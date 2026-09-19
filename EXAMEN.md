@@ -69,7 +69,7 @@ La sécurité doit être pensée **dès la conception**, pas ajoutée à la fin.
 - **Tests d'intégration / non-régression** : parcours API complets (register → login → création de salon → envoi → réception → historique), cas d'erreur et cas de sécurité (accès non autorisé, tokens invalides, CSRF absent…).
 - **Preuve de non-régression** : la CI doit **tout** lancer et être **verte** sur la branche personnelle.
 - **Docker** : `Dockerfile` et `docker-compose.yml` (app + base de données) ; l'application doit se lancer et se tester simplement (`docker compose up`, puis `docker compose run --rm test` par exemple).
-- **Compréhension** : le code livré doit être **lisible, nommé clairement, sans logique obscure** — chaque étudiant doit être capable de **l'expliquer** (voir grille).
+- **Compréhension** : le code livré doit être **lisible, nommé clairement, sans logique obscure** — jugé directement sur la branche (voir grille).
 
 ## 7. Rendu — livrables attendus
 
@@ -148,13 +148,13 @@ Sur **votre branche personnelle** du dépôt :
 |---------|-----|
 | README clair et complet : fonctionnement, architecture, sécurité, mise en place, tests | 1 |
 
-## 8. Présentation / soutenance — 2 pts
+## 8. Qualité & clarté du code (jugée sur la branche) — 2 pts
 
 | Critère | Pts |
 |---------|-----|
-| Compréhension du code (architecture, sécurité, chiffrement) **à minima** | 1 |
-| Justification des choix techniques et de sécurité | 0,5 |
-| Démonstration de fonctionnement (app lancée, tests verts, CI verte) | 0,5 |
+| Architecture claire et compréhensible (modules, séparation des responsabilités) | 0,75 |
+| Code lisible, nommage explicite, sans logique obscure | 0,75 |
+| Choix techniques et de sécurité justifiés dans le README | 0,5 |
 
 ---
 
