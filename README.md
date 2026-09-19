@@ -4,7 +4,7 @@
 <tr><th>Dépôt de travail</th><td>https://github.com/DevsAreAlsoHumans/talk</td></tr>
 <tr><th>Modalité</th><td>Travail <b>individuel</b> — chaque étudiant sur <b>sa propre branche</b></td></tr>
 <tr><th>Rendu</th><td>Branche personnelle poussée sur le dépôt, CI verte, README à jour</td></tr>
-<tr><th>Barème</th><td><b>100 points</b> — seuil de validation : 60/100 (détails en fin de document)</td></tr>
+<tr><th>Barème</th><td><b>Notation sur 20</b> — seuil de validation : <b>12/20</b> (détails en fin de document)</td></tr>
 </table>
 
 ---
@@ -86,91 +86,93 @@ Sur **votre branche personnelle** du dépôt :
 
 # GRILLE DE NOTATION
 
-**Total : 100 points** — Seuil de validation : **60/100**.
+> **Notation sur /20.** Chaque critère est noté par pas de **0,25 point**
+> (valeurs possibles : 0 — 0,25 — 0,5 — 0,75 — 1 — 1,25 — 1,5 — 1,75 — 2 — etc.)
+> Seuil de validation : **12/20**, avec minimas par bloc (voir plus bas).
 
-## 1. Fonctionnalités — 25 pts
-
-| Critère | Pts |
-|---------|-----|
-| Authentification complète (inscription, connexion, déconnexion, sessions) | 5 |
-| Salons / canaux (création, liste, gestion des membres) | 5 |
-| Chiffrement de bout en bout des messages (envoi/réception) | 10 |
-| Expérience proche de Discord, frontend vanilla fonctionnel et utilisable | 5 |
-
-## 2. Sécurité — security by design — 25 pts
+## 1. Fonctionnalités — 5 pts
 
 | Critère | Pts |
 |---------|-----|
-| Protection CSRF effective sur toutes les mutations + vérification d'origine | 5 |
-| Anti-injection SQL et NoSQL | 5 |
-| Hachage des mots de passe robuste (Argon2/bcrypt) | 3 |
-| E2E correctement implémenté : jamais de texte clair ni de clé de déchiffrement stockés côté serveur | 5 |
-| Validation stricte des entrées + anti-XSS | 3 |
-| Headers de sécurité, sessions sécurisées, gestion des secrets | 4 |
+| Authentification complète (inscription, connexion, déconnexion, sessions) | 1,25 |
+| Salons / canaux (création, liste, gestion des membres) | 1 |
+| Chiffrement de bout en bout des messages (envoi/réception/historique) | 2 |
+| Expérience proche de Discord, frontend vanilla fonctionnel et utilisable | 0,75 |
 
-## 3. Tests — 20 pts
+## 2. Sécurité — security by design — 5 pts
 
 | Critère | Pts |
 |---------|-----|
-| Tests unitaires (chiffrement, sécurité, logique métier) | 8 |
-| Tests d'intégration / non-régression (parcours complets + cas d'erreur) | 8 |
-| Couverture des cas sécurité (CSRF, injections, accès non autorisés) | 4 |
+| Protection CSRF effective sur toutes les mutations + vérification d'origine | 1 |
+| Anti-injection SQL et NoSQL | 1 |
+| Hachage des mots de passe robuste (Argon2/bcrypt) | 0,5 |
+| E2E correctement implémenté : jamais de texte clair ni de clé de déchiffrement côté serveur | 1 |
+| Validation stricte des entrées + anti-XSS | 0,75 |
+| Headers de sécurité, sessions sécurisées, gestion des secrets | 0,75 |
 
-**Minimal exigé : 10/20** (sinon la validation de la partie technique n'est pas acquise).
-
-## 4. CI / GitHub Actions — 10 pts
-
-| Critère | Pts |
-|---------|-----|
-| Pipeline CI lançant les tests à chaque push / pull request | 5 |
-| Résultat concluant et **vert** sur la branche personnelle (build + tests, idéalement coverage) | 5 |
-
-## 5. Docker & mise en place — 10 pts
+## 3. Tests — 3 pts
 
 | Critère | Pts |
 |---------|-----|
-| Application conteneurisée (Dockerfile(s) propres, bonnes pratiques) | 4 |
-| Orchestration `docker-compose` (app + Redis/MongoDB, healthchecks) | 4 |
-| Simplicité de lancement et de test (documenté, fonctionnel) | 2 |
+| Tests unitaires (chiffrement, sécurité, logique métier) | 1 |
+| Tests d'intégration / non-régression (parcours complets + cas d'erreur) | 1,25 |
+| Couverture des cas sécurité (CSRF, injections, accès non autorisés) | 0,75 |
 
-## 6. Versioning Git — 5 pts
+**Minimal exigé : 1,5/3** (sinon la validation de la partie technique n'est pas acquise).
 
-| Critère | Pts |
-|---------|-----|
-| Commits réguliers, clairs, petits et cohérents (tout au long du projet) | 3 |
-| Branche personnelle propre, sans casse des branches des autres étudiants | 2 |
-
-## 7. Documentation — 5 pts
+## 4. CI / GitHub Actions — 1,5 pt
 
 | Critère | Pts |
 |---------|-----|
-| README clair et complet : fonctionnement, architecture, sécurité, mise en place, tests | 5 |
+| Pipeline CI lançant les tests à chaque push / pull request | 0,75 |
+| Résultat concluant et **vert** sur la branche personnelle (build + tests, idéalement coverage) | 0,75 |
 
-## 8. Présentation / soutenance — 20 pts
+## 5. Docker & mise en place — 1,5 pt
 
 | Critère | Pts |
 |---------|-----|
-| Compréhension du code (architecture, sécurité, chiffrement) **à minima** | 10 |
-| Justification des choix techniques et de sécurité | 5 |
-| Démonstration de fonctionnement (app lancée, tests verts, CI verte) | 5 |
+| Application conteneurisée (Dockerfile(s) propres, bonnes pratiques) | 0,5 |
+| Orchestration `docker-compose` (app + Redis/MongoDB, healthchecks) | 0,5 |
+| Simplicité de lancement et de test (documenté, fonctionnel) | 0,5 |
+
+## 6. Versioning Git — 1 pt
+
+| Critère | Pts |
+|---------|-----|
+| Commits réguliers, clairs, petits et cohérents (tout au long du projet) | 0,5 |
+| Branche personnelle propre, sans casse des branches des autres étudiants | 0,5 |
+
+## 7. Documentation — 1 pt
+
+| Critère | Pts |
+|---------|-----|
+| README clair et complet : fonctionnement, architecture, sécurité, mise en place, tests | 1 |
+
+## 8. Présentation / soutenance — 2 pts
+
+| Critère | Pts |
+|---------|-----|
+| Compréhension du code (architecture, sécurité, chiffrement) **à minima** | 1 |
+| Justification des choix techniques et de sécurité | 0,5 |
+| Démonstration de fonctionnement (app lancée, tests verts, CI verte) | 0,5 |
 
 ---
 
 ## Seuil de validation
 
-- **Note globale ≥ 60/100** ;
-- **et** au moins **10/25 en Sécurité** ;
-- **et** au moins **10/20 en Tests**.
+- **Note globale ≥ 12/20** ;
+- **et** au moins **2/5 en Sécurité** ;
+- **et** au moins **1,5/3 en Tests**.
 
 ## Pénalités (malus sur la note globale)
 
 | Manquement | Malus |
 |------------|-------|
-| Absence de chiffrement de bout en bout (texte clair en base) | **−10 pts** |
-| Absence de protection CSRF, ou vulnérabilité injectable démontrée | **−10 pts** |
-| Branche d'un autre étudiant cassée (force-push, réécriture, suppression) | **−10 pts** |
-| CI absente ou rouge sur la branche rendue | **−5 pts** |
-| Absence de dockerisation | **−5 pts** |
-| README inexistant ou incompréhensible | **−5 pts** |
-| Historique en un seul énorme commit / commits illisibles | **−3 pts** |
-| Secret (token, clé, .env…) committé dans le dépôt | **−5 pts** |
+| Absence de chiffrement de bout en bout (texte clair en base) | **−2 pts** |
+| Absence de protection CSRF, ou vulnérabilité injectable démontrée | **−2 pts** |
+| Branche d'un autre étudiant cassée (force-push, réécriture, suppression) | **−2 pts** |
+| Secret (token, clé, .env…) committé dans le dépôt | **−1 pt** |
+| CI absente ou rouge sur la branche rendue | **−1 pt** |
+| Absence de dockerisation | **−1 pt** |
+| README inexistant ou incompréhensible | **−1 pt** |
+| Historique en un seul énorme commit / commits illisibles | **−0,5 pt** |
