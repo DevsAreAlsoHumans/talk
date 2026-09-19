@@ -5,7 +5,7 @@
 Application de messagerie où les utilisateurs s'authentifient, rejoignent des salons et échangent des messages **sans que le serveur puisse jamais lire le contenu en clair** (chiffrement de bout en bout côté client).
 
 ## Énoncé & notation
-
+ 
 L'énoncé complet et la grille de notation (sur 20) sont disponibles dans **[`EXAMEN.md`](./EXAMEN.md)** :
 
 - stack imposée : **Python + FastAPI** · **Redis** ou **MongoDB** · **HTML/CSS/JS vanilla**
@@ -51,3 +51,4 @@ README.md                 # documentation personnelle (fonctionnement, sécurit�
 ---
 
 *Projet pédagogique — année 2026.*
+
