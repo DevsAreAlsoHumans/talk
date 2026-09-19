@@ -68,6 +68,7 @@ La sécurité doit être pensée **dès la conception**, pas ajoutée à la fin.
 - **Tests unitaires** : chiffrement/déchiffrement, sécurité (hachage, CSRF, validation), logique métier.
 - **Tests d'intégration / non-régression** : parcours API complets (register → login → création de salon → envoi → réception → historique), cas d'erreur et cas de sécurité (accès non autorisé, tokens invalides, CSRF absent…).
 - **Preuve de non-régression** : la CI doit **tout** lancer et être **verte** sur la branche personnelle.
+- **Linter / qualité du code** : utiliser un linter (ex. **ruff** pour Python) ; il doit être **inclus dans la CI** et passer sans erreur bloquante sur tout le code livré.
 - **Docker** : `Dockerfile` et `docker-compose.yml` (app + base de données) ; l'application doit se lancer et se tester simplement (`docker compose up`, puis `docker compose run --rm test` par exemple).
 - **Compréhension** : le code rendu sur la branche doit **se comprendre sans explication orale** — lisible, nommage explicite, aucune logique obscure (voir grille, section 8).
 
