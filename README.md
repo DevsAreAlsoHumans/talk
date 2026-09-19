@@ -1,37 +1,53 @@
 # talk
 
-> **Chat chiffré de bout en bout, proche de Discord** — sujet d'examen `SDV DEV 2026`.
+> **Chat chiffré de bout en bout — un croisement entre Discord et Telegram WebApp.**
 
-Application de messagerie où les utilisateurs s'authentifient, rejoignent des salons et échangent des messages **sans que le serveur puisse jamais lire le contenu en clair** (chiffrement de bout en bout côté client).
+Application de messagerie qui combine le modèle de **Discord** (serveurs, salons, canaux, multi-utilisateurs) et le côté **webapp léger de Telegram** (interface accessible depuis le navigateur, sans installation). Les utilisateurs s'authentifient, rejoignent des salons et échangent des messages **sans que le serveur puisse jamais lire le contenu en clair** (chiffrement de bout en bout côté client).
 
-## Énoncé & notation
+Sujet d'examen `SDV DEV 2026`.
 
-L'énoncé complet et la grille de notation (sur 20) sont disponibles dans **[`EXAMEN.md`](./EXAMEN.md)** :
+## Stack
 
-- stack imposée : **Python + FastAPI** · **Redis** ou **MongoDB** · **HTML/CSS/JS vanilla**
-- exigences fonctionnelles, de sécurité (**security by design**) et de qualité
-- organisation sur le dépôt (branches, CI), livrables
-- grille détaillée sur 20 pts et seuil de validation (**12/20**)
+| Couche | Technologie |
+|--------|-------------|
+| Backend | Python + FastAPI |
+| Stockage | Redis ou MongoDB |
+| Frontend | HTML + CSS + JavaScript vanilla |
+| Temps réel | WebSocket / polling court |
+| CI | GitHub Actions |
+| Déploiement | Docker + docker-compose |
 
-## Mode de travail sur ce dépôt
+## Fonctionnalités
 
-- Travail **individuel** : chaque étudiant développe son projet sur **sa propre branche**.
-- Nommage de branche recommandé : `etudiant/<nom>-<prenom>`.
-- **Ne jamais casser les branches des autres** (pas de force-push, reset, réécriture ou suppression des branches d'autrui).
-- La branche `main` sert de référence (énoncé) ; les projets sont rendus sur les branches étudiantes avec **CI verte**.
+- Authentification (inscription, connexion, sessions sécurisées, mots de passe hachés).
+- Salons et canaux de discussion multi-utilisateurs, proche d'un serveur Discord.
+- Messages chiffrés de bout en bout, **jamais stockés en clair**.
+- Mise à jour en temps réel ou quasi temps réel.
+- Interface web légère et utilisable, style webapp.
 
-## Démarrage rapide (attendu dans les projets rendus)
+## Sécurité
 
-Chaque branche étudiante doit fournir un projet **dockerisé** :
+- Protection CSRF effective sur toutes les mutations.
+- Prévention des injections SQL et NoSQL.
+- Chiffrement de bout en bout côté client (clés jamais transmises au serveur).
+- Validation stricte des entrées, anti-XSS, headers de sécurité, sessions sécurisées.
+
+## Démarrer avec Docker
 
 ```bash
-docker compose up          # lance l'application (app + Redis/MongoDB)
-docker compose run --rm test   # lance la suite de tests (unitaires + intégration)
+docker compose up              # lance l'application (app + Redis/MongoDB)
+docker compose run --rm test   # lance les tests (unitaires + intégration)
 ```
 
 La **CI GitHub Actions** exécute les tests et le linter à chaque push / pull request.
 
-## Structure attendue d'une branche étudiante
+## Mode de travail sur ce dépôt
+
+- Travail **individuel** : chaque étudiant développe son projet sur **sa propre branche** (`etudiant/<nom>-<prenom>`).
+- **Ne jamais casser les branches des autres** (pas de force-push, reset, réécriture ni suppression des branches d'autrui).
+- La branche `main` sert de référence ; les projets sont rendus sur les branches étudiantes avec **CI verte**.
+
+## Structure d'un projet rendu
 
 ```
 Dockerfile                # image de l'application
@@ -40,13 +56,12 @@ docker-compose.yml        # app + base de données
 app/                      # backend FastAPI
 frontend/                 # HTML/CSS/JS vanilla + chiffrement côté client
 tests/                    # tests unitaires + intégration / non-régression
-README.md                 # documentation personnelle (fonctionnement, sécurité, mise en place)
+README.md                 # documentation (fonctionnement, sécurité, mise en place)
 ```
 
 ## Ressources
 
 - Dépôt : <https://github.com/DevsAreAlsoHumans/talk>
-- Énoncé & grille : [`EXAMEN.md`](./EXAMEN.md)
 
 ---
 
