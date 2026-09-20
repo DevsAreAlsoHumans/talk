@@ -123,6 +123,15 @@ class PeerPayload(BaseModel):
     peer: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9_.]+$")
 
 
+class TransferPayload(BaseModel):
+    """Cible d'un transfert de propriété — c'est un membre du salon, donc les
+    règles de pseudo sont les mêmes que pour une invitation."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    to: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9_.]+$")
+
+
 class FriendshipOut(BaseModel):
     """Une relation d'amitié vue depuis le demandeur (liste/sidebar)."""
 
@@ -149,6 +158,7 @@ class RoomKeyShare(BaseModel):
 class MemberPublic(BaseModel):
     username: str
     public_key: str | None = None
+    online: bool = False
 
 
 class RoomMembers(BaseModel):
@@ -158,6 +168,27 @@ class RoomMembers(BaseModel):
 
 class MessageOut(BaseModel):
     """Historique : blobs chiffrés avec leur séquence mono- croissante."""
+
+    n: int
+    sender: str
+    ts: datetime
+    payload: str
+
+
+class ReactionCreate(BaseModel):
+    """Réaction emoji chiffrée : {v, iv, ct} opaque pointant vers un message.
+
+    L'emoji est chiffré avec la clé de salon — le serveur ne stocke qu'un
+    blob illisible ; seule la cible (n) et l'auteur sont de la métadonnée.
+    `blob` absent ⇒ retrait de la réaction (toggle côté client).
+    """
+
+    n: int = Field(ge=0)
+    blob: KeyBlob | None = None
+
+
+class ReactionOut(BaseModel):
+    """Une réaction vue d'un membre : cible (n), auteur et blob opaque."""
 
     n: int
     sender: str

@@ -27,7 +27,7 @@ from fastapi import (
 from ..config import get_settings
 from ..db import Database, get_db
 from ..deps import SESSION_COOKIE
-from ..realtime import ConnectionManager
+from ..realtime import manager
 from ..security import verify_session_token
 
 router = APIRouter(prefix="/api/ws", tags=["ws"])
@@ -40,8 +40,6 @@ WS_POLICY_VIOLATION = 1008  # origine tierce non autorisée
 
 # Plafond explicite : un blob chiffré est borné — au-delà, refus.
 MAX_PAYLOAD_BYTES = 64 * 1024
-
-manager = ConnectionManager()
 
 DbDep = Annotated[Database, Depends(get_db)]
 
@@ -75,6 +73,16 @@ def _frame_payload(raw: str) -> tuple[str, str] | None:
     if not isinstance(channel_id, str) or not isinstance(payload, str):
         return None
     return channel_id, payload
+
+
+def _frame_is_typing(raw: str) -> bool:
+    """Frame d'indicateur de frappe : `{"type": "typing"}` — métadonnée
+    transitoire, jamais persistée (Discord/Telegram font de même)."""
+    try:
+        frame = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return isinstance(frame, dict) and frame.get("type") == "typing"
 
 
 def _origin_allowed(websocket: WebSocket) -> bool:
@@ -130,6 +138,15 @@ async def chat_ws(
     try:
         while True:
             raw = await websocket.receive_text()
+            # Indicateur de frappe : métadonnée transitoire, relayée telle
+            # quelle (sans persistance) — le contenu reste chiffré ailleurs.
+            if _frame_is_typing(raw):
+                await manager.broadcast(
+                    room_id,
+                    {"type": "typing", "user": username},
+                    exclude=websocket,
+                )
+                continue
             frame = _frame_payload(raw)
             if frame is None:
                 await _close_socket(websocket, room_id, WS_BAD_ENVELOPE)

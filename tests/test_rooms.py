@@ -6,7 +6,7 @@ autorisations (appartenance / propriété) et rejoue des données illisibles.
 
 import json
 
-from conftest import InMemory, create_room, register
+from conftest import InMemory, create_channel, create_room, register
 from starlette.testclient import TestClient
 
 from app.main import app
@@ -102,6 +102,62 @@ def test_members_requires_membership(inmemory: InMemory) -> None:
         assert r.status_code == 200
         assert r.json()["owner_id"] == "alice"
         assert r.json()["members"][0]["username"] == "alice"
+
+
+def test_members_report_online_status(inmemory: InMemory) -> None:
+    """Le panneau « membres » lit `online` depuis les sockets connectées."""
+    alice, bob = TestClient(app), TestClient(app)
+    with alice, bob:
+        register(alice, "alice")
+        rid = create_room(alice)
+        register(bob, "bob")
+        alice.post(
+            f"/api/rooms/{rid}/invite",
+            json={"username": "bob"},
+            headers={"X-CSRF-Token": _csrf(alice)},
+        )
+
+        def online_names():
+            rows = alice.get(f"/api/rooms/{rid}/members").json()["members"]
+            return {m["username"] for m in rows if m["online"]}
+
+        assert online_names() == set()
+
+        with _connect(alice, rid) as a_ws:
+            assert online_names() == {"alice"}
+            with _connect(bob, rid):
+                a_ws.receive_json()  # présence de Bob, queue nettoyée
+                assert online_names() == {"alice", "bob"}
+
+
+def test_invite_broadcasts_invited_event(inmemory: InMemory) -> None:
+    """Une invite salon est annoncée UNE fois, à tous (l'inviteur compris)."""
+    alice, bob, carol = TestClient(app), TestClient(app), TestClient(app)
+    with alice, bob, carol:
+        register(alice, "alice")
+        rid = create_room(alice)
+        register(bob, "bob")
+        register(carol, "carol")
+        alice.post(
+            f"/api/rooms/{rid}/invite",
+            json={"username": "bob"},
+            headers={"X-CSRF-Token": _csrf(alice)},
+        )
+
+        with _connect(alice, rid) as a_ws:
+            with _connect(bob, rid) as b_ws:
+                a_ws.receive_json()  # présence de Bob
+                r = alice.post(
+                    f"/api/rooms/{rid}/invite",
+                    json={"username": "carol"},
+                    headers={"X-CSRF-Token": _csrf(alice)},
+                )
+                assert r.status_code == 200
+                for ws in (a_ws, b_ws):
+                    msg = ws.receive_json()
+                    assert msg["type"] == "presence"
+                    assert msg["event"] == "invited"
+                    assert msg["user"] == "carol"
 
 
 def test_share_and_fetch_wrapped_key(inmemory: InMemory) -> None:
@@ -218,3 +274,153 @@ def test_my_wrapped_key_404_when_none(client, inmemory) -> None:
     rid = create_room(client)
     r = client.get(f"/api/rooms/{rid}/keys/me")
     assert r.status_code == 404
+
+
+def test_member_leaves_room(two_members, inmemory) -> None:
+    alice, bob, room_id = two_members
+    assert (
+        alice.post(
+            f"/api/rooms/{room_id}/keys",
+            json={"to": "bob", "blob": _BLOB},
+            headers={"X-CSRF-Token": _csrf(alice)},
+        ).status_code
+        == 204
+    )
+    r = bob.delete(f"/api/rooms/{room_id}/members/me", headers={"X-CSRF-Token": _csrf(bob)})
+    assert r.status_code == 204
+
+    # Bob n'est plus membre : panneau membres, clés, salons — tout est refusé.
+    assert bob.get(f"/api/rooms/{room_id}/members").status_code == 403
+    assert bob.get(f"/api/rooms/{room_id}/keys/me").status_code == 403
+    assert all(room["id"] != room_id for room in bob.get("/api/rooms").json())
+
+    # Alice voit Bob disparaître du panneau ; sa clé enveloppée est purgée.
+    names = {m["username"] for m in alice.get(f"/api/rooms/{room_id}/members").json()["members"]}
+    assert names == {"alice"}
+    assert (room_id, "bob") not in inmemory.wrapped
+
+
+def test_leave_broadcasts_member_left(two_members) -> None:
+    alice, bob, room_id = two_members
+    with _connect(alice, room_id) as a_ws:
+        with _connect(bob, room_id):
+            a_ws.receive_json()  # présence de Bob, queue nettoyée
+            r = bob.delete(
+                f"/api/rooms/{room_id}/members/me",
+                headers={"X-CSRF-Token": _csrf(bob)},
+            )
+            assert r.status_code == 204
+            msg = a_ws.receive_json()
+            assert msg["type"] == "presence"
+            assert msg["event"] == "member_left"
+            assert msg["user"] == "bob"
+
+
+def test_owner_cannot_leave_shared_room(two_members) -> None:
+    alice, bob, room_id = two_members
+    r = alice.delete(f"/api/rooms/{room_id}/members/me", headers={"X-CSRF-Token": _csrf(alice)})
+    assert r.status_code == 403
+
+
+def test_owner_alone_leaving_deletes_room(two_members, inmemory) -> None:
+    alice, bob, room_id = two_members
+    # Bob part : Alice reste seule, elle peut alors quitter = supprimer.
+    bob.delete(f"/api/rooms/{room_id}/members/me", headers={"X-CSRF-Token": _csrf(bob)})
+    r = alice.delete(f"/api/rooms/{room_id}/members/me", headers={"X-CSRF-Token": _csrf(alice)})
+    assert r.status_code == 204
+    assert alice.get("/api/rooms").json() == []
+    assert inmemory.channels == []
+    assert all(rid != room_id for (rid, _user) in inmemory.wrapped)
+
+
+def test_owner_deletes_room_with_members(two_members, inmemory) -> None:
+    alice, bob, room_id = two_members
+    _ = create_channel(alice, room_id, "tmp")
+    assert (
+        alice.post(
+            f"/api/rooms/{room_id}/keys",
+            json={"to": "bob", "blob": _BLOB},
+            headers={"X-CSRF-Token": _csrf(alice)},
+        ).status_code
+        == 204
+    )
+    r = alice.delete(f"/api/rooms/{room_id}", headers={"X-CSRF-Token": _csrf(alice)})
+    assert r.status_code == 204
+    # Disparu pour tout le monde, y compris ses canaux et clés.
+    assert alice.get("/api/rooms").json() == []
+    assert bob.get("/api/rooms").json() == []
+    assert bob.get(f"/api/rooms/{room_id}/members").status_code == 404
+    assert (room_id, "bob") not in inmemory.wrapped
+
+
+def test_delete_room_forbidden_for_non_owner(two_members) -> None:
+    alice, bob, room_id = two_members
+    r = bob.delete(f"/api/rooms/{room_id}", headers={"X-CSRF-Token": _csrf(bob)})
+    assert r.status_code == 403
+
+
+def test_transfer_ownership(two_members) -> None:
+    alice, bob, room_id = two_members
+    r = alice.post(
+        f"/api/rooms/{room_id}/transfer",
+        json={"to": "bob"},
+        headers={"X-CSRF-Token": _csrf(alice)},
+    )
+    assert r.status_code == 204
+    assert alice.get(f"/api/rooms/{room_id}/members").json()["owner_id"] == "bob"
+    # Le nouveau créateur peut à son tour inviter.
+    carol = TestClient(app)
+    with carol:
+        register(carol, "carol")
+        r = bob.post(
+            f"/api/rooms/{room_id}/invite",
+            json={"username": "carol"},
+            headers={"X-CSRF-Token": _csrf(bob)},
+        )
+        assert r.status_code == 200
+
+
+def test_transfer_broadcasts_ownership_changed(two_members) -> None:
+    alice, bob, room_id = two_members
+    with _connect(alice, room_id) as a_ws:
+        with _connect(bob, room_id) as b_ws:
+            a_ws.receive_json()  # présence de Bob
+            alice.post(
+                f"/api/rooms/{room_id}/transfer",
+                json={"to": "bob"},
+                headers={"X-CSRF-Token": _csrf(alice)},
+            )
+            for ws in (a_ws, b_ws):
+                msg = ws.receive_json()
+                assert msg["type"] == "presence"
+                assert msg["event"] == "ownership_changed"
+                assert msg["owner"] == "bob"
+
+
+def test_transfer_guardrails(two_members, inmemory) -> None:
+    alice, bob, room_id = two_members
+    # Non-créateur : 403. Cible hors du salon : 400. Transférer à soi : 400.
+    assert (
+        bob.post(
+            f"/api/rooms/{room_id}/transfer",
+            json={"to": "alice"},
+            headers={"X-CSRF-Token": _csrf(bob)},
+        ).status_code
+        == 403
+    )
+    assert (
+        alice.post(
+            f"/api/rooms/{room_id}/transfer",
+            json={"to": "ghost"},
+            headers={"X-CSRF-Token": _csrf(alice)},
+        ).status_code
+        == 400
+    )
+    assert (
+        alice.post(
+            f"/api/rooms/{room_id}/transfer",
+            json={"to": "alice"},
+            headers={"X-CSRF-Token": _csrf(alice)},
+        ).status_code
+        == 400
+    )

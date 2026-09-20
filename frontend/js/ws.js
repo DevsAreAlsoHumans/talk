@@ -6,11 +6,13 @@ const MAX_BACKOFF_MS = 30000;
 const UNAUTHENTICATED_CLOSE = 4401;
 
 export class ChatSocket {
-  constructor(roomId, onMessage, onPresence, onState) {
+  constructor(roomId, onMessage, onPresence, onState, onTyping, onReaction) {
     this.roomId = roomId;
     this.onMessage = onMessage;
     this.onPresence = onPresence;
     this.onState = onState;
+    this.onTyping = onTyping || (() => {});
+    this.onReaction = onReaction || (() => {});
     this.backoff = BASE_BACKOFF_MS;
     this.closed = false;
   }
@@ -58,13 +60,21 @@ export class ChatSocket {
     } catch {
       return;
     }
-    if (msg && msg.type === "presence") this.onPresence(msg);
+    if (msg && msg.type === "typing") this.onTyping(msg);
+    else if (msg && msg.type === "reaction") this.onReaction(msg);
+    else if (msg && msg.type === "presence") this.onPresence(msg);
     else if (msg && typeof msg.payload === "string") this.onMessage(msg);
   }
 
   send(channelId, payload) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ channel: channelId, payload }));
+    }
+  }
+
+  sendTyping() {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "typing" }));
     }
   }
 

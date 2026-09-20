@@ -67,6 +67,17 @@ def test_ws_relays_opaque_blob(two_members) -> None:
             assert msg["payload"] == blob
 
 
+def test_ws_broadcasts_typing(two_members) -> None:
+    """L'indicateur « @X écrit… » est relayé sans persistance ni déchiffrement."""
+    alice, bob, room_id = two_members
+    with _connect(alice, room_id) as a_ws:
+        with _connect(bob, room_id) as b_ws:
+            assert a_ws.receive_json()["type"] == "presence"
+            a_ws.send_text('{"type":"typing"}')
+            msg = b_ws.receive_json()
+            assert msg == {"type": "typing", "user": "alice"}
+
+
 def test_ws_accepts_same_origin_handshake(two_members) -> None:
     """Handshake depuis la même origine (le chat lui-même) : accepté."""
     alice, bob, room_id = two_members

@@ -11,7 +11,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from ..db import Database, get_db
 from ..deps import get_current_user, require_csrf
-from ..models import ChannelCreate, ChannelPublic, MessageOut, UserPublic
+from ..models import (
+    ChannelCreate,
+    ChannelPublic,
+    MessageOut,
+    ReactionCreate,
+    ReactionOut,
+    UserPublic,
+)
+from ..realtime import manager
 from .rooms import _member_room_or_error
 
 router = APIRouter(prefix="/api/rooms", tags=["channels"])
@@ -70,6 +78,76 @@ async def get_channel_messages(
         raise HTTPException(status_code=404, detail="Canal introuvable")
     rows = await db.get_channel_messages(room_id, channel_id, after=after, limit=limit)
     return [MessageOut(**r) for r in rows]
+
+
+@router.get("/{room_id}/channels/{channel_id}/reactions", response_model=list[ReactionOut])
+async def get_channel_reactions(
+    room_id: str,
+    channel_id: str,
+    user: CurrentUser,
+    db: DbDep,
+):
+    """Réactions (blobs opaques) d'un canal — déchiffrées uniquement côté client."""
+    await _member_room_or_error(db, room_id, user.username)
+    channel = await db.get_channel(room_id, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="Canal introuvable")
+    rows = await db.list_reactions(room_id, channel_id)
+    return [ReactionOut(**r) for r in rows]
+
+
+@router.post(
+    "/{room_id}/channels/{channel_id}/reactions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ReactionOut,
+)
+async def add_channel_reaction(
+    room_id: str,
+    channel_id: str,
+    payload: ReactionCreate,
+    user: CurrentUser,
+    db: DbDep,
+    _: None = Depends(require_csrf),  # mutation : CSRF obligatoire
+):
+    """Réagit (ou retire la réaction) sur un message — blob chiffré.
+
+    `blob` = emoji chiffré avec la clé de salon. Le serveur ne connait ni
+    l'emoji ni le contenu du message : il stocke juste une cible (n) et
+    relaie le blob opaque aux autres membres présents.
+    """
+    await _member_room_or_error(db, room_id, user.username)
+    channel = await db.get_channel(room_id, channel_id)
+    if channel is None:
+        raise HTTPException(status_code=404, detail="Canal introuvable")
+    blob_json = payload.blob.model_dump_json() if payload.blob is not None else None
+    row = await db.set_reaction(
+        room_id, channel_id, user.username, payload.n, blob_json
+    )
+    if blob_json is None:
+        await manager.broadcast(
+            room_id,
+            {
+                "type": "reaction",
+                "channel_id": channel_id,
+                "n": payload.n,
+                "from": user.username,
+                "payload": None,
+            },
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Canal introuvable")
+    await manager.broadcast(
+        room_id,
+        {
+            "type": "reaction",
+            "channel_id": channel_id,
+            "n": payload.n,
+            "from": user.username,
+            "payload": blob_json,
+        },
+    )
+    return ReactionOut(**row)
 
 
 @router.delete("/{room_id}/channels/{channel_id}", status_code=status.HTTP_204_NO_CONTENT)

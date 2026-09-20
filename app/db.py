@@ -38,6 +38,12 @@ class Database:
 
     async def add_room_member(self, room_id: str, username: str) -> bool: ...
 
+    async def remove_room_member(self, room_id: str, username: str) -> bool: ...
+
+    async def set_room_owner(self, room_id: str, owner_username: str) -> bool: ...
+
+    async def delete_room(self, room_id: str) -> bool: ...
+
     async def find_direct_room(self, me: str, peer: str) -> dict[str, Any] | None: ...
 
     async def get_friendship(self, a: str, b: str) -> dict[str, Any] | None: ...
@@ -60,6 +66,8 @@ class Database:
 
     async def get_wrapped_key(self, room_id: str, username: str) -> dict[str, Any] | None: ...
 
+    async def delete_wrapped_key(self, room_id: str, username: str) -> bool: ...
+
     async def create_channel(self, room_id: str, name: str) -> dict[str, Any] | None: ...
 
     async def list_channels(self, room_id: str) -> list[dict[str, Any]]: ...
@@ -75,6 +83,12 @@ class Database:
     async def get_channel_messages(
         self, room_id: str, channel_id: str, after: int | None = None, limit: int = 200
     ) -> list[dict[str, Any]]: ...
+
+    async def set_reaction(
+        self, room_id: str, channel_id: str, sender: str, n: int, payload: str | None
+    ) -> dict[str, Any] | None: ...
+
+    async def list_reactions(self, room_id: str, channel_id: str) -> list[dict[str, Any]]: ...
 
     async def close(self) -> None: ...
 
@@ -146,6 +160,7 @@ class Mongo(Database):
                 "created_at": utcnow(),
                 "message_blobs": [],
                 "msg_seq": 0,
+                "reaction_by_key": {},
             }
         )
         return await self._db.rooms.find_one({"_id": room_id})
@@ -170,6 +185,41 @@ class Mongo(Database):
             {"_id": ObjectId(room_id)}, {"$addToSet": {"members": username}}
         )
         return res.modified_count > 0
+
+    async def remove_room_member(self, room_id: str, username: str) -> bool:
+        from bson import ObjectId
+
+        if not ObjectId.is_valid(room_id):
+            return False
+        res = await self._db.rooms.update_one(
+            {"_id": ObjectId(room_id)}, {"$pull": {"members": username}}
+        )
+        return res.modified_count > 0
+
+    async def set_room_owner(self, room_id: str, owner_username: str) -> bool:
+        from bson import ObjectId
+
+        if not ObjectId.is_valid(room_id):
+            return False
+        res = await self._db.rooms.update_one(
+            {"_id": ObjectId(room_id)}, {"$set": {"owner_id": owner_username}}
+        )
+        return res.modified_count > 0
+
+    async def delete_room(self, room_id: str) -> bool:
+        """Supprime le salon ET ses canaux / clés enveloppées (tout y est
+        chiffré : aucune sauvegarde serveur à conserver)."""
+        from bson import ObjectId
+
+        if not ObjectId.is_valid(room_id):
+            return False
+        oid = ObjectId(room_id)
+        res = await self._db.rooms.delete_one({"_id": oid})
+        if res.deleted_count == 0:
+            return False
+        await self._db.channels.delete_many({"room_id": oid})
+        await self._db.wrapped_keys.delete_many({"room_id": room_id})
+        return True
 
     async def find_direct_room(self, me: str, peer: str) -> dict[str, Any] | None:
         """Salon « privé » à exactement 2 membres, quel que soit l'ordre."""
@@ -245,6 +295,14 @@ class Mongo(Database):
         )
         return doc["blob"] if doc else None
 
+    async def delete_wrapped_key(self, room_id: str, username: str) -> bool:
+        """Le membre qui part perd SA clé enveloppée : plus aucun déchiffrement
+        possible via le serveur (les autres membres gardent la leur)."""
+        res = await self._db.wrapped_keys.delete_one(
+            {"room_id": room_id, "username": username}
+        )
+        return res.deleted_count > 0
+
     async def add_channel_message(
         self, room_id: str, channel_id: str, sender: str, blob: str
     ) -> dict[str, Any] | None:
@@ -283,6 +341,56 @@ class Mongo(Database):
         msgs.sort(key=lambda m: m["n"])
         return msgs[-limit:]
 
+    async def set_reaction(
+        self, room_id: str, channel_id: str, sender: str, n: int, payload: str | None
+    ) -> dict[str, Any] | None:
+        """Ajoute/remplace (payload) ou retire (payload=None) une réaction.
+
+        Clé `"{n}:{sender}"` dans un dict embarqué : aucune course possible
+        entre deux toggles du même utilisateur sur le même message (upsert
+        atomique par `$set`/`$unset` au lieu de push/pull d'array).
+        """
+        from bson import ObjectId
+
+        if not ObjectId.is_valid(room_id) or not ObjectId.is_valid(channel_id):
+            return None
+        key = f"{n}:{sender}"
+        if payload is None:
+            op: dict[str, Any] = {"$unset": {f"reaction_by_key.{key}": ""}}
+        else:
+            op = {"$set": {f"reaction_by_key.{key}": {"ts": utcnow(), "payload": payload}}}
+        channel = await self._db.channels.find_one_and_update(
+            {"_id": ObjectId(channel_id), "room_id": ObjectId(room_id)},
+            op,
+            return_document=ReturnDocument.AFTER,
+        )
+        if channel is None:
+            return None
+        entry = (channel.get("reaction_by_key") or {}).get(key)
+        if entry is None:
+            return None
+        return {"n": n, "sender": sender, "ts": entry["ts"], "payload": entry["payload"]}
+
+    async def list_reactions(self, room_id: str, channel_id: str) -> list[dict[str, Any]]:
+        from bson import ObjectId
+
+        if not ObjectId.is_valid(room_id) or not ObjectId.is_valid(channel_id):
+            return []
+        channel = await self._db.channels.find_one(
+            {"_id": ObjectId(channel_id), "room_id": ObjectId(room_id)},
+            {"reaction_by_key": 1},
+        )
+        if channel is None:
+            return []
+        reactions = []
+        for key, entry in (channel.get("reaction_by_key") or {}).items():
+            n_str, sender = key.rsplit(":", 1)
+            reactions.append(
+                {"n": int(n_str), "sender": sender, "ts": entry["ts"], "payload": entry["payload"]}
+            )
+        reactions.sort(key=lambda r: (r["n"], r["sender"]))
+        return reactions
+
     async def create_channel(self, room_id: str, name: str) -> dict[str, Any] | None:
         from bson import ObjectId
 
@@ -296,6 +404,7 @@ class Mongo(Database):
             # indéchiffrables côté serveur par construction.
             "message_blobs": [],
             "msg_seq": 0,
+            "reaction_by_key": {},
         }
         try:
             res = await self._db.channels.insert_one(doc)

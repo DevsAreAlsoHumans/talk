@@ -11,7 +11,10 @@
 
   <section id="auth-screen" class="screen">
     <form id="auth-form" class="card">
-      <h1>Talk</h1>
+      <div class="card-head">
+        <h1>Talk</h1>
+        <button type="button" id="btn-theme-auth" class="theme-toggle" aria-label="Mode sombre">◐</button>
+      </div>
       <p class="muted">Messagerie chiffrée de bout en bout.</p>
       <label>
         Pseudo
@@ -37,9 +40,20 @@
           <strong id="me-name"></strong>
           <button type="button" id="btn-logout" class="link">Déconnexion</button>
         </div>
+        <button type="button" id="btn-theme" class="theme-toggle" aria-label="Mode sombre">◐</button>
       </div>
       <button type="button" id="btn-new-room" class="accent">+ Nouveau salon</button>
       <ul id="room-list" class="rooms"></ul>
+
+      <div id="friends-pane">
+        <p class="pane-head">Amis</p>
+        <form id="friend-add" class="friend-add">
+          <input id="friend-username" placeholder="Ajouter un ami" maxlength="32" required>
+          <button type="submit">+</button>
+        </form>
+        <ul id="request-list" class="requests"></ul>
+        <ul id="friend-list" class="friends"></ul>
+      </div>
     </aside>
 
     <main id="chat">
@@ -49,9 +63,14 @@
           <p id="room-meta" class="muted"></p>
         </div>
         <form id="invite-form" class="invite" hidden>
-          <input id="invite-username" placeholder="Inviter un membre" maxlength="32" required>
+          <input id="invite-username" placeholder="Inviter dans le salon…" maxlength="32" required>
           <button type="submit">Inviter</button>
         </form>
+        <button type="button" id="btn-search" class="ghost" title="Rechercher dans les messages déchiffrés" hidden>Rechercher</button>
+        <button type="button" id="btn-export" class="ghost" title="Exporter la conversation déchiffrée" hidden>Exporter</button>
+        <button type="button" id="btn-transfer" class="ghost" title="Transférer la propriété du salon" hidden>Transférer</button>
+        <button type="button" id="btn-delete-rm" class="ghost danger" title="Supprimer définitivement le salon" hidden>Supprimer</button>
+        <button type="button" id="btn-leave" class="ghost" title="Quitter le salon (vous perdrez l'accès)" hidden>Quitter</button>
       </header>
 
       <div class="chat-body">
@@ -64,7 +83,13 @@
         <div class="chat-col">
           <div class="chat-topic">
             <h3 id="channel-title"></h3>
+            <p id="typing-hint" class="typing-hint" hidden></p>
           </div>
+          <form id="search-form" class="search-bar" hidden>
+            <input id="search-input" placeholder="Rechercher dans les messages déchiffrés…" autocomplete="off" maxlength="256">
+            <button type="submit">Rechercher</button>
+          </form>
+          <div id="search-results" class="search-results" hidden></div>
           <div id="messages" class="messages" aria-live="polite"></div>
 
           <form id="composer" class="composer">
@@ -72,6 +97,11 @@
             <button type="submit">Envoyer</button>
           </form>
         </div>
+
+        <aside id="member-pane">
+          <p class="pane-head" id="member-head">Membres</p>
+          <ul id="member-list" class="members"></ul>
+        </aside>
       </div>
     </main>
   </section>

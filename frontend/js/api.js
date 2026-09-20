@@ -51,12 +51,29 @@ export const api = {
   putKey: (publicKey) => request("PUT", "/api/keys", { public_key: publicKey }),
   rooms: () => request("GET", "/api/rooms"),
   createRoom: (name) => request("POST", "/api/rooms", { name }),
+  createDirect: (peer) => request("POST", "/api/rooms/direct", { peer }),
   channels: (roomId) => request("GET", "/api/rooms/" + roomId + "/channels"),
   createChannel: (roomId, name) => request("POST", "/api/rooms/" + roomId + "/channels", { name }),
   members: (roomId) => request("GET", "/api/rooms/" + roomId + "/members"),
   invite: (roomId, username) => request("POST", "/api/rooms/" + roomId + "/invite", { username }),
+  leave: (roomId) => request("DELETE", "/api/rooms/" + roomId + "/members/me"),
+  transfer: (roomId, to) => request("POST", "/api/rooms/" + roomId + "/transfer", { to }),
+  deleteRoom: (roomId) => request("DELETE", "/api/rooms/" + roomId),
   shareKey: (roomId, to, blob) => request("POST", "/api/rooms/" + roomId + "/keys", { to, blob }),
   myKey: (roomId) => request("GET", "/api/rooms/" + roomId + "/keys/me"),
   messages: (roomId, channelId, after) =>
     request("GET", "/api/rooms/" + roomId + "/channels/" + channelId + "/messages?after=" + after),
+  friends: () => request("GET", "/api/friends"),
+  friendRequests: () => request("GET", "/api/friends/requests"),
+  sendFriendRequest: (peer) => request("POST", "/api/friends/requests", { peer }),
+  acceptFriend: (username) => request("POST", "/api/friends/requests/" + username + "/accept"),
+  reactions: (roomId, channelId) =>
+    request("GET", "/api/rooms/" + roomId + "/channels/" + channelId + "/reactions"),
+  deleteChannel: (roomId, channelId) =>
+    request("DELETE", "/api/rooms/" + roomId + "/channels/" + channelId),
+  react: (roomId, channelId, n, blob) =>
+    request("POST", "/api/rooms/" + roomId + "/channels/" + channelId + "/reactions", {
+      n,
+      blob: blob || undefined,
+    }),
 };

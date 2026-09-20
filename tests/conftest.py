@@ -68,6 +68,29 @@ class InMemory(Database):
         room["members"].append(username)
         return True
 
+    async def remove_room_member(self, room_id: str, username: str) -> bool:
+        room = await self.get_room_by_id(room_id)
+        if room is None or username not in room["members"]:
+            return False
+        room["members"].remove(username)
+        return True
+
+    async def set_room_owner(self, room_id: str, owner_username: str) -> bool:
+        room = await self.get_room_by_id(room_id)
+        if room is None:
+            return False
+        room["owner_id"] = owner_username
+        return True
+
+    async def delete_room(self, room_id: str) -> bool:
+        before = len(self.rooms)
+        self.rooms = [r for r in self.rooms if r["_id"] != room_id]
+        if len(self.rooms) == before:
+            return False
+        self.channels = [c for c in self.channels if c["room_id"] != room_id]
+        self.wrapped = {k: v for k, v in self.wrapped.items() if k[0] != room_id}
+        return True
+
     async def find_direct_room(self, me: str, peer: str) -> dict[str, Any] | None:
         want = {me, peer}
         for room in self.rooms:
@@ -131,6 +154,9 @@ class InMemory(Database):
     async def get_wrapped_key(self, room_id: str, username: str) -> dict[str, Any] | None:
         return self.wrapped.get((room_id, username))
 
+    async def delete_wrapped_key(self, room_id: str, username: str) -> bool:
+        return self.wrapped.pop((room_id, username), None) is not None
+
     async def create_channel(self, room_id: str, name: str) -> dict[str, Any] | None:
         if await self.get_room_by_id(room_id) is None:
             return None
@@ -145,6 +171,7 @@ class InMemory(Database):
             "created_at": datetime.now(UTC),
             "message_blobs": [],
             "msg_seq": 0,
+            "reaction_by_key": {},
         }
         self.channels.append(channel)
         return channel
@@ -187,6 +214,33 @@ class InMemory(Database):
         msgs = [m for m in channel["message_blobs"] if after is None or m["n"] > after]
         msgs.sort(key=lambda m: m["n"])
         return msgs[-limit:]
+
+    async def set_reaction(
+        self, room_id: str, channel_id: str, sender: str, n: int, payload: str | None
+    ) -> dict[str, Any] | None:
+        channel = await self.get_channel(room_id, channel_id)
+        if channel is None:
+            return None
+        key = f"{n}:{sender}"
+        if payload is None:
+            channel["reaction_by_key"].pop(key, None)
+            return None
+        entry = {"ts": datetime.now(UTC), "payload": payload}
+        channel["reaction_by_key"][key] = entry
+        return {"n": n, "sender": sender, "ts": entry["ts"], "payload": entry["payload"]}
+
+    async def list_reactions(self, room_id: str, channel_id: str) -> list[dict[str, Any]]:
+        channel = await self.get_channel(room_id, channel_id)
+        if channel is None:
+            return []
+        reactions = []
+        for key, entry in channel["reaction_by_key"].items():
+            n_str, sender = key.rsplit(":", 1)
+            reactions.append(
+                {"n": int(n_str), "sender": sender, "ts": entry["ts"], "payload": entry["payload"]}
+            )
+        reactions.sort(key=lambda r: (r["n"], r["sender"]))
+        return reactions
 
     async def close(self) -> None:
         pass

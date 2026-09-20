@@ -106,7 +106,7 @@ async def test_flux_complet_sur_mongo_reel() -> None:
             dup = client.post(
                 f"/api/rooms/{rid}/channels",
                 json={"name": "prive"},
-headers={"X-CSRF-Token": token},
+                headers={"X-CSRF-Token": token},
             )
             assert dup.status_code == 409
             # Canal d'origine « general » (modèle Discord) + le nouveau.
@@ -177,12 +177,72 @@ headers={"X-CSRF-Token": token},
             assert cipher in payloads
             assert all(m["sender"] == "alice" for m in history.json())
 
+            # Réaction chiffrée sur le message n=1 : stockée puis rejouée,
+            # retrait par toggle (blob absent) — même sur Mongo embarqué.
+            token = _csrf(client)
+            n1 = history.json()[0]["n"]
+            react_blob = {
+                "v": 1,
+                "iv": base64.b64encode(b"i" * 12).decode(),
+                "ct": base64.b64encode(b"e" * 24).decode(),
+            }
+            r = client.post(
+                f"/api/rooms/{rid}/channels/{cid}/reactions",
+                json={"n": n1, "blob": react_blob},
+                headers={"X-CSRF-Token": token},
+            )
+            assert r.status_code == 201
+            rows = client.get(f"/api/rooms/{rid}/channels/{cid}/reactions")
+            assert rows.status_code == 200
+            assert len(rows.json()) == 1
+            assert rows.json()[0]["n"] == n1
+            assert json.loads(rows.json()[0]["payload"]) == react_blob
+
+            r = client.post(
+                f"/api/rooms/{rid}/channels/{cid}/reactions",
+                json={"n": n1},
+                headers={"X-CSRF-Token": token},
+            )
+            assert r.status_code == 204
+            rows = client.get(f"/api/rooms/{rid}/channels/{cid}/reactions")
+            assert rows.json() == []
+
+            # Alice (créatrice) transfère la propriété à Bob puis quitte : sa
+            # clé enveloppée est purgée, elle disparaît du panneau membres.
+            _login(client, "alice")
+            token = _csrf(client)
+            r = client.post(
+                f"/api/rooms/{rid}/transfer",
+                json={"to": "bob"},
+                headers={"X-CSRF-Token": token},
+            )
+            assert r.status_code == 204
+            assert client.get(f"/api/rooms/{rid}/members").json()["owner_id"] == "bob"
+            r = client.delete(
+                f"/api/rooms/{rid}/members/me",
+                headers={"X-CSRF-Token": token},
+            )
+            assert r.status_code == 204
+            assert client.get(f"/api/rooms/{rid}/keys/me").status_code == 403
+            # Bob (propriétaire) vérifie qu'Alice a quitté puis supprime.
+            _login(client, "bob")
+            names = {
+                m["username"]
+                for m in client.get(f"/api/rooms/{rid}/members").json()["members"]
+            }
+            assert names == {"bob"}
+
+            token = _csrf(client)
+            r = client.delete(f"/api/rooms/{rid}", headers={"X-CSRF-Token": token})
+            assert r.status_code == 204
+            assert client.get("/api/rooms").json() == []
+
             # Doublon de pseudo : index unique -> 409 sans crash serveur.
             token = _csrf(client)
             dup_user = client.post(
                 "/api/auth/register",
                 json={"username": "alice", "password": "P4ssw0rdX!"},
-headers={"X-CSRF-Token": token},
+                headers={"X-CSRF-Token": token},
             )
             assert dup_user.status_code == 409
     finally:
