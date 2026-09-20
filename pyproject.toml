@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "talk"
+version = "0.1.0"
+description = "Application de chat chiffré de bout en bout (backend FastAPI + Redis)."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "redis>=5",
+    "argon2-cffi",
+    "pydantic-settings",
+    "cryptography",
+    "python-multipart",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "fakeredis",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI : Depends()/Query() dans les defaults de signature est le pattern idiomatique.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]

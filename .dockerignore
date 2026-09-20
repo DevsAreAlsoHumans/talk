@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# Contexte Docker — exclure tout ce qui n'est pas nécessaire à l'image :
+# secrets, VCS, caches, environnements virtuels, artefacts de build.
+#
+# ⚠️ Piège Docker vérifié empiriquement : un motif « nu » (ex. __pycache__)
+# n'est comparé qu'au chemin COMPLET relatif à la racine du contexte — il
+# n'exclut donc PAS les dossiers imbriqués. Il faut le préfixe `**/`.
+# (Contre-exemple : `*.pyc` fonctionne bien à toute profondeur.)
+# ---------------------------------------------------------------------------
+
+# Versioning
+.git
+.gitignore
+
+# CI (ne sert à rien dans l'image)
+.github
+
+# Environnements virtuels
+.venv
+venv/
+
+# Caches Python — `**/` indispensable pour les niveaux imbriqués
+**/__pycache__/
+*.pyc
+**/.pytest_cache/
+**/.ruff_cache/
+**/*.egg-info/
+
+# Artefacts de build
+build/
+dist/
+
+# Secrets — ne doivent JAMAIS entrer dans l'image
+.env
+.env.*
+
+# Frontend node (non utilisé — ce projet est en HTML/CSS/JS vanilla)
+node_modules/
+
+# Outils dev locaux
+.opencode/
+
+# Artefacts locaux
+.DS_Store
+*.log
+
+# Documents d'examen/plan — inutiles dans l'image (README/LICENSE restent)
+EXAMEN.md
+PLAN.md
+
+# Le .dockerignore lui-même n'a pas besoin d'être copié dans l'image
+.dockerignore

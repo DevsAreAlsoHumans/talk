@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# talk — orchestration Docker (schéma compose moderne, sans champ "version").
+#
+# Deux services suffisent car le frontend est servi PAR FastAPI (StaticFiles) :
+#   * redis — stockage unique (sessions, salons, messages chiffrés, rate-limit) ;
+#   * app   — FastAPI : API /api, WebSocket /ws, frontend statique à la racine.
+#
+# Le service "test" réutilise la MÊME image pour lancer pytest :
+#     docker compose run --rm test
+# Il n'est volontairement PAS sous `profiles:` pour que cette commande fonctionne.
+# ---------------------------------------------------------------------------
+name: talk
+
+services:
+  redis:
+    image: redis:7-alpine
+    # Persistance sur volume nommé : les données survivent aux redémarrages
+    # (AOF actif) — nécessaire car les sessions sont stockées dans Redis.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    # 6379 reste interne au réseau compose (non publié sur l'hôte).
+    expose:
+      - "6379"
+
+  app:
+    build: .
+    environment: &app_env
+      # ⚠️ Valeur de DÉVELOPPEMENT uniquement — en production, surcharger via
+      # une vraie variable d'environnement ou un fichier .env (jamais committé).
+      SECRET_KEY: dev-only-secret-change-me
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_SECURE: "false"
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Healthcheck HTTP sur /api/health (endpoint défini dans app/main.py).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  # `docker compose run --rm test` — même image, commande pytest.
+  # Les tests utilisent fakeredis (aucun service Redis requis théoriquement) ;
+  # redis est tout de même démarré en dépendance pour rester cohérent.
+  test:
+    build: .
+    command: ["pytest", "-v"]
+    environment: *app_env
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:

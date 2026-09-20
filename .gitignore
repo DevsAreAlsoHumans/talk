@@ -6,3 +6,18 @@ RESUME_PRIVE.md
 # Artefacts
 .DS_Store
 *.log
+
+# Environnements virtuels
+.venv/
+venv/
+
+# Caches Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Build
+*.egg-info/
+build/
+dist/

@@ -93,10 +93,15 @@ def logout(
     response: Response,
     redis: Redis = Depends(get_redis),
 ) -> Response:
-    """Déconnexion : détruit la session et efface le cookie."""
+    """Déconnexion : détruit la session et efface le cookie.
+
+    On retourne la réponse injectée (et non un nouvel objet ``Response``),
+    sans quoi le header ``Set-Cookie`` de suppression serait perdu.
+    """
     destroy_session(redis, request)
+    response.status_code = 204
     clear_session_cookie(response)
-    return Response(status_code=204)
+    return response
 
 
 @me_router.get("/me")
