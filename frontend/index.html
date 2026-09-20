@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>talk — messagerie chiffrée de bout en bout</title>
+  <!-- Aucun lien externe : la CSP est posée par le backend (default-src 'self' ...). -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ============================================================
+       VUE AUTHENTIFICATION (connexion / inscription)
+       ============================================================ -->
+  <div id="view-auth" class="view" hidden>
+    <div class="auth-card">
+      <div class="auth-logo">talk</div>
+      <p class="auth-tagline">Messagerie chiffrée de bout en bout</p>
+
+      <!-- Bloc « compte verrouillé » : clé privée absente ou compte différent -->
+      <div id="auth-locked" class="auth-locked" hidden></div>
+
+      <form id="auth-form" class="auth-form" autocomplete="on" hidden>
+        <h1 id="auth-title">Créer un compte</h1>
+
+        <label for="auth-username">Pseudo</label>
+        <input id="auth-username" name="username" type="text"
+               minlength="3" maxlength="32" required autocomplete="username">
+
+        <label for="auth-password">Mot de passe</label>
+        <input id="auth-password" name="password" type="password"
+               minlength="8" maxlength="128" required autocomplete="current-password">
+
+        <label id="auth-password2-label" for="auth-password2">Confirmation</label>
+        <input id="auth-password2" name="password2" type="password"
+               minlength="8" maxlength="128" autocomplete="new-password">
+
+        <p id="auth-error" class="auth-error" hidden></p>
+
+        <button id="auth-submit" type="submit" class="btn btn-primary btn-block">Créer le compte</button>
+      </form>
+
+      <p class="auth-toggle">
+        <button id="auth-toggle-mode" type="button" class="btn-link">Déjà un compte ? Se connecter</button>
+      </p>
+      <p id="auth-note" class="auth-note"></p>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       VUE PRINCIPALE (salons + fil + zone de saisie)
+       ============================================================ -->
+  <div id="view-app" class="view app" hidden>
+
+    <!-- Barre latérale : utilisateur + liste des salons -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-user">
+          <span id="user-avatar" class="avatar"></span>
+          <span id="user-username" class="username"></span>
+        </div>
+        <button id="btn-logout" type="button" class="btn btn-ghost btn-sm" title="Se déconnecter">Déconnexion</button>
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="btn-new-room" type="button" class="btn btn-outline btn-sm">+ Nouveau salon</button>
+        <button id="btn-join-room" type="button" class="btn btn-outline btn-sm">Rejoindre</button>
+      </div>
+
+      <nav class="room-list" id="room-list" aria-label="Liste des salons"></nav>
+    </aside>
+
+    <!-- Colonne principale -->
+    <main class="main">
+      <header id="room-header" class="room-header" hidden>
+        <div class="room-header-info">
+          <h2 id="room-name">Salon</h2>
+          <span id="room-members-count" class="muted"></span>
+        </div>
+        <div class="room-header-actions">
+          <button id="btn-refresh-keys" type="button" class="btn btn-ghost btn-sm"
+                  title="Ré-envelopper la clé de salon pour tous les membres actuels">
+            Actualiser clés
+          </button>
+        </div>
+      </header>
+
+      <div class="main-body">
+        <section class="chat-column">
+          <div id="empty-state" class="empty-state">
+            <p>Choisissez un salon à gauche, ou créez-en un.</p>
+          </div>
+          <div id="messages" class="messages" aria-live="polite" hidden></div>
+          <form id="message-form" class="message-form" hidden>
+            <input id="message-input" type="text" maxlength="1000"
+                   placeholder="Écrire un message chiffré…" autocomplete="off" required>
+            <button id="btn-send" type="submit" class="btn btn-primary">Envoyer</button>
+          </form>
+        </section>
+
+        <!-- Panneau des membres (à droite) -->
+        <aside id="members-panel" class="members-panel" hidden>
+          <h3>Membres du salon</h3>
+          <ul id="members-list" class="members-list"></ul>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <!-- ============================================================
+       MODALE « NOUVEAU SALON »
+       ============================================================ -->
+  <div id="modal-new-room" class="modal-backdrop" hidden>
+    <div class="modal">
+      <h3>Nouveau salon</h3>
+      <input id="new-room-name" type="text" maxlength="64"
+             placeholder="Nom du salon" autocomplete="off">
+      <p id="new-room-error" class="auth-error" hidden></p>
+      <div class="modal-actions">
+        <button id="btn-cancel-new-room" type="button" class="btn btn-ghost">Annuler</button>
+        <button id="btn-create-room" type="button" class="btn btn-primary">Créer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODALE « REJOINDRE UN SALON »
+       ============================================================ -->
+  <div id="modal-join-room" class="modal-backdrop" hidden>
+    <div class="modal">
+      <h3>Rejoindre un salon</h3>
+      <input id="join-room-id" type="text" inputmode="numeric" maxlength="30"
+             placeholder="Identifiant du salon" autocomplete="off">
+      <p id="join-room-error" class="auth-error" hidden></p>
+      <div class="modal-actions">
+        <button id="btn-cancel-join-room" type="button" class="btn btn-ghost">Annuler</button>
+        <button id="btn-join-room-submit" type="button" class="btn btn-primary">Rejoindre</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notifications éphémères -->
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- Aucune librairie externe : tout le code est en modules locaux (CSP self). -->
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
