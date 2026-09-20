@@ -19,6 +19,7 @@ from ..deps import (
     require_csrf,
 )
 from ..models import UserLogin, UserPublic, UserRegister, _UserOut
+from ..ratelimit import rate_limit
 from ..security import (
     create_session_token,
     hash_password,
@@ -38,6 +39,7 @@ async def register(
     response: Response,
     db: DbDep,
     _: None = Depends(require_csrf),  # ligne de défense anti-abus d'inscription
+    __: None = Depends(rate_limit()),  # anti force-brute / spam de comptes
 ):
     user = await db.get_user_by_username(payload.username)
     if user is not None:
@@ -60,6 +62,7 @@ async def login(
     response: Response,
     db: DbDep,
     _: None = Depends(require_csrf),
+    __: None = Depends(rate_limit()),
 ):
     user = await db.get_user_by_username(payload.username)
     # Vérifie même quand l'utilisateur n'existe pas : coût d'argon2 constant

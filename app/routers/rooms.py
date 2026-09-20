@@ -15,6 +15,7 @@ from ..models import (
     InvitePayload,
     KeyBlob,
     MemberPublic,
+    PeerPayload,
     RoomCreate,
     RoomKeyShare,
     RoomMembers,
@@ -62,6 +63,38 @@ async def create_room(
     _: None = Depends(require_csrf),  # mutation : CSRF obligatoire
 ):
     room = await db.create_room(name=payload.name, owner_id=user.username)
+    return _room_public(room)
+
+
+@router.post("/direct", status_code=status.HTTP_201_CREATED, response_model=RoomPublic)
+async def create_direct(
+    payload: PeerPayload,
+    user: CurrentUser,
+    db: DbDep,
+    _: None = Depends(require_csrf),
+):
+    """Message privé = salon à 2 membres (idempotent).
+
+    La clé de salon reste chiffrée de bout en bout ; le serveur ne voit qu'un
+    salon « kind=direct » supplémentaire, jamais le contenu.
+    """
+    if payload.peer == user.username:
+        raise HTTPException(status_code=400, detail="Un message privé à soi-même, c'est étrange")
+    target = await db.get_user_by_username(payload.peer)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+
+    existing = await db.find_direct_room(user.username, payload.peer)
+    if existing is not None:
+        return _room_public(existing)
+
+    room = await db.create_room(
+        name=f"{user.username} & {payload.peer}",
+        owner_id=user.username,
+        kind="direct",
+    )
+    await db.add_room_member(str(room["_id"]), payload.peer)
+    room = await db.get_room_by_id(str(room["_id"]))
     return _room_public(room)
 
 

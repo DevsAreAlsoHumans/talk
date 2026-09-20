@@ -69,8 +69,11 @@ button {
   cursor: pointer;
   background: #3390ec;
   color: #fff;
-  flex: 1;
+  flex: none;
 }
+
+/* Seuls les boutons d'une rangée partagent la largeur (login/inscription). */
+.row button { flex: 1; }
 
 button.ghost { background: #eef2f5; color: #3390ec; }
 
@@ -83,7 +86,7 @@ button.link {
   flex: none;
 }
 
-button.accent { margin: 8px 0; }
+button.accent { margin: 8px 0; width: 100%; }
 
 .error { color: #e6474d; font-size: 13px; }
 

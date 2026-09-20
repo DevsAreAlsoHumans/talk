@@ -13,8 +13,9 @@ from starlette.websockets import WebSocketDisconnect
 from app.realtime import ConnectionManager
 
 
-def _connect(client: TestClient, room_id: str):
-    return client.websocket_connect(f"/api/ws?room_id={room_id}")
+def _connect(client: TestClient, room_id: str, *, origin: str | None = None):
+    kwargs: dict = {"headers": {"Origin": origin}} if origin is not None else {}
+    return client.websocket_connect(f"/api/ws?room_id={room_id}", **kwargs)
 
 
 def _channel_id(client: TestClient, room_id: str) -> str:
@@ -64,6 +65,33 @@ def test_ws_relays_opaque_blob(two_members) -> None:
             assert msg["channel_id"] == cid
             assert msg["from"] == "alice"
             assert msg["payload"] == blob
+
+
+def test_ws_accepts_same_origin_handshake(two_members) -> None:
+    """Handshake depuis la même origine (le chat lui-même) : accepté."""
+    alice, bob, room_id = two_members
+    with _connect(alice, room_id, origin="http://testserver") as a_ws:
+        with _connect(bob, room_id) as _b_ws:
+            # Alice seule ne reçoit aucune frame ; l'arrivée de Bob déclenche
+            # la présence et prouve que le handshake a abouti.
+            assert a_ws.receive_json()["type"] == "presence"
+
+
+def test_ws_rejects_third_party_origin(two_members) -> None:
+    """Site tiers -> handshake refusé (anti cross-site websocket hijacking)."""
+    alice, _, room_id = two_members
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with _connect(alice, room_id, origin="https://evil.example"):
+            pass
+    assert exc.value.code == 1008
+
+
+def test_ws_rejects_non_http_scheme_origin(two_members) -> None:
+    alice, _, room_id = two_members
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with _connect(alice, room_id, origin="ftp://localhost"):
+            pass
+    assert exc.value.code == 1008
 
 
 def test_ws_does_not_echo_sender(two_members) -> None:

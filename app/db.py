@@ -28,13 +28,29 @@ class Database:
 
     async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None: ...
 
-    async def create_room(self, name: str, owner_id: str) -> dict[str, Any]: ...
+    async def create_room(
+        self, name: str, owner_id: str, kind: str = "normal"
+    ) -> dict[str, Any]: ...
 
     async def get_room_by_id(self, room_id: str) -> dict[str, Any] | None: ...
 
     async def list_rooms_for_user(self, username: str) -> list[dict[str, Any]]: ...
 
     async def add_room_member(self, room_id: str, username: str) -> bool: ...
+
+    async def find_direct_room(self, me: str, peer: str) -> dict[str, Any] | None: ...
+
+    async def get_friendship(self, a: str, b: str) -> dict[str, Any] | None: ...
+
+    async def create_friendship(self, requester: str, target: str) -> dict[str, Any] | None: ...
+
+    async def accept_friendship(self, a: str, b: str) -> bool: ...
+
+    async def delete_friendship(self, a: str, b: str) -> bool: ...
+
+    async def list_friendships(
+        self, username: str, status: str | None = None
+    ) -> list[dict[str, Any]]: ...
 
     async def set_public_key(self, username: str, public_key: str) -> None: ...
 
@@ -81,6 +97,13 @@ class Mongo(Database):
         await self._db.channels.create_index(
             [("room_id", 1), ("name", 1)], unique=True
         )
+        # Une amitié (acceptée ou en attente) entre deux personnes au plus.
+        # pair = "|".join(sorted([a, b])) garantit une seule occurrence par couple.
+        await self._db.friendships.create_index("pair", unique=True)
+        # Forme en liste : compatible avec toutes les versions de pymongo
+        # (les paires (clé, ordre) positionnelles sont ambiguës depuis 4.9).
+        await self._db.friendships.create_index([("a", 1)])
+        await self._db.friendships.create_index([("b", 1)])
 
     async def get_user_by_username(self, username: str) -> dict[str, Any] | None:
         return await self._db.users.find_one({"username": username})
@@ -105,11 +128,12 @@ class Mongo(Database):
             return None
         return await self._db.users.find_one({"_id": ObjectId(user_id)})
 
-    async def create_room(self, name: str, owner_id: str) -> dict[str, Any]:
+    async def create_room(self, name: str, owner_id: str, kind: str = "normal") -> dict[str, Any]:
         room = {
             "name": name,
             "owner_id": owner_id,
             "members": [owner_id],
+            "kind": kind,
             "created_at": utcnow(),
         }
         res = await self._db.rooms.insert_one(room)
@@ -146,6 +170,60 @@ class Mongo(Database):
             {"_id": ObjectId(room_id)}, {"$addToSet": {"members": username}}
         )
         return res.modified_count > 0
+
+    async def find_direct_room(self, me: str, peer: str) -> dict[str, Any] | None:
+        """Salon « privé » à exactement 2 membres, quel que soit l'ordre."""
+        return await self._db.rooms.find_one(
+            {
+                "kind": "direct",
+                "members": {"$size": 2, "$all": [me, peer]},
+            }
+        )
+
+    @staticmethod
+    def _pair(a: str, b: str) -> str:
+        # Ordre canonique : une seule occurrence par couple de personnes.
+        return "|".join(sorted([a, b]))
+
+    async def get_friendship(self, a: str, b: str) -> dict[str, Any] | None:
+        return await self._db.friendships.find_one({"pair": self._pair(a, b)})
+
+    async def create_friendship(
+        self, requester: str, target: str
+    ) -> dict[str, Any] | None:
+        doc = {
+            "pair": self._pair(requester, target),
+            "a": requester,
+            "b": target,
+            "requester": requester,
+            "status": "pending",
+            "created_at": utcnow(),
+        }
+        try:
+            await self._db.friendships.insert_one(doc)
+        except DuplicateKeyError:
+            return None
+        return doc
+
+    async def accept_friendship(self, a: str, b: str) -> bool:
+        res = await self._db.friendships.update_one(
+            {"pair": self._pair(a, b), "status": "pending"},
+            {"$set": {"status": "accepted"}},
+        )
+        return res.modified_count > 0
+
+    async def delete_friendship(self, a: str, b: str) -> bool:
+        res = await self._db.friendships.delete_one({"pair": self._pair(a, b)})
+        return res.deleted_count > 0
+
+    async def list_friendships(
+        self, username: str, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        query: dict[str, Any] = {"$or": [{"a": username}, {"b": username}]}
+        if status is not None:
+            query["status"] = status
+        cursor = self._db.friendships.find(query).sort("created_at", -1)
+        return await cursor.to_list(length=500)
 
     async def set_public_key(self, username: str, public_key: str) -> None:
         await self._db.keys.update_one(

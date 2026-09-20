@@ -114,6 +114,23 @@ class InvitePayload(BaseModel):
     username: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9_.]+$")
 
 
+class PeerPayload(BaseModel):
+    """Interlocuteur visé (invitation ami, message privé) — mêmes règles que
+    `InvitePayload` : pseudo assaini, jamais un opérateur NoSQL ni du brut."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    peer: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9_.]+$")
+
+
+class FriendshipOut(BaseModel):
+    """Une relation d'amitié vue depuis le demandeur (liste/sidebar)."""
+
+    username: str
+    status: str  # "pending" | "accepted"
+    requested_by: str
+
+
 class KeyBlob(BaseModel):
     """Blob opaque : clé de salon enveloppée (ou message) — jamais déchiffré."""
 

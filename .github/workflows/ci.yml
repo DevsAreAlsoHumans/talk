@@ -41,9 +41,26 @@ jobs:
       - run: python -m pytest tests/ -v
         env:
           TALK_MONGODB_URI: mongodb://localhost:27017/talk_test
+          TALK_DB_NAME: talk_test
+
+  test-front:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: find frontend -name '*.js' -print0 | xargs -0 -n1 node --check
+      # Glob explicite : la découverte par répertoire est capricieuse selon
+      # l'OS (Node/Windows), le glob est portable sur Linux CI comme en local.
+      - run: node --test tests/front/*.test.mjs
 
   docker-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose build app   # valide que l'image "runtime" se construit
+      # TALK_JWT_SECRET est requis par Compose ; une valeur jetable suffit ici
+      # (l'image n'est PAS lancée : elle est juste bâtie puis validée).
+      - run: docker compose build app
+        env:
+          TALK_JWT_SECRET: ci-build-only-secret-do-not-reuse-0123456789abcdef

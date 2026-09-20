@@ -85,21 +85,26 @@ function deriveShared(identity, peerPublicRawB64) {
     );
 }
 
-/* KEK = HKDF(ECDH(priv, peerPub), salt=contexte du salon) : partage déterministe. */
+/* KEK = HKDF(ECDH(priv, peerPub), salt=contexte du salon) : partage déterministe.
+   deriveBits rend un ArrayBuffer brut ; HKDF exige une CryptoKey -> import. */
 function deriveKEK(identity, peerPublicRawB64, roomId) {
   return deriveShared(identity, peerPublicRawB64).then((shared) =>
-    crypto.subtle.deriveKey(
-      {
-        name: "HKDF",
-        hash: "SHA-256",
-        salt: enc.encode("talk-room-v1:" + roomId),
-        info: enc.encode("talk-ekey-v1"),
-      },
-      shared,
-      { name: "AES-GCM", length: 256 },
-      false,
-      ["encrypt", "decrypt"],
-    ),
+    crypto.subtle
+      .importKey("raw", shared, "HKDF", false, ["deriveKey"])
+      .then((base) =>
+        crypto.subtle.deriveKey(
+          {
+            name: "HKDF",
+            hash: "SHA-256",
+            salt: enc.encode("talk-room-v1:" + roomId),
+            info: enc.encode("talk-ekey-v1"),
+          },
+          base,
+          { name: "AES-GCM", length: 256 },
+          false,
+          ["encrypt", "decrypt"],
+        ),
+      ),
   );
 }
 

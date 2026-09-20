@@ -2,6 +2,7 @@
 RESUME_PRIVE.md
 .env
 .env.*
+!.env.example   # le modèle n'est pas un secret
 
 # Artefacts
 .DS_Store

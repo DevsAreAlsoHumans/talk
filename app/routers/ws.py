@@ -14,6 +14,7 @@ chiffré de bout en bout et jamais interprété côté serveur.
 import asyncio
 import json
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import (
     APIRouter,
@@ -23,6 +24,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 
+from ..config import get_settings
 from ..db import Database, get_db
 from ..deps import SESSION_COOKIE
 from ..realtime import ConnectionManager
@@ -34,6 +36,7 @@ router = APIRouter(prefix="/api/ws", tags=["ws"])
 WS_UNAUTHENTICATED = 4401  # session absente/invalide ou non membre du salon
 WS_BAD_ENVELOPE = 4402     # enveloppe mal formée ou canal inconnu du salon
 WS_MESSAGE_TOO_LARGE = 4409
+WS_POLICY_VIOLATION = 1008  # origine tierce non autorisée
 
 # Plafond explicite : un blob chiffré est borné — au-delà, refus.
 MAX_PAYLOAD_BYTES = 64 * 1024
@@ -74,6 +77,27 @@ def _frame_payload(raw: str) -> tuple[str, str] | None:
     return channel_id, payload
 
 
+def _origin_allowed(websocket: WebSocket) -> bool:
+    """Défense en profondeur : un site tiers ne doit pas pouvoir ouvrir de
+    socket vers nous (cross-site WebSocket hijacking). Accepte :
+      - aucune origine (client non-navigateur : bots, tests),
+      - une origine explicite de la allowlist CORS,
+      - la même origine que la nôtre (host du handshake)."""
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    if parts.scheme not in {"http", "https"}:
+        return False
+    if origin in get_settings().cors_origins:
+        return True
+    host = websocket.headers.get("host")
+    return bool(host) and parts.netloc == host
+
+
 async def _close_socket(websocket: WebSocket, room_id: str, code: int) -> None:
     """Fermeture propre : évacue d'abord le manager (pas de fuite de socket)."""
     await manager.disconnect(room_id, websocket)
@@ -89,6 +113,10 @@ async def chat_ws(
     username = await _authenticated_username(websocket, db)
     if username is None:
         await websocket.close(code=WS_UNAUTHENTICATED)
+        return
+
+    if not _origin_allowed(websocket):
+        await websocket.close(code=WS_POLICY_VIOLATION)
         return
 
     room = await db.get_room_by_id(room_id)

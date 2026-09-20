@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import get_settings
 from .db import close_db
 from .middleware import SecurityHeadersMiddleware
-from .routers import auth, channels, keys, rooms, ws
+from .routers import auth, channels, friends, keys, rooms, ws
 
 settings = get_settings()
 
@@ -55,6 +55,7 @@ app.include_router(auth.router)
 app.include_router(rooms.router)
 app.include_router(channels.router)
 app.include_router(keys.router)
+app.include_router(friends.router)
 app.include_router(ws.router)
 
 # Front : fichiers statiques + entrée racine

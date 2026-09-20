@@ -19,6 +19,7 @@ class InMemory(Database):
         self.channels: list[dict[str, Any]] = []
         self.keys: dict[str, str] = {}
         self.wrapped: dict[tuple[str, str], dict[str, Any]] = {}
+        self.friendships: list[dict[str, Any]] = []
         self.seq = 0
         self.channel_seq = 0
 
@@ -39,13 +40,14 @@ class InMemory(Database):
     async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
         return self.users.get(user_id)
 
-    async def create_room(self, name: str, owner_id: str) -> dict[str, Any]:
+    async def create_room(self, name: str, owner_id: str, kind: str = "normal") -> dict[str, Any]:
         self.seq += 1
         room = {
             "_id": str(self.seq),
             "name": name,
             "owner_id": owner_id,
             "members": [owner_id],
+            "kind": kind,
             "created_at": datetime.now(UTC),
         }
         self.rooms.append(room)
@@ -65,6 +67,57 @@ class InMemory(Database):
             return False
         room["members"].append(username)
         return True
+
+    async def find_direct_room(self, me: str, peer: str) -> dict[str, Any] | None:
+        want = {me, peer}
+        for room in self.rooms:
+            if room.get("kind") == "direct" and set(room["members"]) == want:
+                return room
+        return None
+
+    @staticmethod
+    def _pair(a: str, b: str) -> str:
+        return "|".join(sorted([a, b]))
+
+    async def get_friendship(self, a: str, b: str) -> dict[str, Any] | None:
+        pair = self._pair(a, b)
+        return next((f for f in self.friendships if f["pair"] == pair), None)
+
+    async def create_friendship(self, requester: str, target: str) -> dict[str, Any] | None:
+        if await self.get_friendship(requester, target) is not None:
+            return None
+        doc = {
+            "pair": self._pair(requester, target),
+            "a": requester,
+            "b": target,
+            "requester": requester,
+            "status": "pending",
+            "created_at": datetime.now(UTC),
+        }
+        self.friendships.append(doc)
+        return doc
+
+    async def accept_friendship(self, a: str, b: str) -> bool:
+        row = await self.get_friendship(a, b)
+        if row is None or row["status"] != "pending":
+            return False
+        row["status"] = "accepted"
+        return True
+
+    async def delete_friendship(self, a: str, b: str) -> bool:
+        pair = self._pair(a, b)
+        before = len(self.friendships)
+        self.friendships = [f for f in self.friendships if f["pair"] != pair]
+        return len(self.friendships) < before
+
+    async def list_friendships(
+        self, username: str, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        rows = [f for f in self.friendships if username in (f["a"], f["b"])]
+        if status is not None:
+            rows = [f for f in rows if f["status"] == status]
+        rows.sort(key=lambda f: f["created_at"], reverse=True)
+        return rows
 
     async def set_public_key(self, username: str, public_key: str) -> None:
         self.keys[username] = public_key
@@ -137,6 +190,14 @@ class InMemory(Database):
 
     async def close(self) -> None:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """Chaque test repart avec un compteur de rate-limit vierge (isolation)."""
+    from app.ratelimit import reset_rate_limits
+
+    reset_rate_limits()
 
 
 @pytest.fixture()

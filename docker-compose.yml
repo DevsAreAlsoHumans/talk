@@ -7,6 +7,10 @@ services:
       - "8000:8000"
     environment:
       TALK_MONGODB_URI: mongodb://db:27017/talk   # ne contient QUE du ciphertext (jamais de clair)
+      # Secret obligatoire : sans lui, Compose refuse de démarrer (pas de
+      # secret "par défaut" qui circulerait sur tous les postes). Générer via
+      # `openssl rand -hex 32` dans le .env local (voir .env.example).
+      TALK_JWT_SECRET: ${TALK_JWT_SECRET:?TALK_JWT_SECRET manquant — voir .env.example}
     depends_on:
       db:
         condition: service_healthy
@@ -29,6 +33,7 @@ services:
     command: sh -lc "ruff check app/ tests/ && python -m pytest tests/ -v -x"
     environment:
       TALK_MONGODB_URI: mongodb://db:27017/talk_test   # base isolée côté tests
+      TALK_DB_NAME: talk_test
     depends_on:
       db:
         condition: service_healthy
