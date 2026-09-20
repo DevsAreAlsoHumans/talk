@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Talk</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <section id="auth-screen" class="screen">
+    <form id="auth-form" class="card">
+      <h1>Talk</h1>
+      <p class="muted">Messagerie chiffrée de bout en bout.</p>
+      <label>
+        Pseudo
+        <input id="auth-username" name="username" autocomplete="username" maxlength="32" required>
+      </label>
+      <label>
+        Mot&nbsp;de&nbsp;passe
+        <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="128" required>
+      </label>
+      <div class="row">
+        <button type="button" id="btn-login" class="ghost">Connexion</button>
+        <button type="submit">Inscription</button>
+      </div>
+      <p id="auth-error" class="error"></p>
+    </form>
+  </section>
+
+  <section id="app-screen" class="screen" hidden>
+    <aside id="sidebar">
+      <div class="account">
+        <span id="me-avatar" class="avatar"></span>
+        <div class="account-id">
+          <strong id="me-name"></strong>
+          <button type="button" id="btn-logout" class="link">Déconnexion</button>
+        </div>
+      </div>
+      <button type="button" id="btn-new-room" class="accent">+ Nouveau salon</button>
+      <ul id="room-list" class="rooms"></ul>
+    </aside>
+
+    <main id="chat">
+      <header class="chat-header">
+        <div class="chat-title">
+          <h2 id="room-title">—</h2>
+          <p id="room-meta" class="muted"></p>
+        </div>
+        <form id="invite-form" class="invite" hidden>
+          <input id="invite-username" placeholder="Inviter un membre" maxlength="32" required>
+          <button type="submit">Inviter</button>
+        </form>
+      </header>
+
+      <div class="chat-body">
+        <aside id="channel-pane">
+          <p class="pane-head">Canaux</p>
+          <ul id="channel-list" class="channels"></ul>
+          <button type="button" id="btn-new-channel" class="ghost">+ Canal</button>
+        </aside>
+
+        <div class="chat-col">
+          <div class="chat-topic">
+            <h3 id="channel-title"></h3>
+          </div>
+          <div id="messages" class="messages" aria-live="polite"></div>
+
+          <form id="composer" class="composer">
+            <input id="composer-input" placeholder="Écrire un message chiffré..." autocomplete="off" maxlength="4096">
+            <button type="submit">Envoyer</button>
+          </form>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

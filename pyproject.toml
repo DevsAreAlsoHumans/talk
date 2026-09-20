@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W: style — F: pyflakes — I: imports — S: bandit (sécurité) — B: bugbear
+select = ["E", "F", "I", "W", "S", "B"]
+ignore = ["S101"]  # assert pytest autorisé
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105"]  # mots de passe factices dans les fixtures
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"

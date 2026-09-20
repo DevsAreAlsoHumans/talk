@@ -6,3 +6,14 @@ RESUME_PRIVE.md
 # Artefacts
 .DS_Store
 *.log
+
+# Python / tests
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Base de données locale (ailleurs que dans Docker)
+data/

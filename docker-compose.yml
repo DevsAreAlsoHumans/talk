@@ -1,0 +1,37 @@
+# MongoDB préféré à Redis : les messages chiffrés E2EE exigent une persistance
+# durable + indexation/pagination — Redis reste du cache/état transitoire.
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      TALK_MONGODB_URI: mongodb://db:27017/talk   # ne contient QUE du ciphertext (jamais de clair)
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: mongo:7
+    volumes:
+      - db-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 })"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  test:
+    build:
+      context: .
+      target: deps            # image comportant pytest + ruff + le code source
+    command: sh -lc "ruff check app/ tests/ && python -m pytest tests/ -v -x"
+    environment:
+      TALK_MONGODB_URI: mongodb://db:27017/talk_test   # base isolée côté tests
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

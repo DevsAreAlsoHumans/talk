@@ -1,0 +1,6 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+motor>=3.6          # driver MongoDB async (non-bloquant, adapté au modèle WS)
+pydantic-settings>=2.5
+argon2-cffi>=23.1   # hash de mots de passe Argon2id (référence OWASP)
+itsdangerous>=2.2   # jetons de session signés + expiration (anti-falsification)
