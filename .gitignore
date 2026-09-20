@@ -1,8 +1,17 @@
-# Secrets locaux — ne jamais committer
-RESUME_PRIVE.md
+# Secrets : ne jamais les committer
 .env
-.env.*
+*.pem
+*.key
 
-# Artefacts
-.DS_Store
-*.log
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node (tests frontend)
+node_modules/

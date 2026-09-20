@@ -1,0 +1,14 @@
+{
+  "name": "talk-tests",
+  "private": true,
+  "type": "module",
+  "description": "Tests JavaScript de talk (cryptographie du navigateur, interface). Le code de l'application n'a aucune dépendance npm.",
+  "scripts": {
+    "test:crypto": "node --test tests/js/crypto.test.mjs",
+    "test:ui": "node tests/ui/ui.test.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.0",
+    "ws": "^8.21.3"
+  }
+}

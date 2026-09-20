@@ -1,0 +1,6 @@
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+redis==8.1.0
+argon2-cffi==25.1.0
+pydantic-settings==2.15.0
+cryptography==50.0.1
