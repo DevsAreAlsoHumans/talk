@@ -28,8 +28,17 @@ export function getCurrentRoomId() {
   return currentRoomId;
 }
 
-/** Dernier identifiant de message reçu (pour le polling `?after=`). */
+/** Identifiant de message reçu (pour le polling `?after=<seq>`). */
 let lastMessageId = 0;
+
+/**
+ * Séquence d'un message (score Redis, entier) : base du tri et du polling.
+ * Le champ `id` est un UUID (non ordonnable) ; seul `seq` est ordonné.
+ */
+function seqOf(raw) {
+  const seq = Number(raw != null ? raw.seq : NaN);
+  return Number.isFinite(seq) ? seq : 0;
+}
 
 /** Déduplication (anti-doublon entre WS, polling et envoi local). */
 const seenIds = new Set();
@@ -113,29 +122,23 @@ async function fetchHistoryAndRender() {
 
   let messages;
   try {
-    messages = await api(`/api/rooms/${roomId}/messages`); // sans `after` : tout l'historique
+    // Le serveur renvoie {"messages": [...]} (liste éventuellement vide).
+    const data = await api(`/api/rooms/${roomId}/messages`); // sans `after` : tout l'historique
+    messages = Array.isArray(data) ? data : data && Array.isArray(data.messages) ? data.messages : [];
   } catch (error) {
     appendSystemMessage("Historique indisponible : " + error.message);
     return;
   }
 
-  if (!Array.isArray(messages)) {
-    appendSystemMessage("Réponse serveur inattendue pour l'historique.");
-    return;
-  }
-
-  // Tri croissant par identifiant (séquentiel) pour un affichage chronologique,
-  // quel que soit l'ordre renvoyé par le serveur.
-  const ordered = [...messages].sort(
-    (a, b) => Number(a.id != null ? a.id : a.seq) - Number(b.id != null ? b.id : b.seq),
-  );
+  // Tri croissant par `seq` (séquentiel, fiable quel que soit l'ordre renvoyé).
+  const ordered = [...messages].sort((a, b) => seqOf(a) - seqOf(b));
 
   for (const raw of ordered) {
     const msg = newMessageFromRaw(raw);
     if (msg && !seenIds.has(msg.id)) {
       await appendMessage(msg, roomKey);
       seenIds.add(msg.id);
-      lastMessageId = Math.max(lastMessageId, Number(msg.id) || 0);
+      lastMessageId = Math.max(lastMessageId, seqOf(raw));
     }
   }
 
@@ -165,7 +168,7 @@ export async function handleNewMessage(payload) {
   const roomKey = crypto.getRoomKey(currentRoomId);
   await appendMessage(msg, roomKey);
   seenIds.add(msg.id);
-  lastMessageId = Math.max(lastMessageId, Number(msg.id) || 0);
+  lastMessageId = Math.max(lastMessageId, seqOf(payload));
   scrollToBottom();
 }
 
@@ -184,27 +187,27 @@ export async function pollNewMessages() {
 
   let messages;
   try {
-    messages = await api(
+    // Même forme que l'historique complet : {"messages": [...]}.
+    const data = await api(
       `/api/rooms/${currentRoomId}/messages?after=${lastMessageId}`,
     );
+    messages = Array.isArray(data) ? data : data && Array.isArray(data.messages) ? data.messages : [];
   } catch {
     return; // polling silencieux : on réessaiera au prochain tick
   }
 
-  if (!Array.isArray(messages)) {
+  if (messages.length === 0) {
     return;
   }
 
   const roomKey = crypto.getRoomKey(currentRoomId);
-  const ordered = [...messages].sort(
-    (a, b) => Number(a.id != null ? a.id : a.seq) - Number(b.id != null ? b.id : b.seq),
-  );
+  const ordered = [...messages].sort((a, b) => seqOf(a) - seqOf(b));
   for (const raw of ordered) {
     const msg = newMessageFromRaw(raw);
     if (msg && !seenIds.has(msg.id)) {
       await appendMessage(msg, roomKey);
       seenIds.add(msg.id);
-      lastMessageId = Math.max(lastMessageId, Number(msg.id) || 0);
+      lastMessageId = Math.max(lastMessageId, seqOf(raw));
     }
   }
   scrollToBottom();
@@ -243,17 +246,18 @@ export async function sendMessage(text) {
   });
 
   // Le nouveau message n'est PAS re-broadcasté à l'émetteur : on l'affiche
-  // localement après le 201.
+  // localement après le 201. Le serveur renvoie {"message": {...}}.
+  const created = response && typeof response === "object" ? response.message : null;
   let msg;
-  if (response && typeof response === "object" && response.id != null) {
-    msg = newMessageFromRaw(response);
+  if (created && created.id != null) {
+    msg = newMessageFromRaw(created);
   } else {
     // Réponse sans métadonnées : on construit un message local.
     localCounter += 1;
     msg = {
       id: "local-" + localCounter,
       room_id: currentRoomId,
-      sender_id: user ? user.id : null,
+      author_id: user ? user.id : null,
       sender: user ? user.username : "",
       nonce,
       ciphertext,
@@ -268,6 +272,7 @@ export async function sendMessage(text) {
     await appendMessage(msg, roomKey);
     seenIds.add(msg.id);
   }
+  lastMessageId = Math.max(lastMessageId, seqOf(created));
   scrollToBottom();
   return true;
 }
@@ -282,8 +287,8 @@ function renderHeaderInfo() {
 
 /**
  * Normalise un message brut de l'API/WS.
- * Le contrat n'impose pas le nom exact des champs de métadonnées : on accepte
- * `id` / `seq`, `sender_id` / `sender`, `username` / `sender_username`, etc.
+ * Métadonnées serveur : `id` (UUID), `seq` (entier ordonnable), `author_id`.
+ * On accepte aussi `roomId`, `sender_id`, `sender`, `username`… (défensif).
  */
 function newMessageFromRaw(raw) {
   if (!raw || typeof raw !== "object") {
@@ -291,7 +296,12 @@ function newMessageFromRaw(raw) {
   }
   const id = raw.id != null ? raw.id : raw.seq;
   const roomId = raw.room_id != null ? raw.room_id : raw.roomId;
-  const senderId = raw.sender_id != null ? raw.sender_id : raw.sender;
+  const senderId =
+    raw.author_id != null
+      ? raw.author_id
+      : raw.sender_id != null
+        ? raw.sender_id
+        : raw.sender;
   const senderName =
     raw.sender_username != null
       ? raw.sender_username

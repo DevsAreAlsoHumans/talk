@@ -103,21 +103,35 @@ def test_ws_unsubscribe_removes_socket_from_hub(app: FastAPI) -> None:
             event = ws.receive_json()
             assert event["type"] == "new_message"
 
-            # On se désabonne puis on se ré-abonne à un salon factice ; le
-            # relais reçu garantit que le serveur a bien traité les messages.
+            # Désabonnement effectif : le socket est retiré du hub.
             ws.send_json({"type": "unsubscribe", "room_ids": [room["id"]]})
-            ws.send_json({"type": "subscribe", "room_ids": ["salle-ping"]})
-            ws.send_json(
-                {"type": "new_message", "payload": {"room_id": "salle-ping", "seq": 1, "id": "x"}}
-            )
-            event = ws.receive_json()
-            assert event["payload"]["room_id"] == "salle-ping"
-
             assert len(hub._rooms.get(room["id"], ())) == 0
-            assert len(hub._rooms.get("salle-ping", ())) == 1
+
+            # Un abonnement vers un salon inconnu (ou non membre) est ignoré :
+            # aucun socket n'est ajouté pour "salle-ping".
+            ws.send_json({"type": "subscribe", "room_ids": ["salle-ping"]})
+            assert len(hub._rooms.get("salle-ping", ())) == 0
 
 
-def test_ws_relays_new_message_events(app: FastAPI) -> None:
+def test_ws_subscription_requires_membership(app: FastAPI) -> None:
+    """Un client ne peut s'abonner qu'aux salons dont il est membre."""
+    with TestClient(app) as alice_c, TestClient(app) as bob_c:
+        alice = SyncBrowser(alice_c, "alice_ws", "password123")
+        bob = SyncBrowser(bob_c, "bob_ws", "password123")
+        alice.register()
+        bob.register()
+        bob_room = bob.create_room("salle-de-bob")
+        hub = app.state.hub
+
+        with alice_c.websocket_connect("/ws") as ws:
+            # Alice n'est pas membre du salon de Bob : abonnement refusé.
+            ws.send_json({"type": "subscribe", "room_ids": [bob_room["id"]]})
+            assert len(hub._rooms.get(bob_room["id"], ())) == 0
+
+
+def test_ws_client_cannot_inject_events(app: FastAPI) -> None:
+    """Les trames émises par un client ne sont pas re-diffusées (seul le
+    serveur pousse des événements) : injection de faux messages impossible."""
     with TestClient(app) as client:
         alice = SyncBrowser(client, "alice_wr", "password123")
         alice.register()
@@ -125,12 +139,19 @@ def test_ws_relays_new_message_events(app: FastAPI) -> None:
 
         with client.websocket_connect("/ws") as ws:
             ws.send_json({"type": "subscribe", "room_ids": [room["id"]]})
+
+            # Tentative d'injection : doit être ignorée.
             ws.send_json(
                 {"type": "new_message", "payload": {"room_id": room["id"], "id": "abc", "seq": 99}}
             )
+
+            # L'événement réel suivant doit être le message serveur (seq 1),
+            # et non le faux événement "seq 99" qui aurait été re-diffusé.
+            real = alice.post_message(room["id"], "message réel")
             event = ws.receive_json()
             assert event["type"] == "new_message"
-            assert event["payload"]["seq"] == 99
+            assert event["payload"]["seq"] == 1
+            assert event["payload"]["ciphertext"] == real["ciphertext"]
 
 
 async def test_hub_unsubscribe_stops_delivery(app: FastAPI) -> None:

@@ -3,9 +3,11 @@
 Sécurité :
 - le cookie de session est vérifié avant tout (rejet code 4401 sinon) ;
 - l'origine (Origin) doit correspondre à l'hôte de la requête (rejet sinon) ;
-- le client s'abonne/se désabonne de salons via des messages JSON et les
-  événements ``new_message`` / ``member_joined`` / ``room_key`` sont diffusés
-  aux abonnés (server push only — le récepteur répond via REST).
+- un client ne peut s'abonner qu'aux salons dont il est membre (``rooms.is_member``) ;
+- le serveur est **le seul émetteur** d'événements (``new_message``,
+  ``member_joined``, ``room_key``, poussées par les endpoints REST) : les
+  trames clients autres que ``subscribe``/``unsubscribe`` sont ignorées, ce qui
+  interdit à un client d'injecter de faux événements.
 """
 
 from __future__ import annotations
@@ -15,16 +17,24 @@ import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.realtime.hub import InProcessHub
+from app.repositories import rooms
 from app.security.csrf import origin_matches_host
 from app.security.sessions import get_session
 
 router = APIRouter()
 
 
-async def _handle_message(websocket: WebSocket, hub: InProcessHub, data: object) -> None:
-    """Traite un message JSON entrant du client."""
-    if not isinstance(data, dict):
-        return
+async def _handle_message(
+    websocket: WebSocket,
+    hub: InProcessHub,
+    data: object,
+    *,
+    redis,
+    user_id: str | None,
+) -> None:
+    """Traite un message JSON entrant du client (subscriptions uniquement)."""
+    if user_id is None or not isinstance(data, dict):
+        return  # session anonyme : aucun abonnement possible
     msg_type = data.get("type")
 
     if msg_type in {"subscribe", "unsubscribe"}:
@@ -33,19 +43,11 @@ async def _handle_message(websocket: WebSocket, hub: InProcessHub, data: object)
             if not isinstance(room_id, str):
                 continue
             if msg_type == "subscribe":
-                hub.subscribe(room_id, websocket)
+                # Un client ne s'abonne qu'aux salons dont il est membre.
+                if rooms.is_member(redis, room_id, user_id):
+                    hub.subscribe(room_id, websocket)
             else:
                 hub.unsubscribe(room_id, websocket)
-        return
-
-    if msg_type in {"new_message", "member_joined", "room_key"}:
-        payload = data.get("payload")
-        if not isinstance(payload, dict):
-            return
-        room_id = payload.get("room_id")
-        if isinstance(room_id, str):
-            # Re-diffusion aux abonnés du salon (le récepteur appelle ensuite REST).
-            await hub.publish(room_id, {"type": msg_type, "payload": payload})
 
 
 @router.websocket("/ws")
@@ -55,9 +57,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     hub: InProcessHub = websocket.app.state.hub
 
     # 1. Authentification — le cookie de session doit être valide.
-    if get_session(redis, websocket) is None:
+    session = get_session(redis, websocket)
+    if session is None:
         await websocket.close(code=4401)
         return
+    user_id = session.get("user_id")
 
     # 2. Vérification d'origine (anti cross-site WebSocket hijacking).
     if not origin_matches_host(websocket):
@@ -68,7 +72,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     try:
         while True:
             message = await websocket.receive_json()
-            await _handle_message(websocket, hub, message)
+            await _handle_message(
+                websocket,
+                hub,
+                message,
+                redis=redis,
+                user_id=user_id,
+            )
     except (WebSocketDisconnect, json.JSONDecodeError):
         pass
     finally:
