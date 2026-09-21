@@ -5,6 +5,10 @@
 
 **Projet d'examen `SDV DEV 2026`** — branche `etudiant/barraud-teddy`.
 
+> Les évolutions de la phase 2 (présence en ligne, quitter un salon, suppression de messages,
+> pagination remontante, changement de mot de passe, design « Discord-like ») sont détaillées
+> dans [`FEATURES.md`](FEATURES.md).
+
 ---
 
 ## 1. Présentation
@@ -57,7 +61,7 @@ app/                     # Backend FastAPI
   api/                   # endpoints (auth, rooms, messages, users, csrf)
   realtime/              # hub in-process + endpoint /ws
 frontend/                # HTML/CSS/JS vanilla (WebCrypto), servi à la racine
-tests/                   # 118 tests : unitaires + intégration + sécurité
+tests/                   # 142 tests : unitaires + intégration + sécurité
   helpers/crypto_client.py   # « navigateur de référence » en Python (validé contre le contrat E2E)
 ```
 
@@ -88,15 +92,20 @@ tests/                   # 118 tests : unitaires + intégration + sécurité
 | POST | `/api/auth/register` | Inscription `{username, password, public_key}` → `{user, csrf_token}` |
 | POST | `/api/auth/login` | Connexion → `{user, csrf_token}` |
 | POST | `/api/auth/logout` | Déconnexion (session détruite, cookie effacé) |
+| POST | `/api/auth/change-password` | Changement de mot de passe `{old_password, new_password}` (la clé privée est ré-chiffrée côté client) |
 | GET | `/api/me` | Profil + salons de l'utilisateur connecté |
 | GET | `/api/users/{username}` | Profil public (id, username, public_key) |
 | GET/POST | `/api/rooms` | Liste / création de salon |
-| GET | `/api/rooms/{id}/members` | Membres d'un salon (avec clés publiques) |
+| GET | `/api/rooms/{id}/members` | Membres d'un salon (avec clés publiques et présence `online`) |
 | POST | `/api/rooms/{id}/join` | Rejoindre un salon |
+| POST | `/api/rooms/{id}/leave` | Quitter un salon |
 | POST | `/api/rooms/{room_id}/keys` | Enregistrer une copie enveloppée de la clé de salon |
 | GET | `/api/rooms/{id}/messages?after=<seq>` | Historique chiffré (ou reprise de connexion) |
+| GET | `/api/rooms/{id}/messages?limit=<n>` | Les `n` derniers messages (défaut historique complet) |
+| GET | `/api/rooms/{id}/messages?before=<seq>&limit=<n>` | Page des `n` messages antérieurs à `seq` (pagination remontante) |
 | POST | `/api/rooms/{id}/messages` | Envoyer `{nonce, ciphertext}` |
-| WS | `/ws` | Temps réel : `new_message`, `member_joined`, `room_key` |
+| DELETE | `/api/rooms/{room_id}/messages/{message_id}` | Supprimer son message (auteur uniquement, salon du message vérifié) |
+| WS | `/ws` | Temps réel : `new_message`, `member_joined`, `room_key`, `presence`, `member_left`, `message_deleted` |
 
 ---
 
@@ -130,7 +139,7 @@ Variables d'environnement utiles (avec défauts depuis `docker-compose.yml`) :
 | Variable | Défaut | Rôle |
 |---|---|---|
 | `REDIS_URL` | `redis://redis:6379/0` | Adresse Redis |
-| `SECRET_KEY` | `dev-only-secret-change-me` | **À changer en production** (via GitHub secrets / env) |
+| `SECRET_KEY` | `dev-only-secret-key-change-me` | **À changer en production** (via GitHub secrets / env) |
 | `COOKIE_SECURE` | `false` (dev) | Passer à `true` en HTTPS |
 
 ## 6. Sans Docker (développement)
@@ -147,7 +156,7 @@ Puis ouvrir **http://localhost:8000**.
 ## 7. Tests & qualité
 
 ```bash
-.venv/bin/pytest -v                 # 118 tests (unitaires + intégration + sécurité)
+.venv/bin/pytest -v                 # 142 tests (unitaires + intégration + sécurité)
 .venv/bin/ruff check .              # linter — 0 erreur
 .venv/bin/ruff format --check .     # formatage — conforme
 ```
@@ -176,12 +185,20 @@ La **CI** (`.github/workflows/ci.yml`) exécute à chaque push / pull request : 
 - **Rejoindre un salon** : un nouvel arrivant obtient sa copie de clé quand un membre présent
   ré-enveloppe la clé pour lui (automatique via l'événement `member_joined`, ou via le bouton
   « Actualiser clés »). L'historique antérieur à l'obtention de la clé reste chiffré.
+- **Présence** : un utilisateur est « en ligne » tant qu'au moins un onglet ouvert garde son
+  WebSocket connecté (compteur Redis partagé entre onglets).
+- **Changement de mot de passe** : la clé privée est déchiffrée (ancien mot de passe), ré-chiffrée
+  (nouveau mot de passe) puis restaurent dans le navigateur. Les sessions existantes ne sont
+  **pas** invalidées (limite assumée).
+- **Quitter un salon depuis un autre onglet** : la sidebar des autres onglets du même utilisateur
+  se met à jour au prochain rechargement du salon / rafraîchissement (événement temps réel
+  reçu par les *autres* membres uniquement).
 
 ---
 
 ## 9. Rendu
 
 - Branche : **`etudiant/barraud-teddy`** (CE projet).
-- CI : verte sur la branche (lint + 118 tests + build docker).
+- CI : verte sur la branche (lint + 142 tests + build docker).
 - Licence : Apache 2.0 (fichier `LICENSE`).
 - Énoncé du sujet : `EXAMEN.md` (référence).

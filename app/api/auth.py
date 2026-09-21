@@ -13,7 +13,8 @@ from app.api.deps import client_ip, get_current_user
 from app.db.redis import get_redis
 from app.repositories import rooms as rooms_repo
 from app.repositories import users
-from app.schemas import AuthResponse, LoginRequest, RegisterRequest
+from app.schemas import AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest
+from app.security import passwords
 from app.security.passwords import hash_password, verify_password
 from app.security.ratelimit import login_rate_limited, reset_login_rate_limit
 from app.security.sessions import (
@@ -85,6 +86,27 @@ def login(
     new_sid, new_token = _rotate_to_user(redis, request, user["id"])
     set_session_cookie(response, new_sid)
     return {"user": users.to_public(user), "csrf_token": new_token}
+
+
+@router.post("/change-password", status_code=204)
+def change_password(
+    body: ChangePasswordRequest,
+    response: Response,
+    user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+) -> Response:
+    """Change le mot de passe de l'utilisateur courant (ancien mot de passe vérifié).
+
+    Décision assumée : le changement n'invalide PAS les sessions existantes
+    (la rotation de session reste réservée à login/register).
+    """
+    stored = users.get_by_id(redis, user["id"])
+    if stored is None or not passwords.verify_password(body.old_password, stored["password_hash"]):
+        raise HTTPException(status_code=403, detail="Incorrect current password")
+
+    users.update_password(redis, user["id"], passwords.hash_password(body.new_password))
+    response.status_code = 204
+    return response
 
 
 @router.post("/logout", status_code=204)

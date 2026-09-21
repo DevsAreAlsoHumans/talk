@@ -69,6 +69,13 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         return
 
     await websocket.accept()
+    hub.attach_user(websocket, user_id)
+    # Présence : un compteur INCR/DECR par onglet ; en ligne si count > 0.
+    count = redis.incr(rooms.PRESENCE_COUNT_PREFIX + user_id)
+    if count == 1:  # premier onglet : l'utilisateur passe en ligne
+        presence = {"type": "presence", "payload": {"user_id": user_id, "online": True}}
+        for room in rooms.list_for_user(redis, user_id):
+            await hub.publish(room["id"], presence)
     try:
         while True:
             message = await websocket.receive_json()
@@ -83,3 +90,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         pass
     finally:
         hub.disconnect(websocket)
+        remaining = redis.decr(rooms.PRESENCE_COUNT_PREFIX + user_id)
+        if remaining <= 0:  # dernier onglet fermé : l'utilisateur passe hors ligne
+            redis.delete(rooms.PRESENCE_COUNT_PREFIX + user_id)
+            presence = {"type": "presence", "payload": {"user_id": user_id, "online": False}}
+            for room in rooms.list_for_user(redis, user_id):
+                await hub.publish(room["id"], presence)

@@ -2,6 +2,7 @@
 RESUME_PRIVE.md
 .env
 .env.*
+!.env.example
 
 # Artefacts
 .DS_Store

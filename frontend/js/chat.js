@@ -1,14 +1,24 @@
 /**
- * chat.js — Fil de messages : historique, envoi chiffré, affichage déchiffré,
- * défilement, polling de secours.
+ * chat.js — Fil de messages : historique paginé, envoi chiffré, affichage
+ * déchiffré, groupement visuel, défilement, suppression, polling de secours.
  *
- * Aucun `innerHTML` n'est utilisé : tout le contenu utilisateur (messages,
- * pseudos, salons) est injecté via `textContent` (anti-XSS).
+ * Règles strictes :
+ *   - Aucun `innerHTML` avec des données utilisateur : tout le contenu
+ *     (messages, pseudos) est injecté via `textContent`.
+ *   - Le fil est « à la Discord » : pas de bulles, avatar + pseudo + heure,
+ *     regroupement des messages consécutifs d'un même auteur, séparateurs de
+ *     dates centrés, bouton de pagination en haut.
+ *   - La pagination est gérée par `?limit=50` (ouverture) et
+ *     `?before=<seq>&limit=50` (page antérieure), en préservant le scroll.
  */
 
 import { api } from "./api.js";
 import * as crypto from "./crypto.js";
 import { getCurrentUser } from "./auth.js";
+import * as ui from "./ui.js";
+
+/** Taille d'une page d'historique (50 derniers messages à l'ouverture). */
+const PAGE_SIZE = 50;
 
 /**
  * Limite client en octets UTF-8 : le ciphertext AES-GCM (+ tag AEAD) puis sa
@@ -23,13 +33,16 @@ let onToast = () => {};
 /** Identifiant du salon actuellement ouvert (null si aucun). */
 let currentRoomId = null;
 
-/** @returns {string|null} identifiant du salon ouvert (pour le polling WS). */
+/** @returns {string|null} identifiant du salon ouvert (pour le WS). */
 export function getCurrentRoomId() {
   return currentRoomId;
 }
 
-/** Identifiant de message reçu (pour le polling `?after=<seq>`). */
+/** Plus grand `seq` connu : base du polling `?after=<seq>`. */
 let lastMessageId = 0;
+
+/** Plus petit `seq` affiché : borne de la pagination `?before=<seq>`. */
+let oldestSeq = null;
 
 /**
  * Séquence d'un message (score Redis, entier) : base du tri et du polling.
@@ -40,7 +53,7 @@ function seqOf(raw) {
   return Number.isFinite(seq) ? seq : 0;
 }
 
-/** Déduplication (anti-doublon entre WS, polling et envoi local). */
+/** Déduplication (anti-doublon entre WS, polling, pagination et envoi local). */
 const seenIds = new Set();
 
 /** Pseudo des membres : senderId → username (fourni à l'ouverture du salon). */
@@ -49,15 +62,28 @@ let membersById = new Map();
 /** Compteur local pour les messages sans id retourné par le serveur. */
 let localCounter = 0;
 
-/** Promise de chargement en cours (évite les lancements concurrents). */
+/** Promise de chargement de la première page (évite les lancements concurrents). */
 let historyLoading = null;
 
+/** Verrou du chargement « messages précédents ». */
+let loadingEarlier = false;
+
+/** Éléments du fil (copies locales, recréées à chaque reset). */
+let messagesEl = null;
+let loadWrapperEl = null;
+let lastMsgEl = null;
+let threadHintEl = null;
+
+/* ============================================================
+   Branchement initial
+   ============================================================ */
+
 /**
- * Branche la zone de saisie.
- * @param {{onToast: (message: string) => void}} callbacks
+ * Branche la zone de saisie et le bouton de pagination.
+ * @param {{onToast?: (message: string, type?: string) => void}} callbacks
  */
 export function initChat({ onToast: toastCallback }) {
-  onToast = toastCallback;
+  onToast = toastCallback || onToast;
 
   const form = document.getElementById("message-form");
   form.addEventListener("submit", async (event) => {
@@ -75,37 +101,113 @@ export function initChat({ onToast: toastCallback }) {
       }
     } catch (error) {
       input.value = text;
-      onToast(error.message || "Envoi impossible.");
+      onToast(error.message || "Envoi impossible.", "error");
     }
   });
 }
 
-/** Ouvre un salon : réinitialise l'état et recharge l'historique. */
+/* ============================================================
+   Ouverture / fermeture de salon
+   ============================================================ */
+
+/** Ouvre un salon : réinitialise l'état et charge les 50 derniers messages. */
 export async function openRoom(roomId, members) {
   currentRoomId = roomId;
   lastMessageId = 0;
+  oldestSeq = null;
   seenIds.clear();
   membersById = new Map((members || []).map((m) => [String(m.id), m.username]));
-  renderHeaderInfo();
-
-  const messagesEl = document.getElementById("messages");
-  messagesEl.textContent = ""; // suppression totale : jamais innerHTML
+  resetThread();
   await loadHistory();
 }
 
-/** Recharge intégralement l'historique (utilisé quand la clé arrive). */
+/** Recharge la première page (utilisé quand une clé de salon arrive). */
 export async function reloadHistory() {
   if (!currentRoomId) {
     return;
   }
   lastMessageId = 0;
+  oldestSeq = null;
   seenIds.clear();
-  const messagesEl = document.getElementById("messages");
-  messagesEl.textContent = "";
+  resetThread();
   await loadHistory();
 }
 
-/** Requête d'historique (protégée contre les lancements concurrents). */
+/** Ferme proprement le fil (salon quitté ou plus aucun salon sélectionné). */
+export function closeRoom() {
+  currentRoomId = null;
+  lastMessageId = 0;
+  oldestSeq = null;
+  seenIds.clear();
+  resetThread();
+}
+
+/** Vide le fil et recrée le conteneur de pagination. */
+function resetThread() {
+  messagesEl = document.getElementById("messages");
+  messagesEl.textContent = "";
+  lastMsgEl = null;
+  threadHintEl = null;
+
+  loadWrapperEl = document.createElement("div");
+  loadWrapperEl.className = "message-load";
+  loadWrapperEl.hidden = true;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.id = "btn-load-earlier";
+  button.className = "btn btn-load-earlier";
+  button.textContent = "Charger des messages précédents";
+  button.disabled = false;
+  button.addEventListener("click", () => {
+    loadEarlierMessages();
+  });
+  loadWrapperEl.appendChild(button);
+  messagesEl.appendChild(loadWrapperEl);
+}
+
+/** Affiche/masque le bouton de pagination (en tête du fil). */
+function showLoadEarlier() {
+  if (loadWrapperEl) {
+    loadWrapperEl.hidden = false;
+  }
+}
+
+function hideLoadEarlier() {
+  if (loadWrapperEl) {
+    loadWrapperEl.hidden = true;
+  }
+}
+
+/** Recalcule `oldestSeq` depuis le premier message affiché. */
+function updateOldestSeq() {
+  const first = messagesEl.querySelector(".message");
+  const seq = first ? Number(first.dataset.seq) : NaN;
+  oldestSeq = Number.isFinite(seq) && seq > 0 ? seq : null;
+}
+
+/** Indicateur central « fil vide » (texte non utilisateur). */
+function showThreadHint(text) {
+  if (!threadHintEl) {
+    threadHintEl = document.createElement("div");
+    threadHintEl.className = "thread-hint";
+    messagesEl.appendChild(threadHintEl);
+  }
+  threadHintEl.textContent = text;
+}
+
+function hideThreadHint() {
+  if (threadHintEl) {
+    threadHintEl.remove();
+    threadHintEl = null;
+  }
+}
+
+/* ============================================================
+   Historique : première page (limit=50)
+   ============================================================ */
+
+/** Requête de la première page (protégée contre les lancements concurrents). */
 function loadHistory() {
   if (!historyLoading) {
     historyLoading = fetchHistoryAndRender().finally(() => {
@@ -117,22 +219,28 @@ function loadHistory() {
 
 async function fetchHistoryAndRender() {
   const roomId = currentRoomId;
+  if (!roomId) {
+    return;
+  }
   const roomKey = crypto.getRoomKey(roomId);
-  const messagesEl = document.getElementById("messages");
 
-  let messages;
+  let items;
   try {
-    // Le serveur renvoie {"messages": [...]} (liste éventuellement vide).
-    const data = await api(`/api/rooms/${roomId}/messages`); // sans `after` : tout l'historique
-    messages = Array.isArray(data) ? data : data && Array.isArray(data.messages) ? data.messages : [];
+    // GET /api/rooms/{id}/messages?limit=50 → les 50 derniers, croissants.
+    const data = await api(`/api/rooms/${roomId}/messages?limit=${PAGE_SIZE}`);
+    items = extractMessages(data);
   } catch (error) {
-    appendSystemMessage("Historique indisponible : " + error.message);
+    if (String(roomId) === String(currentRoomId)) {
+      showThreadHint("Historique indisponible : " + (error.message || "erreur"));
+    }
     return;
   }
 
-  // Tri croissant par `seq` (séquentiel, fiable quel que soit l'ordre renvoyé).
-  const ordered = [...messages].sort((a, b) => seqOf(a) - seqOf(b));
+  if (String(roomId) !== String(currentRoomId)) {
+    return; // le salon a changé pendant la requête
+  }
 
+  const ordered = [...items].sort((a, b) => seqOf(a) - seqOf(b));
   for (const raw of ordered) {
     const msg = newMessageFromRaw(raw);
     if (msg && !seenIds.has(msg.id)) {
@@ -143,15 +251,120 @@ async function fetchHistoryAndRender() {
   }
 
   if (ordered.length === 0) {
-    appendSystemMessage("Aucun message pour l'instant. Écrivez le premier !");
+    showThreadHint("Aucun message pour l'instant. Écrivez le premier !");
+    hideLoadEarlier();
+  } else {
+    updateOldestSeq();
+    // Page pleine → il peut exister des messages plus anciens.
+    if (ordered.length >= PAGE_SIZE) {
+      showLoadEarlier();
+    } else {
+      hideLoadEarlier();
+    }
   }
-
   scrollToBottom();
 }
 
+/** Normalise une réponse `{"messages": [...]}` (tolérance tableau nu). */
+function extractMessages(data) {
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return data && Array.isArray(data.messages) ? data.messages : [];
+}
+
+/* ============================================================
+   Pagination : page antérieure (before=<seq>)
+   ============================================================ */
+
+/**
+ * Charge la page précédente et la préfixe dans le DOM, scroll préservé.
+ * `?before=<seq du plus ancien message affiché>&limit=50`.
+ */
+async function loadEarlierMessages() {
+  if (!currentRoomId || !oldestSeq || loadingEarlier) {
+    return;
+  }
+  loadingEarlier = true;
+  const button = loadWrapperEl && loadWrapperEl.querySelector("button");
+  if (button) {
+    button.disabled = true;
+  }
+
+  const roomId = currentRoomId;
+  // Mémorisation pour restaurer la position après l'insertion en tête.
+  const prevScrollTop = messagesEl.scrollTop;
+  const prevScrollHeight = messagesEl.scrollHeight;
+
+  try {
+    const data = await api(
+      `/api/rooms/${roomId}/messages?before=${oldestSeq}&limit=${PAGE_SIZE}`,
+    );
+    if (String(roomId) !== String(currentRoomId)) {
+      return;
+    }
+    let items = extractMessages(data)
+      .sort((a, b) => seqOf(a) - seqOf(b))
+      .filter((raw) => {
+        const msg = newMessageFromRaw(raw);
+        return msg && !seenIds.has(msg.id);
+      });
+
+    if (items.length === 0) {
+      hideLoadEarlier();
+      onToast("Début de l'historique.", "info");
+      return;
+    }
+
+    hideThreadHint();
+    const roomKey = crypto.getRoomKey(roomId);
+    const fragment = document.createDocumentFragment();
+    for (const raw of items) {
+      const msg = newMessageFromRaw(raw);
+      const node = await buildMessageNode(msg, roomKey);
+      seenIds.add(msg.id);
+      fragment.appendChild(node);
+    }
+
+    // Insertion en tête, dans l'ordre croissant des `seq`.
+    const anchor = messagesEl.querySelector(".message");
+    messagesEl.insertBefore(fragment, anchor);
+
+    // Regroupement et séparateurs de dates recalculés sur tout le fil
+    // (la frontière ancien-nouveau peut changer le premier groupe).
+    normalizeGrouping();
+    updateOldestSeq();
+
+    if (items.length < PAGE_SIZE) {
+      hideLoadEarlier();
+    }
+
+    // `lastMessageId` (max) n'est pas affecté : les messages insérés sont
+    // antérieurs, donc de `seq` plus petit.
+    restoreScroll(prevScrollTop, prevScrollHeight);
+  } catch (error) {
+    onToast("Chargement impossible : " + (error.message || "erreur"), "error");
+  } finally {
+    loadingEarlier = false;
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
+/** Restaure la position de scroll après une insertion en tête. */
+function restoreScroll(prevScrollTop, prevScrollHeight) {
+  messagesEl.scrollTop = prevScrollTop + (messagesEl.scrollHeight - prevScrollHeight);
+}
+
+/* ============================================================
+   Temps réel : new_message, message_deleted, polling
+   ============================================================ */
+
 /**
  * Applique un nouveau message reçu en temps réel (WebSocket).
- * Uniquement si le salon concerné est celui qui est ouvert.
+ * Les messages d'un autre salon sont ignorés ici (le compteur de non-lus est
+ * géré par rooms.js via main.js).
  */
 export async function handleNewMessage(payload) {
   const msg = newMessageFromRaw(payload);
@@ -159,17 +372,44 @@ export async function handleNewMessage(payload) {
     return;
   }
   if (String(msg.room_id) !== String(currentRoomId)) {
-    return; // message d'un autre salon : ignoré ici (pas de compteur non lu)
+    return;
   }
   if (seenIds.has(msg.id)) {
     return; // déjà affiché (polling / envoi local)
   }
-
+  hideThreadHint();
   const roomKey = crypto.getRoomKey(currentRoomId);
   await appendMessage(msg, roomKey);
   seenIds.add(msg.id);
   lastMessageId = Math.max(lastMessageId, seqOf(payload));
   scrollToBottom();
+}
+
+/**
+ * Événement WS `message_deleted` : retire le message du fil pour tout le monde
+ * (ciblé via data-message-id, idempotent).
+ */
+export function handleMessageDeleted(payload) {
+  const roomId = payload && (payload.room_id != null ? payload.room_id : payload.roomId);
+  if (roomId == null || String(roomId) !== String(currentRoomId)) {
+    return;
+  }
+  removeMessageNode(payload.id);
+}
+
+/** Retire le noeud DOM d'un message (par data-message-id). */
+function removeMessageNode(messageId) {
+  if (messageId == null) {
+    return;
+  }
+  const node = messagesEl.querySelector(
+    `.message[data-message-id=${CSS.escape(String(messageId))}]`,
+  );
+  if (node) {
+    node.remove();
+    normalizeGrouping();
+    updateOldestSeq();
+  }
 }
 
 /**
@@ -185,26 +425,28 @@ export async function pollNewMessages() {
     return;
   }
 
-  let messages;
+  const roomId = currentRoomId;
+  let items;
   try {
-    // Même forme que l'historique complet : {"messages": [...]}.
-    const data = await api(
-      `/api/rooms/${currentRoomId}/messages?after=${lastMessageId}`,
-    );
-    messages = Array.isArray(data) ? data : data && Array.isArray(data.messages) ? data.messages : [];
+    const data = await api(`/api/rooms/${roomId}/messages?after=${lastMessageId}`);
+    items = extractMessages(data);
   } catch {
     return; // polling silencieux : on réessaiera au prochain tick
   }
 
-  if (messages.length === 0) {
+  if (String(roomId) !== String(currentRoomId)) {
+    return;
+  }
+  if (items.length === 0) {
     return;
   }
 
-  const roomKey = crypto.getRoomKey(currentRoomId);
-  const ordered = [...messages].sort((a, b) => seqOf(a) - seqOf(b));
+  const roomKey = crypto.getRoomKey(roomId);
+  const ordered = [...items].sort((a, b) => seqOf(a) - seqOf(b));
   for (const raw of ordered) {
     const msg = newMessageFromRaw(raw);
     if (msg && !seenIds.has(msg.id)) {
+      hideThreadHint();
       await appendMessage(msg, roomKey);
       seenIds.add(msg.id);
       lastMessageId = Math.max(lastMessageId, seqOf(raw));
@@ -212,6 +454,10 @@ export async function pollNewMessages() {
   }
   scrollToBottom();
 }
+
+/* ============================================================
+   Envoi chiffré
+   ============================================================ */
 
 /**
  * Envoie un message chiffré : AES-256-GCM avec la clé de salon, puis POST.
@@ -239,8 +485,9 @@ export async function sendMessage(text) {
 
   const user = getCurrentUser();
   const { nonce, ciphertext } = await crypto.encryptMessage(roomKey, text);
+  const roomId = currentRoomId;
 
-  const response = await api(`/api/rooms/${currentRoomId}/messages`, {
+  const response = await api(`/api/rooms/${roomId}/messages`, {
     method: "POST",
     body: { nonce, ciphertext },
   });
@@ -256,7 +503,7 @@ export async function sendMessage(text) {
     localCounter += 1;
     msg = {
       id: "local-" + localCounter,
-      room_id: currentRoomId,
+      room_id: roomId,
       author_id: user ? user.id : null,
       sender: user ? user.username : "",
       nonce,
@@ -268,22 +515,47 @@ export async function sendMessage(text) {
 
   // Course possible : le serveur peut broadcaster `new_message` à l'émetteur
   // AVANT que la réponse du POST ne soit traitée → on ne duplique pas l'affichage.
-  if (!seenIds.has(msg.id)) {
+  if (String(roomId) === String(currentRoomId) && !seenIds.has(msg.id)) {
+    hideThreadHint();
     await appendMessage(msg, roomKey);
     seenIds.add(msg.id);
   }
-  lastMessageId = Math.max(lastMessageId, seqOf(created));
+  if (created != null && Number.isFinite(seqOf(created))) {
+    lastMessageId = Math.max(lastMessageId, seqOf(created));
+  }
   scrollToBottom();
   return true;
 }
 
-/** Renseigne le nom du salon et le nombre de membres dans l'en-tête. */
-function renderHeaderInfo() {
-  // Le nom du salon est posé par rooms.js ; ici on met à jour le compteur.
-  const countEl = document.getElementById("room-members-count");
-  const count = membersById.size;
-  countEl.textContent = count + " membre" + (count > 1 ? "s" : "");
+/* ============================================================
+   Suppression d'un message (auteur uniquement)
+   ============================================================ */
+
+/** Menu contextuel → confirmation → DELETE → retrait local. */
+async function confirmDeleteMessage(msg, roomId) {
+  const ok = await ui.confirmDialog({
+    title: "Supprimer le message",
+    message:
+      "Ce message sera supprimé pour tous les membres du salon. " +
+      "Cette action est définitive.",
+    confirmLabel: "Supprimer",
+    danger: true,
+  });
+  if (!ok) {
+    return;
+  }
+  try {
+    await api(`/api/rooms/${roomId}/messages/${msg.id}`, { method: "DELETE" });
+    removeMessageNode(msg.id);
+    onToast("Message supprimé.", "success");
+  } catch (error) {
+    onToast(error.message || "Suppression impossible.", "error");
+  }
 }
+
+/* ============================================================
+   Construction du DOM des messages
+   ============================================================ */
 
 /**
  * Normalise un message brut de l'API/WS.
@@ -321,38 +593,53 @@ function newMessageFromRaw(raw) {
 }
 
 /**
- * Ajoute un message au fil (déchiffré si possible).
+ * Construit le noeud DOM d'un message (avatar, pseudo, heure, texte —
+ * déchiffré si possible). Ne l'insère PAS dans le fil.
  * @param {object} msg Message normalisé.
  * @param {CryptoKey|null} roomKey Clé de salon (éventuellement absente).
+ * @returns {Promise<HTMLElement>}
  */
-async function appendMessage(msg, roomKey) {
+async function buildMessageNode(msg, roomKey) {
   const user = getCurrentUser();
   const isOwn = user && msg.sender_id != null && String(msg.sender_id) === String(user.id);
 
-  const messagesEl = document.getElementById("messages");
   const item = document.createElement("div");
-  item.className = "message" + (isOwn ? " message--own" : "");
+  item.className = "message";
+  item.dataset.messageId = String(msg.id != null ? msg.id : "");
+  item.dataset.seq = String(seqOf(msg));
+  item.dataset.authorId = msg.sender_id != null ? String(msg.sender_id) : "";
+  if (msg.created_at) {
+    item.dataset.day = ui.dayKeyOf(msg.created_at);
+    item.dataset.dayLabel = ui.dayLabelOf(msg.created_at);
+  }
 
-  // Métadonnées : pseudo + heure.
-  const meta = document.createElement("div");
-  meta.className = "message-meta";
+  // Avatar teinté par pseudo (masqué visuellement pour les messages groupés).
+  const avatar = document.createElement("span");
+  avatar.className = "avatar avatar--message " + ui.avatarHueClass(msg.sender || "?");
+  avatar.textContent = (msg.sender || "?").charAt(0).toUpperCase();
+  item.appendChild(avatar);
 
-  const senderEl = document.createElement("span");
-  senderEl.className = "message-sender";
-  senderEl.textContent = isOwn ? "Vous" : msg.sender || "Inconnu";
-  meta.appendChild(senderEl);
+  // Colonne contenu : en-tête (pseudo + heure) puis texte.
+  const body = document.createElement("div");
+  body.className = "message-body";
 
+  const header = document.createElement("div");
+  header.className = "message-header";
+  const sender = document.createElement("span");
+  sender.className = "message-sender";
+  sender.textContent = msg.sender || "Inconnu";
+  header.appendChild(sender);
   if (msg.created_at) {
     const timeEl = document.createElement("span");
     timeEl.className = "message-time";
-    timeEl.textContent = formatTime(msg.created_at);
-    meta.appendChild(timeEl);
+    timeEl.textContent = ui.formatTime(msg.created_at);
+    header.appendChild(timeEl);
   }
+  body.appendChild(header);
 
   // Contenu déchiffré (jamais injecté via innerHTML).
-  const bubble = document.createElement("div");
-  bubble.className = "message-bubble";
-
+  const textEl = document.createElement("div");
+  textEl.className = "message-text";
   let decryptedText = null;
   if (msg.nonce && msg.ciphertext && roomKey) {
     try {
@@ -361,45 +648,112 @@ async function appendMessage(msg, roomKey) {
       decryptedText = null;
     }
   }
-
-  const bodyEl = document.createElement("span");
   if (decryptedText !== null) {
-    bodyEl.textContent = decryptedText;
+    textEl.textContent = decryptedText;
   } else {
-    bodyEl.textContent =
-      "[Message chiffré — clé de salon non disponible sur ce navigateur]";
     item.classList.add("message--locked");
+    textEl.textContent = "[Message chiffré — clé de salon non disponible sur ce navigateur]";
   }
-  bubble.appendChild(bodyEl);
+  body.appendChild(textEl);
+  item.appendChild(body);
 
-  item.appendChild(meta);
-  item.appendChild(bubble);
-  messagesEl.appendChild(item);
+  // Menu « Supprimer » : auteur uniquement, visible au survol.
+  if (isOwn && msg.id != null && String(msg.id).indexOf("local-") !== 0) {
+    const roomIdAtBuild = msg.room_id || currentRoomId;
+    const actionsBtn = document.createElement("button");
+    actionsBtn.type = "button";
+    actionsBtn.className = "icon-btn message-actions-btn";
+    actionsBtn.setAttribute("aria-label", "Options du message");
+    actionsBtn.appendChild(ui.icon("dots"));
+    actionsBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      ui.openMenu(actionsBtn, [
+        {
+          label: "Supprimer",
+          danger: true,
+          onClick: () => confirmDeleteMessage(msg, roomIdAtBuild),
+        },
+      ]);
+    });
+    item.appendChild(actionsBtn);
+  }
+
+  return item;
 }
 
-/** Ajoute un message système (informations non utilisateur). */
-function appendSystemMessage(text) {
-  const messagesEl = document.getElementById("messages");
-  const item = document.createElement("div");
-  item.className = "message message--locked";
-  const bubble = document.createElement("div");
-  bubble.className = "message-bubble";
-  bubble.textContent = text;
-  item.appendChild(bubble);
-  messagesEl.appendChild(item);
+/**
+ * Ajoute un message en fin de fil, avec regroupement et séparation de date
+ * calculés par rapport au dernier message affiché.
+ * @param {object} msg Message normalisé.
+ * @param {CryptoKey|null} roomKey Clé de salon.
+ */
+async function appendMessage(msg, roomKey) {
+  const node = await buildMessageNode(msg, roomKey);
+  const prev = lastMsgEl;
+
+  const isGrouped =
+    prev &&
+    prev.dataset.authorId &&
+    msg.sender_id != null &&
+    prev.dataset.authorId === String(msg.sender_id);
+  node.classList.add(isGrouped ? "message--grouped" : "message--group-start");
+
+  const prevDay = prev && prev.dataset.day;
+  const nodeDay = node.dataset.day;
+  if (prev && prevDay && nodeDay && prevDay !== nodeDay) {
+    const separator = document.createElement("div");
+    separator.className = "date-separator";
+    const label = document.createElement("span");
+    label.textContent = node.dataset.dayLabel || nodeDay;
+    separator.appendChild(label);
+    messagesEl.appendChild(separator);
+  }
+
+  messagesEl.appendChild(node);
+  lastMsgEl = node;
 }
 
-/** « Heure d'émission » lisible (ex. : 14:05). */
-function formatTime(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return "";
+/**
+ * Recalcule le groupement et les séparateurs de dates sur TOUT le fil.
+ * Utilisé après une insertion en tête (pagination) ou une suppression, où la
+ * frontière de groupe peut changer.
+ */
+function normalizeGrouping() {
+  for (const sep of messagesEl.querySelectorAll(".date-separator")) {
+    sep.remove();
   }
-  return date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  for (const m of messagesEl.querySelectorAll(".message")) {
+    m.classList.remove("message--grouped", "message--group-start");
+  }
+
+  let prevAuthor = undefined;
+  let prevDay = undefined;
+  for (const msgNode of messagesEl.querySelectorAll(".message")) {
+    const author = msgNode.dataset.authorId || null;
+    const day = msgNode.dataset.day || null;
+
+    if (prevAuthor !== undefined && author !== null && author === prevAuthor) {
+      msgNode.classList.add("message--grouped");
+    } else {
+      msgNode.classList.add("message--group-start");
+    }
+
+    // Séparateur avant le premier message du jour suivant.
+    if (prevDay !== undefined && day !== null && day !== prevDay) {
+      const separator = document.createElement("div");
+      separator.className = "date-separator";
+      const label = document.createElement("span");
+      label.textContent = msgNode.dataset.dayLabel || day;
+      separator.appendChild(label);
+      msgNode.parentNode.insertBefore(separator, msgNode);
+    }
+
+    prevAuthor = author;
+    prevDay = day;
+  }
 }
 
 /** Défilement vers le bas du fil. */
 function scrollToBottom() {
-  const messagesEl = document.getElementById("messages");
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }

@@ -3,6 +3,7 @@
 from app.schemas.auth import (
     USERNAME_PATTERN,
     AuthResponse,
+    ChangePasswordRequest,
     LoginRequest,
     RegisterRequest,
     UserPublic,
@@ -14,6 +15,7 @@ from app.schemas.rooms import KeyWrapRequest, MemberPublic, Room, RoomCreate
 __all__ = [
     "USERNAME_PATTERN",
     "AuthResponse",
+    "ChangePasswordRequest",
     "KeyWrapRequest",
     "LoginRequest",
     "MemberPublic",

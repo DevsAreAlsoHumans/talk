@@ -61,6 +61,15 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class ChangePasswordRequest(BaseModel):
+    """Corps de ``POST /api/auth/change-password``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    old_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class UserPublic(BaseModel):
     """Utilisateur sous forme publique (jamais de hash de mot de passe)."""
 

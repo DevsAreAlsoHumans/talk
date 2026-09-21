@@ -15,6 +15,7 @@
 
 import { api, ApiError } from "./api.js";
 import * as crypto from "./crypto.js";
+import * as ui from "./ui.js";
 
 /** Clés de localStorage gérées par ce module. */
 const LS_PRIVATE_KEY = "talk.private_key";
@@ -28,12 +29,18 @@ let currentUser = null;
 /** Callback appelé après une authentification réussie (posé par main.js). */
 let onAuthenticated = () => {};
 
+/** Callback de notification (toasts), posé par main.js. */
+let onToast = (message, type) => {};
+
 /**
- * Branche l'interface d'authentification (formulaire, bascule login/register).
- * @param {{onAuthenticated: (user: object) => void}} callbacks
+ * Branche l'interface d'authentification (formulaire, bascule login/register)
+ * ainsi que la modale de changement de mot de passe.
+ * @param {{onAuthenticated: (user: object) => void,
+ *          onToast?: (message: string, type?: string) => void}} callbacks
  */
-export function initAuth({ onAuthenticated: cb }) {
+export function initAuth({ onAuthenticated: cb, onToast: toastCallback }) {
   onAuthenticated = cb;
+  onToast = toastCallback || onToast;
 
   const form = document.getElementById("auth-form");
   const usernameInput = document.getElementById("auth-username");
@@ -152,6 +159,119 @@ export function initAuth({ onAuthenticated: cb }) {
   } else {
     setMode("register");
   }
+
+  /* ------------------------------------------------------------
+     Changement de mot de passe (modale accessible depuis la sidebar)
+     ------------------------------------------------------------ */
+  document.getElementById("btn-change-password").addEventListener("click", () => {
+    openPasswordModal();
+  });
+  document.getElementById("btn-cancel-change-password").addEventListener("click", () => {
+    ui.closeModal(document.getElementById("modal-change-password"));
+  });
+
+  const passwordForm = document.getElementById("form-change-password");
+  passwordForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await submitPasswordChange();
+  });
+}
+
+/** Ouvre la modale de changement de mot de passe (champs vidés). */
+function openPasswordModal() {
+  const modal = document.getElementById("modal-change-password");
+  document.getElementById("cp-old").value = "";
+  document.getElementById("cp-new").value = "";
+  document.getElementById("cp-confirm").value = "";
+  ui.openModal(modal, "#cp-old");
+}
+
+/** Validation client + changement réel (voir export changePassword). */
+async function submitPasswordChange() {
+  const errorEl = document.getElementById("cp-error");
+  const fail = (message) => {
+    errorEl.textContent = message;
+    errorEl.hidden = false;
+  };
+
+  const oldPassword = document.getElementById("cp-old").value;
+  const newPassword = document.getElementById("cp-new").value;
+  const confirmPassword = document.getElementById("cp-confirm").value;
+
+  if (!oldPassword) {
+    fail("Indiquez votre mot de passe actuel.");
+    return;
+  }
+  if (newPassword.length < 8 || newPassword.length > 128) {
+    fail("Le nouveau mot de passe doit contenir entre 8 et 128 caractères.");
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    fail("La confirmation ne correspond pas au nouveau mot de passe.");
+    return;
+  }
+
+  const submitBtn = document.getElementById("btn-change-password-submit");
+  submitBtn.disabled = true;
+  try {
+    await changePassword(oldPassword, newPassword);
+    ui.closeModal(document.getElementById("modal-change-password"));
+    onToast("Mot de passe mis à jour.", "success");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      fail("L'ancien mot de passe est incorrect.");
+    } else {
+      fail(error.message || "Changement de mot de passe impossible.");
+    }
+  } finally {
+    submitBtn.disabled = false;
+  }
+}
+
+/**
+ * Change le mot de passe :
+ *   1. déchiffre la clé privée stockée avec l'ancien mot de passe (JWK) ;
+ *   2. POST /api/auth/change-password (le serveur vérifie l'ancien) ;
+ *   3. ré-chiffre la clé privée avec le nouveau mot de passe puis la stocke.
+ * @returns {Promise<void>}
+ * @throws {ApiError} ancien mot de passe incorrect (403) ou erreur serveur.
+ */
+export async function changePassword(oldPassword, newPassword) {
+  const storedRaw = localStorage.getItem(LS_PRIVATE_KEY);
+  if (!storedRaw) {
+    throw new ApiError(
+      "Aucune clé privée stockée sur ce navigateur : changement impossible.",
+      400,
+    );
+  }
+
+  let stored;
+  try {
+    stored = JSON.parse(storedRaw);
+  } catch {
+    throw new ApiError("Données locales corrompues.", 500);
+  }
+
+  // 1. Vérification locale : l'ancien mot de passe déverrouille-t-il la clé ?
+  let privateKeyJwk;
+  try {
+    privateKeyJwk = await crypto.decryptPrivateKeyWithPassword(stored, oldPassword);
+  } catch {
+    throw new ApiError("L'ancien mot de passe est incorrect.", 403);
+  }
+
+  // 2. Autorité serveur (Argon2). En cas d'échec, aucune donnée n'est modifiée.
+  await api("/api/auth/change-password", {
+    method: "POST",
+    body: { old_password: oldPassword, new_password: newPassword },
+  });
+
+  // 3. Ré-chiffrement local puis persistance (les clés mémoire sont inchangées).
+  const reEncrypted = await crypto.encryptPrivateKeyWithPassword(
+    privateKeyJwk,
+    newPassword,
+  );
+  localStorage.setItem(LS_PRIVATE_KEY, JSON.stringify(reEncrypted));
 }
 
 /** Erreur spécifique au « verrouillage » (clé privée locale manquante). */

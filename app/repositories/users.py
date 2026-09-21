@@ -69,6 +69,21 @@ def get_by_id(redis: Redis, user_id: str) -> dict | None:
     return json.loads(raw)
 
 
+def update_password(redis: Redis, user_id: str, password_hash: str) -> None:
+    """Remplace le hash du mot de passe d'un utilisateur (réécriture complète).
+
+    Le secteur est stocké en JSON string sous ``user:{id}`` : on relit
+    l'enregistrement existant (même format que ``get_by_id``), on met à jour
+    la clé ``password_hash`` puis on réécrit le JSON (même format que
+    ``create_user``). Ne fait rien si l'utilisateur est inconnu.
+    """
+    user = get_by_id(redis, user_id)
+    if user is None:
+        return
+    user["password_hash"] = password_hash
+    redis.set(_user_key(user_id), json.dumps(user))
+
+
 def to_public(user: dict) -> dict:
     """Forme publique d'un utilisateur : id, username, clé publique, date."""
     return {

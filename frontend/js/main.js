@@ -2,19 +2,21 @@
  * main.js — Bootstrap : câblage des vues, WebSocket temps réel, fallback
  * polling, dernière instance de coordination des modules.
  *
- * Déroulé (PLAN.md) :
+ * Déroulé :
  *   1. Vérification de `talk.private_key` → mode login (clé présente) ou
  *      inscription (clé absente).
  *   2. Après connexion : `/api/me` remplit la sidebar, WebSocket connecté.
  *   3. Sélection d'un salon → membres + historique + `subscribe` WS.
  *   4. Envoi : chiffrement AES-256-GCM côté client, POST, affichage local.
- *   5. Temps réel : `new_message` / `member_joined` / `room_key` via WS ;
- *      repli polling `?after=<id>` toutes les 3 s si le WS est coupé.
+ *   5. Temps réel : `new_message` (compteur de non-lus pour les salons non
+ *      ouverts), `presence`, `member_left`, `message_deleted`, `member_joined`,
+ *      `room_key` via WS ; repli polling `?after=<seq>` si le WS est coupé.
  */
 
 import * as auth from "./auth.js";
 import * as rooms from "./rooms.js";
 import * as chat from "./chat.js";
+import * as ui from "./ui.js";
 
 /** URI du WebSocket sur le même hôte (protocole ws/wss selon la page). */
 function wsUrl() {
@@ -34,20 +36,44 @@ let toastTimer = null;
 /** Passe à true après une authentification réussie (le WS exige une session). */
 let authenticated = false;
 
-/** Affiche une notification éphémère (texte pur, aucun HTML injecté). */
-function showToast(message) {
+/**
+ * Affiche une notification éphémère (texte pur, aucun HTML injecté).
+ * @param {string} message
+ * @param {"info"|"success"|"error"} [type]
+ */
+function showToast(message, type = "info") {
   const toastEl = document.getElementById("toast");
   toastEl.textContent = message;
+  toastEl.className = "toast toast--" + type;
   toastEl.hidden = false;
+
+  // Force un reflow pour redémarrer proprement la transition entrée/sortie.
+  void toastEl.offsetWidth;
+  toastEl.classList.add("toast--show");
+
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
-    toastEl.hidden = true;
-  }, 3500);
+    toastEl.classList.remove("toast--show");
+    // Laisse la transition de sortie se jouer avant de masquer le noeud.
+    setTimeout(() => {
+      toastEl.hidden = true;
+    }, 350);
+  }, 3800);
 }
 
 /* ---------------------------------------------------------------------------
    WebSocket
    ------------------------------------------------------------------------- */
+
+/** Vue du payload WS attendue (défensif) : `{room_id?...}` retourné en objet. */
+function wsPayload(event) {
+  try {
+    const data = JSON.parse(event.data);
+    return data && typeof data === "object" ? data : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Ouvre la connexion WebSocket (et la maintient si elle se ferme). */
 function connectWs() {
@@ -67,21 +93,31 @@ function connectWs() {
   };
 
   ws.onmessage = (event) => {
-    let data;
-    try {
-      data = JSON.parse(event.data);
-    } catch {
+    const frame = wsPayload(event);
+    if (!frame) {
       return; // trame corrompue : ignorée
     }
-    switch (data.type) {
+    const payload = frame.payload || {};
+    switch (frame.type) {
       case "new_message":
-        chat.handleNewMessage(data.payload);
+        // Non-lus pour les salons non ouverts, puis affichage si salon ouvert.
+        rooms.handleRoomMessageUnread(payload);
+        chat.handleNewMessage(payload);
+        break;
+      case "presence":
+        rooms.handlePresence(payload);
+        break;
+      case "member_left":
+        rooms.handleMemberLeft(payload);
+        break;
+      case "message_deleted":
+        chat.handleMessageDeleted(payload);
         break;
       case "member_joined":
-        rooms.handleMemberJoined(data.payload);
+        rooms.handleMemberJoined(payload);
         break;
       case "room_key":
-        rooms.handleRoomKey(data.payload);
+        rooms.handleRoomKey(payload);
         break;
       default:
         // Types inconnus : ignorés silencieusement.
@@ -168,8 +204,11 @@ function showAppView() {
   document.getElementById("view-app").hidden = false;
 
   const user = auth.getCurrentUser();
-  document.getElementById("user-username").textContent = user ? user.username : "";
-  document.getElementById("user-avatar").textContent = user ? user.username.charAt(0) : "?";
+  const username = user && user.username ? user.username : "";
+  const avatarEl = document.getElementById("user-avatar");
+  avatarEl.className = "avatar avatar--sm " + ui.avatarHueClass(username);
+  avatarEl.textContent = username ? username.charAt(0).toUpperCase() : "?";
+  document.getElementById("user-username").textContent = username;
 }
 
 /* ---------------------------------------------------------------------------
@@ -196,15 +235,21 @@ async function main() {
     return;
   }
 
+  // Interactions génériques : dropdowns, modales, confirmation, Échap.
+  ui.initInteractions();
+
   // Callbacks communs fournis aux modules.
-  const ui = {
+  const uiCallbacks = {
     onToast: showToast,
     onRoomOpened: (roomId) => {
       sendSubscribe();
       // Met à jour le nom du salon dans l'en-tête.
       const room = rooms.getRooms().find((r) => String(r.id) === String(roomId));
-      const nameEl = document.getElementById("room-name");
-      nameEl.textContent = room ? room.name : "Salon " + roomId;
+      document.getElementById("room-name").textContent = room ? room.name : "Salon " + roomId;
+    },
+    onRoomsChanged: () => {
+      // Après avoir quitté un salon : recentre l'abonnement WS.
+      sendSubscribe();
     },
   };
 
@@ -228,22 +273,31 @@ async function main() {
       } catch (error) {
         showToast(
           (error && error.message) || "Impossible de charger les salons.",
+          "error",
         );
       }
     },
+    onToast: showToast,
   });
 
-  rooms.initRooms(ui);
-  chat.initChat(ui);
+  rooms.initRooms(uiCallbacks);
+  chat.initChat(uiCallbacks);
 
   // Déconnexion (session détruite puis retour à l'écran d'authentification).
   document.getElementById("btn-logout").addEventListener("click", async () => {
-    if (!window.confirm("Se déconnecter de ce navigateur ?")) {
+    const ok = await ui.confirmDialog({
+      title: "Déconnexion",
+      message: "Se déconnecter de ce navigateur ?",
+      confirmLabel: "Se déconnecter",
+      danger: false,
+    });
+    if (!ok) {
       return;
     }
     authenticated = false;
     closeWs();
     stopPolling();
+    ui.closeAllModals();
     await auth.logout();
     // Recharge propre de l'application (état mémoire remis à zéro).
     window.location.reload();

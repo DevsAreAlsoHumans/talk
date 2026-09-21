@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
   <title>talk — messagerie chiffrée de bout en bout</title>
   <!-- Aucun lien externe : la CSP est posée par le backend (default-src 'self' ...). -->
   <link rel="stylesheet" href="css/style.css">
@@ -12,30 +13,30 @@
   <!-- ============================================================
        VUE AUTHENTIFICATION (connexion / inscription)
        ============================================================ -->
-  <div id="view-auth" class="view" hidden>
+  <div id="view-auth" class="view view--auth" hidden>
     <div class="auth-card">
       <div class="auth-logo">talk</div>
       <p class="auth-tagline">Messagerie chiffrée de bout en bout</p>
 
       <!-- Bloc « compte verrouillé » : clé privée absente ou compte différent -->
-      <div id="auth-locked" class="auth-locked" hidden></div>
+      <div id="auth-locked" class="auth-locked" role="alert" hidden></div>
 
-      <form id="auth-form" class="auth-form" autocomplete="on" hidden>
-        <h1 id="auth-title">Créer un compte</h1>
+      <form id="auth-form" class="auth-form" novalidate>
+        <h1 id="auth-title" class="auth-form-title">Créer un compte</h1>
 
-        <label for="auth-username">Pseudo</label>
+        <label class="field-label" for="auth-username">Pseudo</label>
         <input id="auth-username" name="username" type="text"
                minlength="3" maxlength="32" required autocomplete="username">
 
-        <label for="auth-password">Mot de passe</label>
+        <label class="field-label" for="auth-password">Mot de passe</label>
         <input id="auth-password" name="password" type="password"
                minlength="8" maxlength="128" required autocomplete="current-password">
 
-        <label id="auth-password2-label" for="auth-password2">Confirmation</label>
+        <label class="field-label" id="auth-password2-label" for="auth-password2">Confirmation</label>
         <input id="auth-password2" name="password2" type="password"
                minlength="8" maxlength="128" autocomplete="new-password">
 
-        <p id="auth-error" class="auth-error" hidden></p>
+        <p id="auth-error" class="form-error" role="alert" hidden></p>
 
         <button id="auth-submit" type="submit" class="btn btn-primary btn-block">Créer le compte</button>
       </form>
@@ -48,60 +49,124 @@
   </div>
 
   <!-- ============================================================
-       VUE PRINCIPALE (salons + fil + zone de saisie)
+       VUE PRINCIPALE (sidebar + salons + fil + panneau membres)
        ============================================================ -->
-  <div id="view-app" class="view app" hidden>
+  <div id="view-app" class="view view--app" hidden>
 
-    <!-- Barre latérale : utilisateur + liste des salons -->
+    <!-- Barre latérale : profil + actions + salons -->
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
-        <div class="sidebar-user">
-          <span id="user-avatar" class="avatar"></span>
-          <span id="user-username" class="username"></span>
+        <div class="sidebar-profile">
+          <span id="user-avatar" class="avatar avatar--sm"></span>
+          <span id="user-username" class="sidebar-username"></span>
         </div>
-        <button id="btn-logout" type="button" class="btn btn-ghost btn-sm" title="Se déconnecter">Déconnexion</button>
+        <div class="sidebar-header-actions">
+          <button id="btn-change-password" type="button" class="icon-btn"
+                  aria-label="Changer le mot de passe" title="Changer le mot de passe">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+            </svg>
+          </button>
+          <button id="btn-logout" type="button" class="icon-btn"
+                  aria-label="Se déconnecter" title="Se déconnecter">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="sidebar-actions">
-        <button id="btn-new-room" type="button" class="btn btn-outline btn-sm">+ Nouveau salon</button>
-        <button id="btn-join-room" type="button" class="btn btn-outline btn-sm">Rejoindre</button>
+        <button id="btn-new-room" type="button" class="btn btn-outline">Nouveau salon</button>
+        <button id="btn-join-room" type="button" class="btn btn-outline">Rejoindre</button>
       </div>
 
-      <nav class="room-list" id="room-list" aria-label="Liste des salons"></nav>
+      <div class="sidebar-section">
+        <h2 class="sidebar-section-title">Salons</h2>
+        <nav id="room-list" class="room-list" aria-label="Liste des salons"></nav>
+      </div>
     </aside>
 
     <!-- Colonne principale -->
     <main class="main">
       <header id="room-header" class="room-header" hidden>
-        <div class="room-header-info">
-          <h2 id="room-name">Salon</h2>
-          <span id="room-members-count" class="muted"></span>
+        <div class="room-header-main">
+          <span class="room-hash" aria-hidden="true">#</span>
+          <h2 id="room-name" class="room-header-name">Salon</h2>
+        </div>
+        <div class="room-header-sub">
+          <span id="room-members-count">0 membre</span>
+          <span id="room-id-badge" class="room-id-badge" hidden></span>
         </div>
         <div class="room-header-actions">
           <button id="btn-refresh-keys" type="button" class="btn btn-ghost btn-sm"
                   title="Ré-envelopper la clé de salon pour tous les membres actuels">
             Actualiser clés
           </button>
+          <button id="btn-copy-room-id" type="button" class="icon-btn"
+                  aria-label="Copier l'identifiant du salon" title="Copier l'identifiant du salon">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+          </button>
+          <button id="btn-room-menu" type="button" class="icon-btn" aria-label="Options du salon"
+                  title="Options du salon">
+            <svg class="icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+              <circle cx="12" cy="5" r="1.5"/>
+              <circle cx="12" cy="12" r="1.5"/>
+              <circle cx="12" cy="19" r="1.5"/>
+            </svg>
+          </button>
         </div>
       </header>
 
       <div class="main-body">
         <section class="chat-column">
+          <!-- État vide : aucun salon sélectionné -->
           <div id="empty-state" class="empty-state">
-            <p>Choisissez un salon à gauche, ou créez-en un.</p>
+            <svg class="icon empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+            </svg>
+            <p class="empty-state-title">Choisissez un salon à gauche, ou créez-en un.</p>
           </div>
-          <div id="messages" class="messages" aria-live="polite" hidden></div>
+
+          <!-- Fil de messages (le conteneur défile ; le bouton de pagination y est ancré) -->
+          <div id="messages" class="messages" aria-live="polite"></div>
+
+          <!-- Zone de saisie -->
           <form id="message-form" class="message-form" hidden>
-            <input id="message-input" type="text" maxlength="1000"
-                   placeholder="Écrire un message chiffré…" autocomplete="off" required>
-            <button id="btn-send" type="submit" class="btn btn-primary">Envoyer</button>
+            <div class="message-form-pill">
+              <label class="sr-only" for="message-input">Message</label>
+              <input id="message-input" type="text" maxlength="1000"
+                     placeholder="Écrire un message chiffré…" autocomplete="off" required>
+              <button id="btn-send" type="submit" class="icon-btn icon-btn--send" aria-label="Envoyer">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="22" y1="2" x2="11" y2="13"/>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+              </button>
+            </div>
           </form>
         </section>
 
-        <!-- Panneau des membres (à droite) -->
+        <!-- Panneau membres (à droite) -->
         <aside id="members-panel" class="members-panel" hidden>
-          <h3>Membres du salon</h3>
-          <ul id="members-list" class="members-list"></ul>
+          <div class="members-group">
+            <h3 id="members-online-title" class="members-section-title">En ligne — 0</h3>
+            <ul id="members-online" class="members-list"></ul>
+          </div>
+          <div class="members-group" id="members-offline-group">
+            <h3 id="members-offline-title" class="members-section-title">Hors ligne</h3>
+            <ul id="members-offline" class="members-list"></ul>
+          </div>
         </aside>
       </div>
     </main>
@@ -110,31 +175,76 @@
   <!-- ============================================================
        MODALE « NOUVEAU SALON »
        ============================================================ -->
-  <div id="modal-new-room" class="modal-backdrop" hidden>
-    <div class="modal">
-      <h3>Nouveau salon</h3>
-      <input id="new-room-name" type="text" maxlength="64"
-             placeholder="Nom du salon" autocomplete="off">
-      <p id="new-room-error" class="auth-error" hidden></p>
-      <div class="modal-actions">
-        <button id="btn-cancel-new-room" type="button" class="btn btn-ghost">Annuler</button>
-        <button id="btn-create-room" type="button" class="btn btn-primary">Créer</button>
-      </div>
+  <div id="modal-new-room" class="modal-backdrop" data-modal hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-new-room-title">
+      <h3 id="modal-new-room-title" class="modal-title">Nouveau salon</h3>
+      <form id="form-new-room" class="modal-form" novalidate>
+        <label class="field-label" for="new-room-name">Nom du salon</label>
+        <input id="new-room-name" type="text" maxlength="64" placeholder="Nom du salon" autocomplete="off">
+        <p id="new-room-error" class="form-error" role="alert" hidden></p>
+        <div class="modal-actions">
+          <button id="btn-cancel-new-room" type="button" class="btn btn-ghost">Annuler</button>
+          <button id="btn-create-room" type="submit" class="btn btn-primary">Créer</button>
+        </div>
+      </form>
     </div>
   </div>
 
   <!-- ============================================================
        MODALE « REJOINDRE UN SALON »
        ============================================================ -->
-  <div id="modal-join-room" class="modal-backdrop" hidden>
-    <div class="modal">
-      <h3>Rejoindre un salon</h3>
-      <input id="join-room-id" type="text" inputmode="numeric" maxlength="30"
-             placeholder="Identifiant du salon" autocomplete="off">
-      <p id="join-room-error" class="auth-error" hidden></p>
+  <div id="modal-join-room" class="modal-backdrop" data-modal hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-join-room-title">
+      <h3 id="modal-join-room-title" class="modal-title">Rejoindre un salon</h3>
+      <form id="form-join-room" class="modal-form" novalidate>
+        <label class="field-label" for="join-room-id">Identifiant du salon</label>
+        <input id="join-room-id" type="text" maxlength="32"
+               placeholder="Identifiant (32 caractères hexadécimaux)" autocomplete="off"
+               spellcheck="false" autocapitalize="off" autocorrect="off">
+        <p id="join-room-error" class="form-error" role="alert" hidden></p>
+        <div class="modal-actions">
+          <button id="btn-cancel-join-room" type="button" class="btn btn-ghost">Annuler</button>
+          <button id="btn-join-room-submit" type="submit" class="btn btn-primary">Rejoindre</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODALE « CHANGER LE MOT DE PASSE »
+       ============================================================ -->
+  <div id="modal-change-password" class="modal-backdrop" data-modal hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-change-password-title">
+      <h3 id="modal-change-password-title" class="modal-title">Changer le mot de passe</h3>
+      <form id="form-change-password" class="modal-form" novalidate>
+        <label class="field-label" for="cp-old">Ancien mot de passe</label>
+        <input id="cp-old" type="password" maxlength="128" autocomplete="current-password">
+
+        <label class="field-label" for="cp-new">Nouveau mot de passe</label>
+        <input id="cp-new" type="password" minlength="8" maxlength="128" autocomplete="new-password">
+
+        <label class="field-label" for="cp-confirm">Confirmation</label>
+        <input id="cp-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password">
+
+        <p id="cp-error" class="form-error" role="alert" hidden></p>
+        <div class="modal-actions">
+          <button id="btn-cancel-change-password" type="button" class="btn btn-ghost">Annuler</button>
+          <button id="btn-change-password-submit" type="submit" class="btn btn-primary">Changer le mot de passe</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       MODALE DE CONFIRMATION (quitter un salon / supprimer un message)
+       ============================================================ -->
+  <div id="modal-confirm" class="modal-backdrop" data-modal hidden>
+    <div class="modal modal--confirm" role="dialog" aria-modal="true" aria-labelledby="modal-confirm-title">
+      <h3 id="modal-confirm-title" class="modal-title">Confirmation</h3>
+      <p id="modal-confirm-message" class="modal-message"></p>
       <div class="modal-actions">
-        <button id="btn-cancel-join-room" type="button" class="btn btn-ghost">Annuler</button>
-        <button id="btn-join-room-submit" type="button" class="btn btn-primary">Rejoindre</button>
+        <button id="btn-cancel-confirm" type="button" class="btn btn-ghost">Annuler</button>
+        <button id="btn-confirm" type="button" class="btn btn-danger">Confirmer</button>
       </div>
     </div>
   </div>

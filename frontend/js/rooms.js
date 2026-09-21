@@ -1,6 +1,7 @@
 /**
- * rooms.js — Salons : sidebar, création, adhésion, membres et gestion de la
- * clé de salon (enveloppement / ré-enveloppement vers les membres).
+ * rooms.js — Salons : sidebar (badges de non-lus, menus contextuels), création,
+ * adhésion, quitter un salon, panneau membres avec présence en ligne et gestion
+ * de la clé de salon (enveloppement / ré-enveloppement vers les membres).
  *
  * Rappel du modèle E2E :
  *   - Création  : on génère la clé de salon (32 octets) et on en pose une copie
@@ -9,18 +10,31 @@
  *                 avec la clé publique du nouveau membre puis POST /keys.
  *   - Nouvel adhérent : ne détient rien à l'inscription ; il reçoit sa copie
  *                 enveloppée via l'événement WS `room_key` une fois qu'un membre
- *                 a POSTé la copie à son nom (auto-partage sur `member_joined`
- *                 ou bouton « Actualiser clés »).
+ *                 a POSTé la copie à son nom.
+ *
+ * Présence : choix de conception justifié — on **patche localement** (état
+ * mémoire + re-rendu du panneau) plutôt que de refetch les membres à chaque
+ * événement `presence`. Les événements portent l'état global d'un utilisateur
+ * (`user_id`, `online`) et arrivent sans `room_id` : recharger la liste complète
+ * (avec les blobs de clés publiques) à chaque bascule serait du gaspillage
+ * réseau inutile, et le patch est idempotent (aucune course possible avec des
+ * événements concurrents). Le fetch complet reste fait à l'ouverture du salon
+ * et lors des `member_joined`/`member_left`.
  */
 
 import { api } from "./api.js";
 import * as crypto from "./crypto.js";
 import { getCurrentUser } from "./auth.js";
 import * as chat from "./chat.js";
+import * as ui from "./ui.js";
+
+/** Titre de base (document.title), actualisé avec le total des non-lus. */
+const BASE_TITLE = "talk — messagerie chiffrée de bout en bout";
 
 /** Callbacks posés par main.js. */
 let onToast = () => {};
 let onRoomOpened = () => {};
+let onRoomsChanged = () => {};
 
 /** Salon actuellement sélectionné. */
 let currentRoom = null;
@@ -28,35 +42,38 @@ let currentRoom = null;
 /** Liste des salons de l'utilisateur (depuis /api/me). */
 let roomsList = [];
 
-/** Membres du salon courant : [{id, username, public_key}]. */
+/** Membres du salon courant : [{id, username, public_key, online}]. */
 let currentMembers = [];
 
+/** Non-lus par salon : roomId → nombre de messages reçus hors ouverture. */
+const unreadCounts = new Map();
+
 /**
- * Branche l'interface des salons (sidebar, modales, panneau membres).
- * @param {{onToast?: (message: string) => void,
- *          onRoomOpened?: (roomId: string|number) => void}} callbacks
+ * Branche l'interface des salons (sidebar, modales, panneau membres, menus).
+ * @param {{onToast?: (message: string, type?: string) => void,
+ *          onRoomOpened?: (roomId: string|number) => void,
+ *          onRoomsChanged?: () => void}} callbacks
  */
-export function initRooms({ onToast: toastCallback, onRoomOpened: openedCallback }) {
+export function initRooms({ onToast: toastCallback, onRoomOpened: openedCallback, onRoomsChanged: roomsChanged }) {
   onToast = toastCallback || onToast;
   onRoomOpened = openedCallback || onRoomOpened;
+  onRoomsChanged = roomsChanged || onRoomsChanged;
 
   // ---- Boutons de la sidebar ----
   document.getElementById("btn-new-room").addEventListener("click", () => {
-    openModal("modal-new-room", "new-room-name");
+    ui.openModal(document.getElementById("modal-new-room"), "#new-room-name");
   });
   document.getElementById("btn-join-room").addEventListener("click", () => {
-    openModal("modal-join-room", "join-room-id");
+    ui.openModal(document.getElementById("modal-join-room"), "#join-room-id");
   });
 
   // ---- Modale « nouveau salon » ----
-  document.getElementById("btn-cancel-new-room").addEventListener("click", () => {
-    closeModal("modal-new-room");
-  });
-  document.getElementById("btn-create-room").addEventListener("click", async () => {
+  document.getElementById("form-new-room").addEventListener("submit", async (event) => {
+    event.preventDefault();
     const input = document.getElementById("new-room-name");
     const name = input.value.trim();
     if (!name) {
-      showModalError("modal-new-room", "Donnez un nom au salon.");
+      showModalError("new-room-error", "Donnez un nom au salon.");
       return;
     }
     const createBtn = document.getElementById("btn-create-room");
@@ -64,24 +81,27 @@ export function initRooms({ onToast: toastCallback, onRoomOpened: openedCallback
     try {
       // createRoom ouvre déjà le salon (selectRoom → onRoomOpened).
       await createRoom(name);
-      closeModal("modal-new-room");
+      ui.closeModal(document.getElementById("modal-new-room"));
       input.value = "";
     } catch (error) {
-      showModalError("modal-new-room", error.message || "Création impossible.");
+      showModalError("new-room-error", error.message || "Création impossible.");
     } finally {
       createBtn.disabled = false;
     }
   });
+  document.getElementById("btn-cancel-new-room").addEventListener("click", () => {
+    ui.closeModal(document.getElementById("modal-new-room"));
+  });
 
   // ---- Modale « rejoindre un salon » ----
-  document.getElementById("btn-cancel-join-room").addEventListener("click", () => {
-    closeModal("modal-join-room");
-  });
-  document.getElementById("btn-join-room-submit").addEventListener("click", async () => {
+  document.getElementById("form-join-room").addEventListener("submit", async (event) => {
+    event.preventDefault();
     const input = document.getElementById("join-room-id");
-    const roomId = input.value.trim();
-    if (!/^\d+$/.test(roomId)) {
-      showModalError("modal-join-room", "L'identifiant du salon doit être un nombre.");
+    // Les identifiants de salon sont des uuid4.hex : 32 caractères hexadécimaux.
+    // On normalise en minuscules (uuid4.hex est minuscule — les clés Redis le sont).
+    const roomId = input.value.trim().toLowerCase();
+    if (!/^[0-9a-f]{32}$/i.test(roomId)) {
+      showModalError("join-room-error", "L'identifiant est invalide.");
       return;
     }
     const joinBtn = document.getElementById("btn-join-room-submit");
@@ -89,20 +109,55 @@ export function initRooms({ onToast: toastCallback, onRoomOpened: openedCallback
     try {
       // joinRoom ouvre déjà le salon (selectRoom → onRoomOpened).
       await joinRoom(roomId);
-      closeModal("modal-join-room");
+      ui.closeModal(document.getElementById("modal-join-room"));
       input.value = "";
     } catch (error) {
-      showModalError("modal-join-room", error.message || "Impossible de rejoindre.");
+      showModalError("join-room-error", error.message || "Impossible de rejoindre.");
     } finally {
       joinBtn.disabled = false;
     }
+  });
+  document.getElementById("btn-cancel-join-room").addEventListener("click", () => {
+    ui.closeModal(document.getElementById("modal-join-room"));
+  });
+
+  // ---- Copie de l'identifiant du salon courant (header) ----
+  document.getElementById("btn-copy-room-id").addEventListener("click", () => {
+    requestCopyRoomId();
   });
 
   // ---- Panneau membres / bouton « Actualiser clés » ----
   document.getElementById("btn-refresh-keys").addEventListener("click", () => {
     refreshCurrentRoomKeys();
   });
+
+  // ---- Menu "..." de l'en-tête de salon : quitter le salon ----
+  document.getElementById("btn-room-menu").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (!currentRoom) {
+      return;
+    }
+    const room = currentRoom;
+    ui.openMenu(event.currentTarget, [
+      {
+        label: "Quitter le salon",
+        danger: true,
+        onClick: () => requestLeaveRoom(room),
+      },
+    ]);
+  });
 }
+
+/** Affiche une erreur dans une modale (élément role="alert"). */
+function showModalError(errorElementId, message) {
+  const errorEl = document.getElementById(errorElementId);
+  errorEl.textContent = message;
+  errorEl.hidden = false;
+}
+
+/* ============================================================
+   Listing & sidebar
+   ============================================================ */
 
 /** Charge /api/me et construit la sidebar. @returns {Promise<Array>} salons. */
 export async function loadRooms() {
@@ -125,6 +180,161 @@ export function getRooms() {
 /** @returns {Array} membres du salon courant. */
 export function getCurrentMembers() {
   return currentMembers;
+}
+
+/** Construit la sidebar (salons, badge de non-lus, menu "..." au survol). */
+function renderSidebar() {
+  const listEl = document.getElementById("room-list");
+  listEl.textContent = "";
+
+  for (const room of roomsList) {
+    const item = document.createElement("div");
+    item.className =
+      "room-item" +
+      (currentRoom && String(currentRoom.id) === String(room.id) ? " room-item--active" : "");
+    item.dataset.roomId = String(room.id);
+    item.setAttribute("role", "button");
+    item.tabIndex = 0;
+
+    const icon = document.createElement("span");
+    icon.className = "room-icon";
+    icon.textContent = "#";
+    item.appendChild(icon);
+
+    const name = document.createElement("span");
+    name.className = "room-name";
+    name.textContent = room.name;
+    item.appendChild(name);
+
+    // Badge de messages non lus (pill accent ; masqué si nul).
+    const count = unreadCounts.get(String(room.id)) || 0;
+    const badge = document.createElement("span");
+    badge.className = "room-badge";
+    badge.hidden = count <= 0;
+    if (count > 0) {
+      badge.textContent = formatUnread(count);
+    }
+    item.appendChild(badge);
+
+    // Menu contextuel "..." (visible au survol) → « Quitter le salon ».
+    const menuBtn = document.createElement("button");
+    menuBtn.type = "button";
+    menuBtn.className = "icon-btn room-menu-btn";
+    menuBtn.setAttribute("aria-label", "Options du salon " + room.name);
+    menuBtn.appendChild(ui.icon("dots"));
+    menuBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      ui.openMenu(menuBtn, [
+        {
+          label: "Quitter le salon",
+          danger: true,
+          onClick: () => requestLeaveRoom(room),
+        },
+      ]);
+    });
+    item.appendChild(menuBtn);
+
+    item.addEventListener("click", () => {
+      selectRoom(room.id);
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectRoom(room.id);
+      }
+    });
+
+    listEl.appendChild(item);
+  }
+}
+
+/** Formate un compteur de non-lus (plafonné à 99+ pour la lisibilité). */
+function formatUnread(count) {
+  return count > 99 ? "99+" : String(count);
+}
+
+/** Retourne l'élément `.room-item` d'un salon (ou null). */
+function roomItemEl(roomId) {
+  const key = String(roomId);
+  return document.querySelector(`.room-item[data-room-id=${CSS.escape(key)}]`);
+}
+
+/* ============================================================
+   Non-lus : comptage, badge, titre d'onglet
+   ============================================================ */
+
+/**
+ * Réception d'un `new_message` (main.js). Si le salon n'est pas celui qui est
+ * ouvert : incrément du badge + du total d'onglet. Ouverture → reset (selectRoom).
+ */
+export function handleRoomMessageUnread(payload) {
+  const roomId = payload && (payload.room_id != null ? payload.room_id : payload.roomId);
+  if (roomId == null) {
+    return;
+  }
+  const key = String(roomId);
+
+  // Salon ouvert dans cet onglet : pas de non-lu.
+  if (currentRoom && String(currentRoom.id) === key) {
+    return;
+  }
+
+  // Salon inconnu de la sidebar (rejoint depuis un autre onglet) : on rafraîchit
+  // /api/me puis on applique le compteur.
+  if (!roomsList.some((r) => String(r.id) === key)) {
+    loadRooms()
+      .then(() => {
+        if (roomsList.some((r) => String(r.id) === key)) {
+          bumpUnread(key);
+        }
+      })
+      .catch(() => {});
+    return;
+  }
+
+  bumpUnread(key);
+}
+
+/** Incrémente le compteur d'un salon et met à jour badge + titre. */
+function bumpUnread(roomKey) {
+  unreadCounts.set(roomKey, (unreadCounts.get(roomKey) || 0) + 1);
+  updateBadge(roomKey);
+  updateTitle();
+}
+
+/** Remet à zéro les non-lus d'un salon (appelé à son ouverture). */
+export function resetUnread(roomId) {
+  const key = String(roomId);
+  unreadCounts.delete(key);
+  updateBadge(key);
+  updateTitle();
+}
+
+/** Met à jour le badge d'un salon sans reconstruire toute la sidebar. */
+function updateBadge(roomKey) {
+  const item = roomItemEl(roomKey);
+  if (!item) {
+    renderSidebar();
+    return;
+  }
+  const badge = item.querySelector(".room-badge");
+  if (!badge) {
+    return;
+  }
+  const count = unreadCounts.get(roomKey) || 0;
+  badge.hidden = count <= 0;
+  if (count > 0) {
+    badge.textContent = formatUnread(count);
+  }
+}
+
+/** Total des non-lus dans `document.title` (optionnel mais propre). */
+function updateTitle() {
+  let total = 0;
+  for (const count of unreadCounts.values()) {
+    total += count;
+  }
+  document.title = total > 0 ? `(${total}) ${BASE_TITLE}` : BASE_TITLE;
 }
 
 /* ============================================================
@@ -163,8 +373,7 @@ async function createRoom(name) {
 
 /**
  * Rejoint un salon. L'utilisateur ne détient pas (encore) la clé : un membre
- * présent la partagera à son nom (WS `member_joined` → auto-wrap, ou bouton
- * « Actualiser clés »), et la copie arrivera via l'événement WS `room_key`.
+ * présent la partagera à son nom, et la copie arrivera via `room_key`.
  */
 async function joinRoom(roomId) {
   await api(`/api/rooms/${roomId}/join`, { method: "POST" });
@@ -179,7 +388,7 @@ async function joinRoom(roomId) {
    Sélection de salon
    ============================================================ */
 
-/** Ouvre un salon : charge membres + historique, met à jour l'UI. */
+/** Ouvre un salon : charge membres + historique, remet à zéro les non-lus. */
 export async function selectRoom(roomId) {
   const room = roomsList.find((r) => String(r.id) === String(roomId));
   if (!room && currentRoom && String(currentRoom.id) === String(roomId)) {
@@ -201,6 +410,7 @@ export async function selectRoom(roomId) {
   // Ouvre le fil de discussion (chargement + déchiffrement de l'historique).
   await chat.openRoom(currentRoom.id, currentMembers);
 
+  resetUnread(roomId);
   showRoomUI();
   onRoomOpened(currentRoom.id);
   return currentRoom;
@@ -213,6 +423,7 @@ function showRoomUI() {
   document.getElementById("messages").hidden = false;
   document.getElementById("message-form").hidden = false;
   document.getElementById("members-panel").hidden = false;
+  updateRoomIdBadge();
 }
 
 /** Masque les panneaux du salon (aucun salon sélectionné). */
@@ -222,13 +433,157 @@ export function hideRoomUI() {
   document.getElementById("messages").hidden = true;
   document.getElementById("message-form").hidden = true;
   document.getElementById("members-panel").hidden = true;
+  const idBadge = document.getElementById("room-id-badge");
+  if (idBadge) {
+    idBadge.hidden = true;
+  }
 }
 
 /* ============================================================
-   Membres
+   Partage : copie de l'identifiant du salon courant
    ============================================================ */
 
-/** Récupère et affiche les membres du salon courant. */
+/**
+ * Copie l'identifiant du salon courant dans le presse-papier puis notifie.
+ * Le clic déclenche l'action (le presse-papier exige un geste utilisateur).
+ */
+function requestCopyRoomId() {
+  if (!currentRoom || currentRoom.id == null) {
+    onToast("Aucun salon sélectionné.", "info");
+    return;
+  }
+  const id = String(currentRoom.id);
+  copyTextToClipboard(id)
+    .then(() => {
+      onToast("Identifiant copié.", "success");
+    })
+    .catch(() => {
+      onToast("Copie impossible sur ce navigateur.", "error");
+    });
+}
+
+/**
+ * Copie du texte dans le presse-papier.
+ * - API moderne `navigator.clipboard.writeText` (contexte sécurisé) ;
+ * - repli `document.execCommand("copy")` sur un `<textarea>` hors écran
+ *   (classe `.clipboard-helper`, aucun style inline — CSP respectée).
+ * @param {string} text
+ * @returns {Promise<void>} résolue une fois le texte copié.
+ */
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // repli ci-dessous
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "clipboard-helper";
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  textarea.remove();
+
+  if (!ok) {
+    throw new Error("Presse-papier indisponible.");
+  }
+}
+
+/**
+ * Abrège un identifiant hexadécimal de 32 caractères pour l'étiquette du
+ * header (« 9f2c…0b1a ») ; valeur inattendue → affichage complet.
+ * @param {string} id
+ * @returns {string}
+ */
+function abbreviateRoomId(id) {
+  const text = String(id);
+  return /^[0-9a-f]{32}$/i.test(text) ? text.slice(0, 4) + "…" + text.slice(-4) : text;
+}
+
+/** Met à jour l'étiquette discrète « ID: … » du header du salon courant. */
+function updateRoomIdBadge() {
+  const badge = document.getElementById("room-id-badge");
+  if (!badge) {
+    return;
+  }
+  if (!currentRoom || currentRoom.id == null) {
+    badge.hidden = true;
+    return;
+  }
+  const id = String(currentRoom.id);
+  badge.textContent = "ID: " + abbreviateRoomId(id);
+  badge.title = id; // identifiant complet au survol
+  badge.hidden = false;
+}
+
+/* ============================================================
+   Quitter un salon
+   ============================================================ */
+
+/** Demande de confirmation puis quitte (menu sidebar ou en-tête). */
+async function requestLeaveRoom(room) {
+  const ok = await ui.confirmDialog({
+    title: "Quitter le salon",
+    message: `Quitter le salon « ${room.name} » ? Vous pourrez le rejoindre plus tard s'il existe encore.`,
+    confirmLabel: "Quitter",
+    danger: true,
+  });
+  if (!ok) {
+    return;
+  }
+  try {
+    await leaveRoom(room.id);
+  } catch (error) {
+    onToast(error.message || "Impossible de quitter le salon.", "error");
+  }
+}
+
+/**
+ * Quitte un salon : POST /api/rooms/{id}/leave → 204, puis retrait local
+ * (sidebar, clé de salon locale, non-lus) et état vide si le salon est ouvert.
+ */
+export async function leaveRoom(roomId) {
+  const room = roomsList.find((r) => String(r.id) === String(roomId));
+  await api(`/api/rooms/${roomId}/leave`, { method: "POST" });
+
+  // Hygiène locale : la copie de clé enveloppée est purgée côté serveur,
+  // on oublie aussi la clé de salon de ce navigateur.
+  crypto.removeRoomKey(roomId);
+  unreadCounts.delete(String(roomId));
+
+  const wasCurrent = currentRoom && String(currentRoom.id) === String(roomId);
+  roomsList = roomsList.filter((r) => String(r.id) !== String(roomId));
+
+  if (wasCurrent) {
+    currentRoom = null;
+    currentMembers = [];
+    chat.closeRoom();
+    hideRoomUI();
+  }
+
+  renderSidebar();
+  updateTitle();
+  onRoomsChanged();
+  onToast(`Vous avez quitté « ${room ? room.name : roomId} ».`, "success");
+}
+
+/* ============================================================
+   Membres & présence
+   ============================================================ */
+
+/** Récupère et affiche les membres du salon courant (fetch complet). */
 export async function refreshMembers() {
   if (!currentRoom) {
     return;
@@ -238,22 +593,65 @@ export async function refreshMembers() {
   renderMembers();
 }
 
-/** Rend la liste des membres (avec la clé publique, utile au wrapping). */
+/**
+ * Rend le panneau membres : deux sections « En ligne — N » puis « Hors ligne »,
+ * tri alphabétique à l'intérieur de chaque section, en ligne d'abord.
+ * Met aussi à jour l'en-tête : « N membres — M en ligne ».
+ */
 function renderMembers() {
   const me = getCurrentUser();
-  const listEl = document.getElementById("members-list");
+  const online = [];
+  const offline = [];
+  for (const member of currentMembers) {
+    (member.online ? online : offline).push(member);
+  }
+  const byName = (a, b) => String(a.username).localeCompare(String(b.username), "fr");
+  online.sort(byName);
+  offline.sort(byName);
+
+  document.getElementById("members-online-title").textContent =
+    `En ligne — ${online.length}`;
+  document.getElementById("members-offline-title").textContent = "Hors ligne";
+
+  // Groupe hors ligne masqué quand vide.
+  const offlineGroup = document.getElementById("members-offline-group");
+  offlineGroup.hidden = offline.length === 0;
+
+  renderMemberList("members-online", online, me);
+  renderMemberList("members-offline", offline, me);
+
+  const total = currentMembers.length;
+  const countEl = document.getElementById("room-members-count");
+  countEl.textContent =
+    `${total} membre${total > 1 ? "s" : ""} — ${online.length} en ligne`;
+}
+
+/** Remplit une `<ul>` de membres (avatar + pastille de présence + nom). */
+function renderMemberList(listId, members, me) {
+  const listEl = document.getElementById(listId);
   listEl.textContent = "";
 
-  currentMembers.forEach((member) => {
+  for (const member of members) {
     const item = document.createElement("li");
     item.className = "member-item";
 
+    const avatarWrap = document.createElement("span");
+    avatarWrap.className = "member-avatar-wrap";
+
     const avatar = document.createElement("span");
-    avatar.className = "avatar " + avatarHueClass(member.username || "?");
-    avatar.textContent = (member.username || "?").charAt(0);
-    item.appendChild(avatar);
+    avatar.className = "avatar avatar--member " + ui.avatarHueClass(member.username || "?");
+    avatar.textContent = (member.username || "?").charAt(0).toUpperCase();
+    avatarWrap.appendChild(avatar);
+
+    const dot = document.createElement("span");
+    dot.className = "presence-dot " + (member.online ? "presence-dot--online" : "presence-dot--offline");
+    dot.setAttribute("aria-hidden", "true");
+    avatarWrap.appendChild(dot);
+
+    item.appendChild(avatarWrap);
 
     const name = document.createElement("span");
+    name.className = "member-name";
     name.textContent = member.username || "Inconnu";
     item.appendChild(name);
 
@@ -265,11 +663,71 @@ function renderMembers() {
     }
 
     listEl.appendChild(item);
-  });
+  }
+}
 
-  const countEl = document.getElementById("room-members-count");
-  const count = currentMembers.length;
-  countEl.textContent = count + " membre" + (count > 1 ? "s" : "");
+/**
+ * Événement WS `presence` : patch ciblé de l'état local du membre (idempotent),
+ * puis re-rendu du panneau — sans refetch réseau (justifié en tête de module).
+ */
+export function handlePresence(payload) {
+  const userId = payload && (payload.user_id != null ? payload.user_id : payload.userId);
+  if (userId == null) {
+    return;
+  }
+  const target = currentMembers.find((m) => String(m.id) === String(userId));
+  if (!target) {
+    return; // membre d'un autre salon que celui affiché
+  }
+  const online = Boolean(payload.online);
+  if (target.online === online) {
+    return; // événement dupliqué (un par salon partagé) : rien à faire
+  }
+  target.online = online;
+  renderMembers();
+}
+
+/**
+ * Événement WS `member_left` : retrait du membre du panneau + compteurs.
+ * Si le membre qui part est nous-même (autre onglet), on recharge la sidebar.
+ */
+export async function handleMemberLeft(payload) {
+  const roomId = payload && (payload.room_id != null ? payload.room_id : payload.roomId);
+  const member = payload && payload.member;
+  if (roomId == null || !member || member.id == null) {
+    return;
+  }
+
+  const me = getCurrentUser();
+
+  // Membre du salon actuellement ouvert : suppression ciblée, sans refetch.
+  if (currentRoom && String(currentRoom.id) === String(roomId)) {
+    const before = currentMembers.length;
+    currentMembers = currentMembers.filter((m) => String(m.id) !== String(member.id));
+    if (currentMembers.length !== before) {
+      renderMembers();
+    }
+  }
+
+  // Nous-même (autre onglet) : /api/me peut avoir changé (salon supprimé…).
+  if (me && String(member.id) === String(me.id)) {
+    try {
+      await loadRooms();
+    } catch {
+      // affichage non critique
+    }
+  }
+
+  // Le salon ouvert n'existe plus côté utilisateur → retour à l'état vide.
+  if (currentRoom && !roomsList.some((r) => String(r.id) === String(currentRoom.id))) {
+    currentRoom = null;
+    currentMembers = [];
+    chat.closeRoom();
+    hideRoomUI();
+    renderSidebar();
+    updateTitle();
+    onRoomsChanged();
+  }
 }
 
 /* ============================================================
@@ -297,8 +755,8 @@ export async function handleMemberJoined(payload) {
   }
 
   // Partager la clé si on la possède.
-  const isOwnRoomKey = crypto.getRoomKeyRaw(roomId);
-  if (!isOwnRoomKey) {
+  const rawKey = crypto.getRoomKeyRaw(roomId);
+  if (!rawKey) {
     return;
   }
 
@@ -308,8 +766,6 @@ export async function handleMemberJoined(payload) {
   const publicKeyB64 = sharedMember.public_key || member.public_key;
 
   if (!publicKeyB64) {
-    // Si le salon est ouvert, on prévient l'utilisateur ; sinon le silence est
-    // préférable (l'auto-partage se fera via un autre membre / « Actualiser clés »).
     const isCurrentRoom = currentRoom && String(currentRoom.id) === String(roomId);
     if (isCurrentRoom) {
       onToast(
@@ -322,16 +778,15 @@ export async function handleMemberJoined(payload) {
 
   try {
     await wrapAndPostKey(roomId, member.id, publicKeyB64);
-    onToast("Clé de salon partagée avec « " + (member.username || "membre") + " ».");
+    onToast("Clé de salon partagée avec « " + (member.username || "membre") + " ».", "success");
   } catch (error) {
-    onToast("Partage de clé impossible : " + (error.message || "erreur"));
+    onToast("Partage de clé impossible : " + (error.message || "erreur"), "error");
   }
 }
 
 /**
  * Événement WS `room_key` : une copie enveloppée de la clé de salon nous est
- * destinée (je viens de rejoindre, ou un membre a ré-enveloppé). On la
- * déchiffre avec notre clé privée et on recharge l'historique si besoin.
+ * destinée. On la déchiffre avec notre clé privée et on recharge l'historique.
  */
 export async function handleRoomKey(payload) {
   const roomId = payload.room_id != null ? payload.room_id : payload.roomId;
@@ -353,9 +808,12 @@ export async function handleRoomKey(payload) {
   try {
     const { key, raw } = await crypto.unwrapRoomKeyFor(wrapped, privateKey);
     crypto.storeRoomKey(roomId, { key, raw });
-    onToast("Clé de salon reçue : les messages sont maintenant déchiffrables.");
+    onToast("Clé de salon reçue : les messages sont maintenant déchiffrables.", "success");
   } catch (error) {
-    onToast("Échec du déchiffrement de la clé de salon : " + (error.message || "erreur"));
+    onToast(
+      "Échec du déchiffrement de la clé de salon : " + (error.message || "erreur"),
+      "error",
+    );
     return;
   }
 
@@ -371,8 +829,7 @@ export async function handleRoomKey(payload) {
 
 /**
  * Ré-enveloppe la clé de salon pour TOUS les membres actuels.
- * Utile si un auto-partage (`member_joined`) a échoué ou l'a été hors-ligne :
- * chaque membre recevra (ou récupérera) sa copie enveloppée via `room_key`.
+ * Chaque membre recevra sa copie enveloppée via `room_key`.
  */
 export async function refreshCurrentRoomKeys() {
   if (!currentRoom) {
@@ -402,6 +859,7 @@ export async function refreshCurrentRoomKeys() {
   }
   onToast(
     "Clé de salon ré-enveloppée pour " + shared + " membre(s) sur " + currentMembers.length + ".",
+    "success",
   );
 }
 
@@ -413,81 +871,4 @@ async function wrapAndPostKey(roomId, targetUserId, publicKeyBase64) {
     method: "POST",
     body: { target_user_id: targetUserId, wrapped_key: wrapped },
   });
-}
-
-/* ============================================================
-   Helpers d'interface
-   ============================================================ */
-
-/** Construit la sidebar (liste des salons + actif surligné). */
-function renderSidebar() {
-  const listEl = document.getElementById("room-list");
-  listEl.textContent = "";
-
-  roomsList.forEach((room) => {
-    const item = document.createElement("div");
-    item.className = "room-item" + (currentRoom && String(currentRoom.id) === String(room.id) ? " active" : "");
-
-    const icon = document.createElement("span");
-    icon.className = "room-icon";
-    icon.textContent = "#";
-    item.appendChild(icon);
-
-    const name = document.createElement("span");
-    name.className = "room-name";
-    name.textContent = room.name;
-    item.appendChild(name);
-
-    item.setAttribute("role", "button");
-    item.tabIndex = 0;
-    item.addEventListener("click", () => {
-      selectRoom(room.id);
-    });
-    item.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        selectRoom(room.id);
-      }
-    });
-
-    listEl.appendChild(item);
-  });
-}
-
-/** Ouvre une modale et donne le focus au champ. */
-function openModal(modalId, inputId) {
-  document.getElementById(modalId).hidden = false;
-  const input = document.getElementById(inputId);
-  input.value = "";
-  input.focus();
-  return input;
-}
-
-/** Ferme une modale et efface son erreur éventuelle. */
-function closeModal(modalId) {
-  document.getElementById(modalId).hidden = true;
-  const errorEl = document.querySelector("#" + modalId + " .auth-error");
-  if (errorEl) {
-    errorEl.hidden = true;
-    errorEl.textContent = "";
-  }
-}
-
-/** Affiche une erreur dans une modale. */
-function showModalError(modalId, message) {
-  const errorEl = document.querySelector("#" + modalId + " .auth-error");
-  errorEl.textContent = message;
-  errorEl.hidden = false;
-}
-
-/**
- * Classe CSS d'avatar déterministe par pseudo (6 teintes prédéfinies,
- * aucune couleur inline — compatible avec `style-src 'self'`).
- */
-function avatarHueClass(username) {
-  let hash = 0;
-  for (let i = 0; i < username.length; i += 1) {
-    hash = (hash * 31 + username.charCodeAt(i)) >>> 0;
-  }
-  return "avatar-hue-" + (hash % 6);
 }

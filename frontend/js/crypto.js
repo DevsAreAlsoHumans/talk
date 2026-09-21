@@ -282,6 +282,11 @@ export function getRoomKeyRaw(roomId) {
   return entry ? entry.raw : null;
 }
 
+/** Oublie la clé de salon d'un salon précis (après avoir quitté le salon). */
+export function removeRoomKey(roomId) {
+  roomKeys.delete(String(roomId));
+}
+
 /**
  * Enveloppe la clé de salon brute avec la clé publique RSA d'un membre.
  * @returns {Promise<string>} copie enveloppée en base64.

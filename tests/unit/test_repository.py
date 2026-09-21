@@ -79,7 +79,7 @@ def test_room_list_members_public_and_sorted(redis) -> None:
 
     members = rooms.list_members(redis, room["id"])
     assert [m["username"] for m in members] == ["alice", "bob"]
-    assert set(members[0]) == {"id", "username", "public_key"}
+    assert set(members[0]) == {"id", "username", "public_key", "online"}
     assert "password_hash" not in members[0]
 
 

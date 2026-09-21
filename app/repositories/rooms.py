@@ -21,6 +21,8 @@ MEMBERS_SUFFIX = ":members"
 KEYS_SUFFIX = ":keys"
 USER_ROOMS_PREFIX = "user:"
 USER_ROOMS_SUFFIX = ":rooms"
+#: Préfixe des compteurs de présence Redis (``presence:count:{user_id}``).
+PRESENCE_COUNT_PREFIX = "presence:count:"
 
 
 def _room_key(room_id: str) -> str:
@@ -102,8 +104,13 @@ def get_member_ids(redis: Redis, room_id: str) -> list[str]:
     return list(redis.smembers(_members_key(room_id)))
 
 
+def _is_online(redis: Redis, user_id: str) -> bool:
+    """Un utilisateur est-il en ligne (au moins un onglet WebSocket connecté) ?"""
+    return int(redis.get(PRESENCE_COUNT_PREFIX + user_id) or 0) > 0
+
+
 def list_members(redis: Redis, room_id: str) -> list[dict]:
-    """Membres du salon sous forme publique ``{id, username, public_key}``."""
+    """Membres du salon sous forme publique ``{id, username, public_key, online}``."""
     members = []
     for user_id in get_member_ids(redis, room_id):
         user = users.get_by_id(redis, user_id)
@@ -113,6 +120,7 @@ def list_members(redis: Redis, room_id: str) -> list[dict]:
                     "id": user["id"],
                     "username": user["username"],
                     "public_key": user["public_key"],
+                    "online": _is_online(redis, user_id),
                 }
             )
     members.sort(key=lambda m: m["username"])
@@ -127,3 +135,39 @@ def store_wrapped_key(redis: Redis, room_id: str, target_user_id: str, wrapped_k
 def list_wrapped_keys(redis: Redis, room_id: str) -> dict[str, str]:
     """Renvoie ``{target_user_id: wrapped_key}`` pour le salon."""
     return redis.hgetall(_keys_key(room_id))
+
+
+def remove_wrapped_key(redis: Redis, room_id: str, user_id: str) -> None:
+    """Retire la copie de la clé de salon enveloppée d'un membre (leave)."""
+    redis.hdel(_keys_key(room_id), user_id)
+
+
+def delete_room(redis: Redis, room_id: str) -> None:
+    """Supprime complètement un salon et ses messages (dernier membre parti).
+
+    Efface les clés Redis ``room:{id}``, ``room:{id}:members``,
+    ``room:{id}:keys``, ``room:{id}:messages``, ``room:{id}:seq`` ainsi que
+    chaque hash ``message:{id}`` encore référencé dans le feed du salon.
+    """
+    message_ids = redis.zrange(_feed_key(room_id), 0, -1)
+    pipe = redis.pipeline()
+    pipe.delete(_room_key(room_id))
+    pipe.delete(_members_key(room_id))
+    pipe.delete(_keys_key(room_id))
+    pipe.delete(_feed_key(room_id))
+    pipe.delete(_seq_key(room_id))
+    for message_id in message_ids:
+        pipe.delete(_message_key(message_id))
+    pipe.execute()
+
+
+def _feed_key(room_id: str) -> str:
+    return f"{ROOM_PREFIX}{room_id}:messages"
+
+
+def _seq_key(room_id: str) -> str:
+    return f"{ROOM_PREFIX}{room_id}:seq"
+
+
+def _message_key(message_id: str) -> str:
+    return f"message:{message_id}"

@@ -1,4 +1,4 @@
-"""Salons : listing, création, membres, join, clés de salon enveloppées.
+"""Salons : listing, création, membres, join, leave, clés de salon enveloppées.
 
 Contrôles d'accès : 404 si le salon n'existe pas, 403 si l'appelant n'en est
 pas membre (sauf join).
@@ -6,7 +6,7 @@ pas membre (sauf join).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from redis import Redis
 
 from app.api.deps import get_current_user, get_room_or_404, require_member
@@ -72,6 +72,44 @@ def join_room(
         },
     )
     return room
+
+
+@router.post("/{room_id}/leave", status_code=204)
+def leave_room(
+    room_id: str,
+    response: Response,
+    background: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+    hub: InProcessHub = Depends(get_hub),
+) -> Response:
+    """Quitte un salon : retrait du membre, de sa clé et de ses abonnements WS.
+
+    Le dernier membre qui part entraîne la suppression complète du salon et
+    des messages. Sinon, un événement ``member_left`` est diffusé aux abonnés
+    restants.
+    """
+    get_room_or_404(redis, room_id)
+    require_member(redis, room_id, user["id"])
+    rooms.remove_member(redis, room_id, user["id"])
+    rooms.remove_wrapped_key(redis, room_id, user["id"])
+    hub.unsubscribe_user_room(user["id"], room_id)
+    if not rooms.get_member_ids(redis, room_id):
+        rooms.delete_room(redis, room_id)
+    else:
+        background.add_task(
+            hub.publish,
+            room_id,
+            {
+                "type": "member_left",
+                "payload": {
+                    "room_id": room_id,
+                    "member": {"id": user["id"], "username": user["username"]},
+                },
+            },
+        )
+    response.status_code = 204
+    return response
 
 
 @router.post("/{room_id}/keys", status_code=201)

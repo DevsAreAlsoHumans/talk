@@ -25,11 +25,12 @@ class Room(BaseModel):
 
 
 class MemberPublic(BaseModel):
-    """Membre d'un salon : identité + clé publique (jamais de hash)."""
+    """Membre d'un salon : identité, clé publique (jamais de hash) et présence."""
 
     id: str
     username: str
     public_key: str
+    online: bool = False
 
 
 class KeyWrapRequest(BaseModel):
