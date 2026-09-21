@@ -186,6 +186,18 @@ button.link:hover {
   border-bottom-color: var(--sceau);
 }
 
+.rail-tabs {
+  justify-content: flex-start;
+  gap: 1rem;
+  margin: 0.5rem 0 0;
+  border-bottom: 0;
+}
+
+.rail-tabs button {
+  font-size: 0.9rem;
+  padding: 0.35rem 0;
+}
+
 #auth-form label {
   display: block;
   margin: 1rem 0 0.3rem;
@@ -800,6 +812,115 @@ button.danger:hover {
 
 .narrow-only {
   display: none;
+}
+
+/* ---------- Navigation : salons, conversations, amis ---------- */
+
+.rail-section {
+  padding: 0.8rem 0.8rem 0.5rem;
+  border-top: 1px solid var(--acier);
+}
+
+.rail-section:first-child {
+  border-top: 0;
+}
+
+.rail-title {
+  margin: 0 0 0.4rem;
+  font: 600 0.95rem var(--serif);
+}
+
+.rail-subtitle {
+  margin: 0.8rem 0 0.2rem;
+  font: 600 0.82rem var(--sans);
+  color: var(--brume);
+}
+
+.rail-section .inline-form {
+  border-top: 0;
+  margin-top: 0.5rem;
+  padding: 0;
+}
+
+/* Une conversation directe n'a pas de panneau « Membres » : la colonne disparaît. */
+.app.thread-dm {
+  grid-template-columns: 16.5rem minmax(0, 1fr);
+}
+
+.app.thread-dm .members {
+  display: none;
+}
+
+#friend-list li,
+#friend-requests li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.1rem;
+}
+
+button.friend {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0.2rem 0.3rem;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.friend:hover {
+  background: var(--acier);
+}
+
+button.friend .member-id {
+  flex: 1;
+}
+
+.remove-item {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+}
+
+.friend-request .member-name {
+  min-width: 0;
+}
+
+.friend-request .member-id {
+  flex: 1;
+}
+
+.friend-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.friend-actions .primary {
+  padding: 0.3rem 0.7rem;
+}
+
+.role-field {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--brume);
+}
+
+.role {
+  background: var(--graphite);
+  border: 1px solid var(--acier-clair);
+  color: var(--craie);
+  border-radius: var(--radius);
+  padding: 0.2rem 0.4rem;
 }
 
 /* ---------- Petits écrans : salons et membres deviennent des panneaux ---------- */

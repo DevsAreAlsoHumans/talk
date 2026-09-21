@@ -55,7 +55,7 @@ async def send_message(
         raise HTTPException(status_code=409, detail="IV déjà utilisé dans ce salon")
 
     message = await messages.append(
-        room_id=str(room_id),
+        thread_id=str(room_id),
         sender_id=auth.user["id"],
         sender_username=auth.user["username"],
         iv=body.iv,

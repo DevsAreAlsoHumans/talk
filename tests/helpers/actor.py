@@ -21,6 +21,7 @@ class Actor:
         self.csrf_token = ""
         self.user_id = ""
         self.room_keys: dict[str, bytes] = {}
+        self.conv_keys: dict[str, bytes] = {}
 
     # ---- HTTP ----
 
@@ -60,6 +61,9 @@ class Actor:
 
     def put(self, path: str, json=None, **kwargs):
         return self.request("PUT", path, json=json, **kwargs)
+
+    def delete(self, path: str, **kwargs):
+        return self.request("DELETE", path, **kwargs)
 
     # ---- Parcours métier ----
 
@@ -133,3 +137,80 @@ class Actor:
         if self.cookies:
             headers["Cookie"] = "; ".join(f"{name}={value}" for name, value in self.cookies.items())
         return self.client.websocket_connect("/ws", headers=headers)
+
+    # ---- Amis ----
+
+    def friend_list(self) -> list[dict]:
+        response = self.get("/api/friends")
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def friend_requests(self) -> list[dict]:
+        response = self.get("/api/friends/requests")
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def send_friend_request(self, other: "Actor"):
+        return self.post("/api/friends/requests", {"username": other.identity.username})
+
+    def accept_friend(self, other: "Actor"):
+        return self.post(f"/api/friends/{other.identity.username}/accept")
+
+    def decline_friend(self, other: "Actor"):
+        return self.post(f"/api/friends/{other.identity.username}/decline")
+
+    def remove_friend(self, other: "Actor"):
+        return self.delete(f"/api/friends/{other.identity.username}")
+
+    # ---- Conversations directes ----
+
+    def create_conversation(self, other: "Actor") -> str:
+        """Ouvre une conversation avec un ami ; l'ami récupérera sa clé via ``load_conv_key``."""
+        conv_key = e2e.generate_room_key()
+        wrapped_self = e2e.wrap_room_key(conv_key, self.identity.public_key)
+        wrapped_peer = e2e.wrap_room_key(conv_key, other.identity.public_key)
+        response = self.post(
+            "/api/conversations",
+            {
+                "username": other.identity.username,
+                "wrapped_key": wrapped_self,
+                "peer_wrapped_key": wrapped_peer,
+            },
+        )
+        assert response.status_code == 201, response.text
+        self.conv_keys[response.json()["id"]] = conv_key
+        return response.json()["id"]
+
+    def load_conv_key(self, conv_id: str) -> bytes:
+        """Récupère la clé de conversation comme le ferait le navigateur : déballage privé."""
+        conv = self.get(f"/api/conversations/{conv_id}").json()
+        self.conv_keys[conv_id] = e2e.unwrap_room_key(conv["wrapped_key"], self.identity.private_key)
+        return self.conv_keys[conv_id]
+
+    def conv_list(self) -> list[dict]:
+        response = self.get("/api/conversations")
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def conv_send(self, conv_id: str, text: str):
+        payload = e2e.encrypt_message(self.conv_keys[conv_id], text, conv_id, self.user_id)
+        return self.post(f"/api/conversations/{conv_id}/messages", payload)
+
+    def read_conv(self, conv_id: str, **params) -> list[str]:
+        response = self.get(f"/api/conversations/{conv_id}/messages", params=params)
+        assert response.status_code == 200, response.text
+        plaintexts = []
+        for message in response.json()["messages"]:
+            framed = {
+                "room_id": message["conversation_id"],
+                "sender_id": message["sender_id"],
+                "iv": message["iv"],
+                "ciphertext": message["ciphertext"],
+            }
+            plaintexts.append(e2e.decrypt_bytes(self.conv_keys[conv_id], framed).decode())
+        return plaintexts
+
+    # ---- Grades ----
+
+    def set_role(self, room_id: str, other: "Actor", role: str):
+        return self.post(f"/api/rooms/{room_id}/roles", {"username": other.identity.username, "role": role})

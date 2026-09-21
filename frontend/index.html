@@ -46,17 +46,53 @@
     </main>
 
     <div id="app" class="app" hidden>
-      <aside id="rail" class="rail" aria-label="Salons">
-        <div class="rail-head"><span class="wordmark small">talk</span></div>
-        <nav class="rail-body" aria-label="Liste des salons">
-          <ul id="room-list" class="room-list"></ul>
-          <p id="room-empty" class="empty" hidden>Aucun salon pour l'instant. Créez-en un ci-dessous, ou demandez à un membre de vous ajouter au sien.</p>
+      <aside id="rail" class="rail" aria-label="Salons, conversations et amis">
+        <div class="rail-head">
+          <span class="wordmark small">talk</span>
+          <div class="tabs rail-tabs" role="tablist" aria-label="Navigation">
+            <button type="button" role="tab" id="tab-sessions" aria-selected="true" aria-controls="sessions-panel">Sessions</button>
+            <button type="button" role="tab" id="tab-friends" aria-selected="false" aria-controls="friends-panel">Amis</button>
+          </div>
+        </div>
+        <nav class="rail-body" aria-label="Salons, conversations et amis">
+          <div id="sessions-panel" role="tabpanel" aria-labelledby="tab-sessions">
+            <section class="rail-section" aria-labelledby="salons-title">
+              <h3 id="salons-title" class="rail-title">Salons</h3>
+              <ul id="room-list" class="room-list"></ul>
+              <p id="room-empty" class="empty" hidden>Aucun salon pour l'instant. Créez-en un ci-dessous, ou demandez à un membre de vous ajouter au sien.</p>
+              <form id="create-room-form" class="inline-form" autocomplete="off">
+                <label class="sr-only" for="new-room-name">Nom du nouveau salon</label>
+                <input id="new-room-name" maxlength="50" placeholder="Nom du nouveau salon" />
+                <button type="submit" class="primary">Créer</button>
+              </form>
+            </section>
+
+            <section class="rail-section" aria-labelledby="convs-title">
+              <h3 id="convs-title" class="rail-title">Conversations</h3>
+              <ul id="conv-list" class="room-list"></ul>
+              <p id="conv-empty" class="empty" hidden>
+                Aucune conversation directe. Ouvrez-en une en cliquant sur un de vos amis.
+              </p>
+            </section>
+          </div>
+
+          <div id="friends-panel" role="tabpanel" aria-labelledby="tab-friends" hidden>
+            <section class="rail-section" aria-labelledby="friends-title">
+              <h3 id="friends-title" class="rail-title">Amis</h3>
+              <form id="add-friend-form" class="inline-form" autocomplete="off">
+                <label class="sr-only" for="add-friend-name">Nom d'utilisateur de l'ami</label>
+                <input id="add-friend-name" maxlength="32" placeholder="Ajouter un ami" autocapitalize="none" spellcheck="false" />
+                <button type="submit" class="primary">Ajouter</button>
+              </form>
+              <div id="friend-requests-group" hidden>
+                <h4 class="rail-subtitle">Demandes reçues</h4>
+                <ul id="friend-requests" class="member-list"></ul>
+              </div>
+              <ul id="friend-list" class="member-list"></ul>
+              <p id="friend-empty" class="empty" hidden>Aucun ami pour l'instant. Envoyez une demande ci-dessus.</p>
+            </section>
+          </div>
         </nav>
-        <form id="create-room-form" class="inline-form" autocomplete="off">
-          <label class="sr-only" for="new-room-name">Nom du nouveau salon</label>
-          <input id="new-room-name" maxlength="50" placeholder="Nom du nouveau salon" />
-          <button type="submit" class="primary">Créer</button>
-        </form>
         <div class="account">
           <button type="button" id="btn-profile" class="account id="vider" title="Modifier votre profil">
             <span id="me-avatar" class="avatar" aria-hidden="true"></span>

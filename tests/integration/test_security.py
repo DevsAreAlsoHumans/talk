@@ -13,6 +13,13 @@ MUTATIONS = [
     ("PUT", "/api/rooms", {}),
     ("PATCH", "/api/rooms", {}),
     ("DELETE", "/api/rooms", None),
+    ("POST", "/api/rooms/00000000-0000-4000-8000-000000000000/roles", {}),
+    ("POST", "/api/friends/requests", {}),
+    ("POST", "/api/friends/bob/accept", {}),
+    ("POST", "/api/friends/bob/decline", {}),
+    ("DELETE", "/api/friends/bob", None),
+    ("POST", "/api/conversations", {}),
+    ("POST", "/api/conversations/00000000-0000-4000-8000-000000000000/messages", {}),
 ]
 
 

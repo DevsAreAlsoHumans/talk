@@ -125,6 +125,36 @@ class AddMemberRequest(StrictModel):
     wrapped_key: WrappedRoomKey
 
 
+ROLE_OWNER = "owner"  # chef du salon
+ROLE_CO = "co"  # sous-chef
+ROLE_MEMBER = "member"
+
+
+class SetRoleRequest(StrictModel):
+    """Change le grade d'un membre (sous-chef ↔ membre). Le grade « chef » est réservé au propriétaire."""
+
+    username: Username
+    role: Literal[ROLE_CO, ROLE_MEMBER]
+
+
+class FriendRequestInput(StrictModel):
+    username: Username
+
+
+class CreateConversationRequest(StrictModel):
+    """Crée une conversation directe entre deux amis.
+
+    Le client fournit la clé de conversation *enveloppée pour lui-même*
+    (``wrapped_key``) puis, pour son ami, la même clé enveloppée pour la clé
+    publique de ce dernier (``peer_wrapped_key``). Le serveur ne voit que des
+    enveloppes : la clé de conversation n'existe que dans les deux navigateurs.
+    """
+
+    username: Username
+    wrapped_key: WrappedRoomKey
+    peer_wrapped_key: WrappedRoomKey
+
+
 class SendMessageRequest(StrictModel):
     kind: Kind = "text"
     mime: Mime | None = None
@@ -217,9 +247,24 @@ class RoomDetail(BaseModel):
     owner_id: UUID
     created_at: str
     members: list[MemberSummary]
+    roles: dict[str, str]
     wrapped_key: WrappedRoomKey
     avatars: dict[str, AvatarEnvelope]
     online: dict[str, bool]
+
+
+class ConversationSummary(BaseModel):
+    id: UUID
+    created_at: str
+    peer: MemberSummary
+    member_count: int
+
+
+class ConversationDetail(BaseModel):
+    id: UUID
+    created_at: str
+    peer: MemberSummary
+    wrapped_key: WrappedRoomKey
 
 
 class MessageOut(BaseModel):
@@ -235,6 +280,28 @@ class MessageOut(BaseModel):
     created_at: str
 
 
+class ConversationMessageOut(BaseModel):
+    """Message d'une conversation directe : même contenu qu'un message de salon,
+    l'identifiant du fil est ``conversation_id`` (le client utilise l'id de la
+    conversation comme identifiant de thread chiffré)."""
+
+    id: UUID
+    seq: int
+    conversation_id: UUID
+    sender_id: UUID
+    sender_username: str
+    kind: str
+    mime: str | None
+    iv: str
+    ciphertext: str
+    created_at: str
+
+
 class MessagePage(BaseModel):
     messages: list[MessageOut]
+    has_more: bool
+
+
+class ConversationMessagePage(BaseModel):
+    messages: list[ConversationMessageOut]
     has_more: bool

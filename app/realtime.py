@@ -48,6 +48,8 @@ class ConnectionManager:
         ligne : la déconnexion n'a alors *aucune* requête Redis à faire (elle peut être plus
         lent que soi, et on préfère signaler vite que quelqu'un est parti).
         """
+        self._conv_presence_targets: dict[str, dict[str, set[str]]] = {}
+        """Même cache, pour les conversations directes (id de conversation → autres participants)."""
 
     def add(self, connection: Connection) -> bool:
         sockets = self._connections.setdefault(connection.user_id, set())
@@ -75,6 +77,12 @@ class ConnectionManager:
 
     def pop_presence_targets(self, user_id: str) -> dict[str, set[str]]:
         return self._presence_targets.pop(user_id, {})
+
+    def set_conv_presence_targets(self, user_id: str, targets: dict[str, set[str]]) -> None:
+        self._conv_presence_targets[user_id] = targets
+
+    def pop_conv_presence_targets(self, user_id: str) -> dict[str, set[str]]:
+        return self._conv_presence_targets.pop(user_id, {})
 
     async def send_to_users(self, user_ids: Iterable[str], payload: dict) -> None:
         for user_id in user_ids:

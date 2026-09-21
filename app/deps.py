@@ -8,6 +8,8 @@ from redis.asyncio import Redis
 
 from app.config import Settings
 from app.realtime import ConnectionManager, EventBus
+from app.repositories.conversations import ConversationRepository
+from app.repositories.friends import FriendRepository
 from app.repositories.messages import MessageRepository
 from app.repositories.rooms import RoomRepository
 from app.repositories.users import UserRepository
@@ -48,6 +50,18 @@ def get_messages(redis: RedisDep) -> MessageRepository:
     return MessageRepository(redis)
 
 
+def get_conv_messages(redis: RedisDep) -> MessageRepository:
+    return MessageRepository(redis, prefix="conv")
+
+
+def get_friends(redis: RedisDep) -> FriendRepository:
+    return FriendRepository(redis)
+
+
+def get_conversations(redis: RedisDep) -> ConversationRepository:
+    return ConversationRepository(redis)
+
+
 def get_sessions(redis: RedisDep, settings: SettingsDep) -> SessionStore:
     return SessionStore(redis, settings.session_ttl_seconds)
 
@@ -55,6 +69,9 @@ def get_sessions(redis: RedisDep, settings: SettingsDep) -> SessionStore:
 UsersDep = Annotated[UserRepository, Depends(get_users)]
 RoomsDep = Annotated[RoomRepository, Depends(get_rooms)]
 MessagesDep = Annotated[MessageRepository, Depends(get_messages)]
+ConversationMessagesDep = Annotated[MessageRepository, Depends(get_conv_messages)]
+FriendsDep = Annotated[FriendRepository, Depends(get_friends)]
+ConversationsDep = Annotated[ConversationRepository, Depends(get_conversations)]
 SessionsDep = Annotated[SessionStore, Depends(get_sessions)]
 
 

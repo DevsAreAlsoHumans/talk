@@ -81,3 +81,22 @@ export function history(roomId, before, limit) {
 export const sendMessage = (roomId, payload) => request('POST', `/api/rooms/${roomId}/messages`, payload);
 export const updateProfile = (payload) => request('PUT', '/api/me/profile', payload);
 export const setAvatar = (roomId, payload) => request('PUT', `/api/rooms/${roomId}/avatar`, payload);
+export const setRole = (roomId, payload) => request('POST', `/api/rooms/${roomId}/roles`, payload);
+
+export const listFriends = () => request('GET', '/api/friends');
+export const listFriendRequests = () => request('GET', '/api/friends/requests');
+export const sendFriendRequest = (username) => request('POST', '/api/friends/requests', { username });
+export const acceptFriend = (username) => request('POST', `/api/friends/${encodeURIComponent(username)}/accept`);
+export const declineFriend = (username) => request('POST', `/api/friends/${encodeURIComponent(username)}/decline`);
+export const removeFriend = (username) => request('DELETE', `/api/friends/${encodeURIComponent(username)}`);
+
+export const listConversations = () => request('GET', '/api/conversations');
+export const createConversation = (payload) => request('POST', '/api/conversations', payload);
+export const getConversation = (convId) => request('GET', `/api/conversations/${convId}`);
+export function conversationHistory(convId, before, limit) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (before !== undefined) query.set('before', String(before));
+  return request('GET', `/api/conversations/${convId}/messages?${query}`);
+}
+export const sendConversationMessage = (convId, payload) =>
+  request('POST', `/api/conversations/${convId}/messages`, payload);

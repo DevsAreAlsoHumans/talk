@@ -13,12 +13,14 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 
 from app.deps import AuthDep, ConnectionManagerDep, EventBusDep, MessagesDep, RoomsDep, UsersDep
+from app.repositories.rooms import ROLE_CO
 from app.schemas import (
     AddMemberRequest,
     AvatarRequest,
     CreateRoomRequest,
     RoomDetail,
     RoomSummary,
+    SetRoleRequest,
     UserPublic,
 )
 
@@ -30,6 +32,13 @@ async def _require_member(rooms: RoomsDep, room_id: UUID, user_id: str) -> dict[
     if room is None or not await rooms.is_member(str(room_id), user_id):
         raise HTTPException(status_code=404, detail="Salon introuvable")
     return room
+
+
+async def _can_manage_members(rooms: RoomsDep, room: dict[str, str], user_id: str) -> bool:
+    """Le chef (propriétaire) et les sous-chefs peuvent ajouter des membres."""
+    if room["owner_id"] == user_id:
+        return True
+    return await rooms.get_role(room["id"], user_id) == ROLE_CO
 
 
 @router.get("", response_model=list[RoomSummary])
@@ -60,6 +69,7 @@ async def get_room(
     return {
         **room,
         "members": members,
+        "roles": await rooms.get_roles(str(room_id)),
         "wrapped_key": wrapped_key,
         "avatars": await rooms.get_avatars(str(room_id)),
         "online": {member["id"]: manager.is_online(member["id"]) for member in members},
@@ -70,10 +80,13 @@ async def get_room(
 async def add_member(
     room_id: UUID, body: AddMemberRequest, auth: AuthDep, rooms: RoomsDep, users: UsersDep, bus: EventBusDep
 ) -> dict:
-    """Ajoute un membre. Le client de l'invitant fournit la clé du salon enveloppée pour lui."""
+    """Ajoute un membre. Le client de l'invitant fournit la clé du salon enveloppée pour lui.
+
+    Réservé au chef et aux sous-chefs du salon.
+    """
     room = await _require_member(rooms, room_id, auth.user["id"])
-    if room["owner_id"] != auth.user["id"]:
-        raise HTTPException(status_code=403, detail="Seul le propriétaire peut ajouter des membres")
+    if not await _can_manage_members(rooms, room, auth.user["id"]):
+        raise HTTPException(status_code=403, detail="Seul le chef ou un sous-chef peut ajouter des membres")
 
     new_member = await users.get_by_username(body.username)
     if new_member is None:
@@ -99,6 +112,46 @@ async def add_member(
         await rooms.member_ids(str(room_id)),
     )
     return new_member
+
+
+@router.post("/{room_id}/roles", status_code=204)
+async def set_role(
+    room_id: UUID,
+    body: SetRoleRequest,
+    auth: AuthDep,
+    rooms: RoomsDep,
+    users: UsersDep,
+    bus: EventBusDep,
+) -> None:
+    """Nomme un sous-chef ou rétrograde un membre. Seul le chef du salon peut le faire."""
+    room = await _require_member(rooms, room_id, auth.user["id"])
+    if room["owner_id"] != auth.user["id"]:
+        raise HTTPException(status_code=403, detail="Seul le chef du salon peut changer les grades")
+
+    target = await users.get_by_username(body.username)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    if target["id"] == auth.user["id"]:
+        raise HTTPException(status_code=400, detail="Vous ne pouvez pas changer votre propre grade")
+    if not await rooms.is_member(str(room_id), target["id"]):
+        raise HTTPException(status_code=404, detail="Salon introuvable")
+
+    await rooms.set_role(str(room_id), target["id"], body.role)
+    await bus.publish(
+        {
+            "type": "role_changed",
+            "room_id": str(room_id),
+            "user": {
+                "id": target["id"],
+                "username": target["username"],
+                "public_key": target["public_key"],
+                "display_name": target["display_name"],
+                "bio": target["bio"],
+            },
+            "role": body.role,
+        },
+        await rooms.member_ids(str(room_id)),
+    )
 
 
 @router.put("/{room_id}/avatar", status_code=204)

@@ -24,6 +24,9 @@ const AVATAR_SIZE = 512;
 const MAX_VOICE_MS = 60_000;
 const MIN_VOICE_MS = 300;
 const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const ROLE_OWNER = 'owner';
+const ROLE_CO = 'co';
+const ROLE_MEMBER = 'member';
 
 const timeFormat = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' });
 const dayFormat = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -46,6 +49,18 @@ const el = {
   roomEmpty: $('#room-empty'),
   createRoomForm: $('#create-room-form'),
   newRoomName: $('#new-room-name'),
+  convList: $('#conv-list'),
+  convEmpty: $('#conv-empty'),
+  addFriendForm: $('#add-friend-form'),
+  addFriendName: $('#add-friend-name'),
+  friendList: $('#friend-list'),
+  friendRequests: $('#friend-requests'),
+  friendRequestsGroup: $('#friend-requests-group'),
+  friendEmpty: $('#friend-empty'),
+  tabSessions: $('#tab-sessions'),
+  tabFriends: $('#tab-friends'),
+  sessionsPanel: $('#sessions-panel'),
+  friendsPanel: $('#friends-panel'),
   meName: $('#me-name'),
   logout: $('#logout'),
   toggleRail: $('#toggle-rail'),
@@ -97,6 +112,15 @@ const state = {
   roomKeys: new Map(), // id → CryptoKey AES-GCM
   timelines: new Map(), // id → Map(seq → { message, text | media })
   hasMore: new Map(), // id → reste-t-il des messages plus anciens ?
+  convs: [],
+  currentConvId: null,
+  convDetails: new Map(), // id → { peer, wrapped_key, ... }
+  convKeys: new Map(), // id → CryptoKey AES-GCM
+  convTimelines: new Map(), // id → Map(seq → { message, text | media })
+  convHasMore: new Map(), // id → reste-t-il des messages plus anciens ?
+  convOnline: new Map(), // id du correspondant → en ligne ?
+  friends: [], // amis confirmés (MemberSummary)
+  friendRequests: [], // demandes d'ami reçues, en attente
   avatars: new Map(), // id du salon → Map(id du membre → URL de l'avatar déchiffré)
   unread: new Set(),
   fingerprints: new Map(),
@@ -256,11 +280,13 @@ async function enterApp() {
   state.loggedIn = true;
   el.authScreen.hidden = true;
   el.app.hidden = false;
+  setRailTab('sessions');
   el.meName.textContent = state.me.displayName || state.me.username;
   updateOwnAvatar(null);
   connectSocket();
-  await refreshRooms();
+  await Promise.all([refreshRooms(), refreshConversations(), refreshFriends()]);
   if (state.rooms.length > 0) await selectRoom(state.rooms[0].id);
+  else if (state.convs.length > 0) await selectConversation(state.convs[0].id);
   else renderChat();
 }
 
@@ -280,6 +306,10 @@ function resetSession() {
     privateKey: null,
     rooms: [],
     currentRoomId: null,
+    convs: [],
+    currentConvId: null,
+    friends: [],
+    friendRequests: [],
     everConnected: false,
     reconnectAttempt: 0,
     incoming: null,
@@ -291,16 +321,25 @@ function resetSession() {
     state.roomKeys,
     state.timelines,
     state.hasMore,
+    state.convDetails,
+    state.convKeys,
+    state.convTimelines,
+    state.convHasMore,
+    state.convOnline,
     state.fingerprints,
   ]) {
     collection.clear();
   }
-  revokeAllMedia(state.timelines, state.avatars);
+  revokeAllMedia(state.timelines, state.convTimelines, state.avatars);
   state.unread.clear();
   api.setCsrfToken(null);
   clear(el.roomList);
+  clear(el.convList);
   clear(el.memberList);
   clear(el.messages);
+  clear(el.friendList);
+  clear(el.friendRequests);
+  el.app.classList.remove('thread-dm');
   el.app.hidden = true;
   el.authScreen.hidden = false;
 }
@@ -326,6 +365,18 @@ api.onUnauthorized(() => {
 el.logout.addEventListener('click', logout);
 
 // ---------- Salons ----------
+
+/** Clé d'unicité d'un fil (salon ou conversation) : préfixe « c: » pour les conversations directes. */
+function threadKey({ kind, id }) {
+  return kind === 'conv' ? `c:${id}` : id;
+}
+
+/** Fil actuellement affiché, ou null si rien n'est sélectionné. */
+function currentThread() {
+  if (state.currentConvId) return { kind: 'conv', id: state.currentConvId };
+  if (state.currentRoomId) return { kind: 'room', id: state.currentRoomId };
+  return null;
+}
 
 async function refreshRooms() {
   state.rooms = await api.listRooms();
@@ -377,9 +428,11 @@ async function ensureRoom(roomId) {
 
 async function selectRoom(roomId) {
   state.currentRoomId = roomId;
+  state.currentConvId = null;
   state.unread.delete(roomId);
-  el.app.classList.remove('rail-open', 'members-open');
+  el.app.classList.remove('thread-dm', 'rail-open', 'members-open');
   renderRoomList();
+  renderConvList();
   try {
     await ensureRoom(roomId);
     await loadLatest(roomId);
@@ -390,6 +443,275 @@ async function selectRoom(roomId) {
   }
   if (state.currentRoomId === roomId) renderChat({ scroll: 'bottom' });
 }
+
+// ---------- Conversations directes ----------
+
+async function refreshConversations() {
+  state.convs = await api.listConversations();
+  renderConvList();
+}
+
+function renderConvList() {
+  clear(el.convList);
+  el.convEmpty.hidden = state.convs.length > 0;
+  const sorted = [...state.convs].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  for (const conv of sorted) {
+    const active = conv.id === state.currentConvId;
+    const key = threadKey({ kind: 'conv', id: conv.id });
+    const peer = conv.peer;
+    const online = state.convOnline.get(peer.id);
+    el.convList.append(
+      h(
+        'li',
+        {},
+        h(
+          'button',
+          {
+            type: 'button',
+            class: `room${active ? ' active' : ''}`,
+            'aria-current': active ? 'true' : null,
+            onclick: () => selectConversation(conv.id),
+          },
+          h('span', { class: 'room-name' }, peer.display_name || peer.username),
+          online === undefined
+            ? null
+            : h(
+                'span',
+                { class: `presence${online ? '' : ' offline'}`, title: online ? 'En ligne' : 'Hors ligne' },
+                online ? 'en ligne' : 'hors ligne',
+              ),
+          state.unread.has(key) ? h('span', { class: 'unread', title: 'Nouveaux messages' }) : null,
+          state.unread.has(key) ? h('span', { class: 'sr-only' }, ' (nouveaux messages)') : null,
+        ),
+      ),
+    );
+  }
+}
+
+/** Charge le détail d'une conversation et déballe sa clé (jamais envoyée au serveur). */
+async function ensureConversation(convId) {
+  let detail = state.convDetails.get(convId);
+  if (!detail) {
+    detail = await api.getConversation(convId);
+    state.convDetails.set(convId, detail);
+  }
+  if (!state.convKeys.has(convId)) {
+    const key = await e2e.unwrapRoomKey(detail.wrapped_key, state.privateKey);
+    state.convKeys.set(convId, key);
+  }
+  return detail;
+}
+
+async function selectConversation(convId) {
+  state.currentConvId = convId;
+  state.unread.delete(threadKey({ kind: 'conv', id: convId }));
+  el.app.classList.remove('rail-open', 'members-open');
+  el.app.classList.add('thread-dm');
+  renderRoomList();
+  renderConvList();
+  try {
+    await ensureConversation(convId);
+    await loadLatestConv(convId);
+  } catch (error) {
+    reportError(error, "Impossible d'ouvrir cette conversation.");
+    return;
+  }
+  if (state.currentConvId === convId) renderChat({ scroll: 'bottom' });
+}
+
+async function mergeConvPage(convId, page) {
+  const convKey = state.convKeys.get(convId);
+  const timeline = state.convTimelines.get(convId) ?? new Map();
+  state.convTimelines.set(convId, timeline);
+  for (const raw of page.messages) {
+    // La crypto utilise `room_id` (AAD = fil:expéditeur) : on expose le fil sous le même nom côté client.
+    const message = { ...raw, room_id: raw.conversation_id };
+    if (!timeline.has(message.seq)) {
+      timeline.set(message.seq, { message, ...(await decryptOrNull(convKey, message)) });
+    }
+  }
+  return timeline;
+}
+
+async function loadLatestConv(convId) {
+  const page = await api.conversationHistory(convId, undefined, HISTORY_PAGE_SIZE);
+  const known = state.convTimelines.get(convId);
+  const newest = known && known.size > 0 ? Math.max(...known.keys()) : 0;
+  const gap = page.messages.length > 0 && page.messages[0].seq > newest + 1;
+  if (!known || known.size === 0 || gap) {
+    state.convTimelines.set(convId, new Map()); // trou dans l'historique : on repart de la page la plus récente
+    state.convHasMore.set(convId, page.has_more);
+  }
+  await mergeConvPage(convId, page);
+}
+
+async function loadOlderConvMessages() {
+  const convId = state.currentConvId;
+  const timeline = state.convTimelines.get(convId);
+  if (!timeline || timeline.size === 0) return;
+  try {
+    const page = await api.conversationHistory(convId, Math.min(...timeline.keys()), HISTORY_PAGE_SIZE);
+    await mergeConvPage(convId, page);
+    state.convHasMore.set(convId, page.has_more);
+    if (state.currentConvId === convId) renderMessages({ scroll: 'preserve' });
+  } catch (error) {
+    reportError(error, "Impossible de charger les messages plus anciens.");
+  }
+}
+
+async function openConversationWith(friend) {
+  setRailTab('sessions');
+  const existing = state.convs.find((conv) => conv.peer.id === friend.id);
+  if (existing) {
+    await selectConversation(existing.id);
+    return;
+  }
+  try {
+    const convKey = await e2e.generateRoomKey();
+    const [wrappedKey, peerWrappedKey] = await Promise.all([
+      e2e.wrapRoomKey(convKey, state.me.publicKey), // enveloppée pour nous seuls
+      e2e.wrapRoomKey(convKey, friend.public_key), // et pour l'ami : seul son navigateur pourra l'ouvrir
+    ]);
+    const detail = await api.createConversation({
+      username: friend.username,
+      wrapped_key: wrappedKey,
+      peer_wrapped_key: peerWrappedKey,
+    });
+    state.convKeys.set(detail.id, convKey);
+    state.convDetails.set(detail.id, detail);
+    state.convs = [...state.convs, { id: detail.id, created_at: detail.created_at, peer: detail.peer, member_count: 2 }];
+    renderConvList();
+    await selectConversation(detail.id);
+  } catch (error) {
+    if (error instanceof api.ApiError && error.status === 409) {
+      await refreshConversations();
+      const nowExisting = state.convs.find((conv) => conv.peer.id === friend.id);
+      if (nowExisting) await selectConversation(nowExisting.id);
+      else notify('La conversation existe déjà.', 'info');
+    } else if (error instanceof api.ApiError && error.status === 403) {
+      notify('Les conversations sont réservées aux amis.', 'error');
+    } else reportError(error, "La conversation n'a pas pu être ouverte.");
+  }
+}
+
+// ---------- Amis ----------
+
+async function refreshFriends() {
+  const [friends, requests] = await Promise.all([api.listFriends(), api.listFriendRequests()]);
+  state.friends = friends;
+  state.friendRequests = requests;
+  renderFriendList();
+  renderFriendRequests();
+}
+
+function renderFriendRequests() {
+  clear(el.friendRequests);
+  el.friendRequestsGroup.hidden = state.friendRequests.length === 0;
+  for (const requester of state.friendRequests) {
+    const name = requester.display_name || requester.username;
+    el.friendRequests.append(
+      h(
+        'li',
+        { class: 'friend-request' },
+        h('span', { class: 'member-name' }, avatarThumb(requester, null), h('span', { class: 'member-id' }, name)),
+        h(
+          'span',
+          { class: 'friend-actions' },
+          h('button', { type: 'button', class: 'primary', onclick: () => void acceptRequest(requester) }, 'Accepter'),
+          h('button', { type: 'button', class: 'link', onclick: () => void declineRequest(requester) }, 'Refuser'),
+        ),
+      ),
+    );
+  }
+}
+
+function renderFriendList() {
+  clear(el.friendList);
+  el.friendEmpty.hidden = state.friends.length > 0;
+  for (const friend of state.friends) {
+    const name = friend.display_name || friend.username;
+    el.friendList.append(
+      h(
+        'li',
+        { class: 'friend-row' },
+        h(
+          'button',
+          { type: 'button', class: 'friend', title: `Ouvrir une conversation avec ${name}`, onclick: () => void openConversationWith(friend) },
+          h(
+            'span',
+            { class: 'member-name' },
+            avatarThumb(friend, null),
+            h('span', { class: 'member-id' }, name),
+          ),
+        ),
+        h('button', { type: 'button', class: 'link remove-item', title: `Retirer ${name} de vos amis`,
+            onclick: (event) => { event.stopPropagation(); void removeFriend(friend); } },
+            'Retirer'),
+      ),
+    );
+  }
+}
+
+el.addFriendForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const username = el.addFriendName.value.trim().toLowerCase();
+  if (!USERNAME_PATTERN.test(username)) {
+    notify("Nom d'utilisateur invalide.", 'error');
+    return;
+  }
+  try {
+    await api.sendFriendRequest(username);
+    el.addFriendName.value = '';
+    notify(`Demande envoyée à ${username}.`);
+  } catch (error) {
+    if (error instanceof api.ApiError && error.status === 409) notify('Vous êtes déjà amis, ou la demande existe déjà.', 'error');
+    else if (error instanceof api.ApiError && error.status === 404) notify('Utilisateur introuvable.', 'error');
+    else reportError(error, "La demande n'a pas pu être envoyée.");
+  }
+});
+
+async function acceptRequest(requester) {
+  try {
+    await api.acceptFriend(requester.username);
+    await refreshFriends();
+    notify(`Vous êtes maintenant ami(e)s avec ${requester.display_name || requester.username}.`);
+  } catch (error) {
+    reportError(error, "La demande n'a pas pu être acceptée.");
+  }
+}
+
+async function declineRequest(requester) {
+  try {
+    await api.declineFriend(requester.username);
+    state.friendRequests = state.friendRequests.filter((member) => member.id !== requester.id);
+    renderFriendRequests();
+    notify(`Demande de ${requester.display_name || requester.username} refusée.`);
+  } catch (error) {
+    reportError(error, "La demande n'a pas pu être refusée.");
+  }
+}
+
+async function removeFriend(friend) {
+  try {
+    await api.removeFriend(friend.username);
+    state.friends = state.friends.filter((member) => member.id !== friend.id);
+    renderFriendList();
+    notify(`${friend.display_name || friend.username} retiré(e) de vos amis.`);
+  } catch (error) {
+    reportError(error, "L'ami n'a pas pu être retiré.");
+  }
+}
+
+function setRailTab(tab) {
+  const sessions = tab === 'sessions';
+  el.tabSessions.setAttribute('aria-selected', sessions ? 'true' : 'false');
+  el.tabFriends.setAttribute('aria-selected', sessions ? 'false' : 'true');
+  el.sessionsPanel.hidden = !sessions;
+  el.friendsPanel.hidden = sessions;
+}
+
+el.tabSessions.addEventListener('click', () => setRailTab('sessions'));
+el.tabFriends.addEventListener('click', () => setRailTab('friends'));
 
 async function fillAvatars(roomId) {
   const detail = state.roomDetails.get(roomId);
@@ -457,7 +779,13 @@ async function loadLatest(roomId) {
 }
 
 async function loadOlderMessages() {
-  const roomId = state.currentRoomId;
+  const thread = currentThread();
+  if (!thread) return;
+  if (thread.kind === 'conv') {
+    await loadOlderConvMessages();
+    return;
+  }
+  const roomId = thread.id;
   const timeline = state.timelines.get(roomId);
   if (!timeline || timeline.size === 0) return;
   try {
@@ -512,8 +840,9 @@ async function renderMembers() {
   if (renderId !== memberRenderId) return; // un rendu plus récent (autre salon, membre ajouté…) a pris le relais
 
   const decoded = state.avatars.get(state.currentRoomId) ?? new Map();
-  const items = detail.members.map((member, index) =>
-    h(
+  const items = detail.members.map((member, index) => {
+    const role = detail.roles?.[member.id];
+    return h(
       'li',
       {},
       h(
@@ -528,7 +857,11 @@ async function renderMembers() {
         detail.online?.[member.id]
           ? h('span', { class: 'presence', title: 'En ligne' }, 'en ligne')
           : h('span', { class: 'presence offline', title: 'Hors ligne' }, 'hors ligne'),
-        member.id === detail.owner_id ? h('span', { class: 'tag' }, 'propriétaire') : null,
+        member.id === detail.owner_id
+          ? h('span', { class: 'tag' }, 'chef', h('span', { class: 'sr-only' }, ' (propriétaire)'))
+          : role === ROLE_CO
+            ? h('span', { class: 'tag' }, 'sous-chef')
+            : null,
       ),
       h('code', { class: 'print', title: 'Empreinte de la clé publique' }, prints[index]),
       member.id === state.me.id
@@ -542,11 +875,50 @@ async function renderMembers() {
             },
             'Appel vocal',
           ),
-    ),
-  );
+      detail.owner_id === state.me.id && member.id !== state.me.id ? roleField(member, role ?? 'member') : null,
+    );
+  });
   el.memberList.replaceChildren(...items); // remplacement atomique : jamais de doublons
   el.memberCount.textContent = String(detail.members.length);
-  el.addMemberForm.hidden = detail.owner_id !== state.me.id;
+  el.addMemberForm.hidden = detail.owner_id !== state.me.id && roleOf(detail, state.me.id) !== ROLE_CO;
+}
+
+/** Grade d'un membre dans un salon (défaut : membre). */
+function roleOf(detail, memberId) {
+  return detail.roles?.[memberId] ?? (memberId === detail.owner_id ? ROLE_OWNER : ROLE_MEMBER);
+}
+
+/** Sélecteur de grade (sous-chef ↔ membre), réservé au chef du salon. */
+function roleField(member, role) {
+  return h(
+    'label',
+    { class: 'role-field' },
+    'Grade ',
+    h(
+      'select',
+      {
+        class: 'role',
+        'aria-label': `Grade de ${member.username}`,
+        onchange: (event) => void changeRole(member, event.target.value),
+      },
+      h('option', { value: ROLE_MEMBER, selected: role === ROLE_MEMBER ? true : null }, 'Membre'),
+      h('option', { value: ROLE_CO, selected: role === ROLE_CO ? true : null }, 'Sous-chef'),
+    ),
+  );
+}
+
+async function changeRole(member, role) {
+  const roomId = state.currentRoomId;
+  if (!roomId) return;
+  try {
+    await api.setRole(roomId, { username: member.username, role });
+    const detail = state.roomDetails.get(roomId);
+    if (detail) state.roomDetails.set(roomId, { ...detail, roles: { ...(detail.roles ?? {}), [member.id]: role } });
+    await renderMembers();
+    notify(`${member.display_name || member.username} est maintenant ${role === ROLE_CO ? 'sous-chef' : 'membre'}.`);
+  } catch (error) {
+    reportError(error, "Le grade n'a pas pu être modifié.");
+  }
 }
 
 function avatarThumb(member, url) {
@@ -648,16 +1020,21 @@ function revokeAllMedia(...collections) {
 }
 
 function renderMessages({ animateSeq, scroll = 'auto' } = {}) {
-  const roomId = state.currentRoomId;
+  const thread = currentThread();
+  const threadId = thread?.id;
+  if (!threadId) return;
+  const isConv = thread.kind === 'conv';
   const container = el.messages;
+  const timelines = isConv ? state.convTimelines : state.timelines;
+  const hasMore = isConv ? state.convHasMore : state.hasMore;
   const previousHeight = container.scrollHeight;
   const previousTop = container.scrollTop;
   const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < NEAR_BOTTOM_PX;
 
   clear(container);
-  const entries = [...(state.timelines.get(roomId)?.values() ?? [])].sort((a, b) => a.message.seq - b.message.seq);
+  const entries = [...(timelines.get(threadId)?.values() ?? [])].sort((a, b) => a.message.seq - b.message.seq);
 
-  if (state.hasMore.get(roomId)) {
+  if (hasMore.get(threadId)) {
     container.append(h('button', { type: 'button', class: 'link older', onclick: loadOlderMessages }, 'Afficher les messages précédents'));
   }
   if (entries.length === 0) {
@@ -701,18 +1078,27 @@ function renderMessages({ animateSeq, scroll = 'auto' } = {}) {
 }
 
 function renderChat({ scroll = 'bottom' } = {}) {
-  const room = state.rooms.find((candidate) => candidate.id === state.currentRoomId);
-  const ready = Boolean(room);
-  el.roomTitle.textContent = room ? room.name : 'Aucun salon sélectionné';
+  const thread = currentThread();
+  const ready = Boolean(thread);
+  let title = 'Aucun salon sélectionné';
+  if (thread?.kind === 'conv') {
+    const conv = state.convs.find((candidate) => candidate.id === thread.id);
+    if (conv) title = conv.peer.display_name || conv.peer.username;
+  } else if (thread) {
+    const room = state.rooms.find((candidate) => candidate.id === thread.id);
+    if (room) title = room.name;
+  }
+  el.roomTitle.textContent = title;
   el.e2eBadge.hidden = !ready;
   el.composerInput.disabled = !ready;
   el.composerSend.disabled = !ready;
   el.fileImage.disabled = !ready;
   el.btnVoice.disabled = !ready || recordingLive();
   renderRoomList();
+  renderConvList();
   if (!ready) {
     clear(el.messages);
-    el.messages.append(h('p', { class: 'empty' }, 'Choisissez un salon dans la liste, ou créez-en un.'));
+    el.messages.append(h('p', { class: 'empty' }, 'Choisissez un salon ou une conversation dans la liste.'));
     renderMembers();
     return;
   }
@@ -727,20 +1113,31 @@ function markUnread(roomId) {
   renderRoomList();
 }
 
-async function handleIncomingMessage(message, { own = false } = {}) {
-  const roomId = message.room_id;
-  const roomKey = state.roomKeys.get(roomId);
-  const timeline = state.timelines.get(roomId);
+function markUnreadConv(convId) {
+  if (convId === state.currentConvId) return;
+  state.unread.add(threadKey({ kind: 'conv', id: convId }));
+  renderConvList();
+}
+
+async function handleIncomingMessage(rawMessage, { own = false } = {}) {
+  // Une conversation expose `conversation_id` ; la crypto lit `room_id` (AAD = fil:expéditeur).
+  const message = rawMessage.conversation_id === undefined ? rawMessage : { ...rawMessage, room_id: rawMessage.conversation_id };
+  const isConv = message.conversation_id !== undefined;
+  const threadId = message.room_id;
+  const roomKey = isConv ? state.convKeys.get(threadId) : state.roomKeys.get(threadId);
+  const timeline = isConv ? state.convTimelines.get(threadId) : state.timelines.get(threadId);
   if (!roomKey || !timeline) {
-    markUnread(roomId); // salon jamais ouvert : l'historique sera chargé à l'ouverture
+    if (isConv) markUnreadConv(threadId);
+    else markUnread(threadId); // fil jamais ouvert : l'historique sera chargé à l'ouverture
     return;
   }
   if (timeline.has(message.seq)) return; // déjà reçu (réponse HTTP puis WebSocket)
 
   const entry = await decryptOrNull(roomKey, message);
   timeline.set(message.seq, { message, ...entry });
-  if (roomId !== state.currentRoomId) {
-    markUnread(roomId);
+  if (threadId !== (isConv ? state.currentConvId : state.currentRoomId)) {
+    if (isConv) markUnreadConv(threadId);
+    else markUnread(threadId);
     return;
   }
   renderMessages({ animateSeq: own ? undefined : message.seq, scroll: own ? 'bottom' : 'auto' });
@@ -754,17 +1151,21 @@ let sending = false;
 
 el.composer.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const roomId = state.currentRoomId;
+  const thread = currentThread();
   const text = el.composerInput.value.trim();
-  if (!roomId || !text || sending) return;
+  if (!thread || !text || sending) return;
   if (Array.from(text).length > MAX_MESSAGE_CHARS) {
     notify(`Message trop long : ${MAX_MESSAGE_CHARS} caractères maximum.`, 'error');
     return;
   }
   sending = true;
   try {
-    const payload = await e2e.encryptMessage(state.roomKeys.get(roomId), text, roomId, state.me.id);
-    const message = await api.sendMessage(roomId, payload);
+    const isConv = thread.kind === 'conv';
+    const key = isConv ? state.convKeys.get(thread.id) : state.roomKeys.get(thread.id);
+    const payload = await e2e.encryptMessage(key, text, thread.id, state.me.id);
+    const message = isConv
+      ? await api.sendConversationMessage(thread.id, payload)
+      : await api.sendMessage(thread.id, payload);
     el.composerInput.value = '';
     resizeComposer();
     await handleIncomingMessage(message, { own: true });
@@ -836,13 +1237,17 @@ async function reencodeImage(file) {
 }
 
 async function sendMedia(kind, mime, bytes) {
-  const roomId = state.currentRoomId;
-  const roomKey = state.roomKeys.get(roomId);
-  if (!roomId || !roomKey || bytes.length === 0 || sending) return;
+  const thread = currentThread();
+  if (!thread) return;
+  const isConv = thread.kind === 'conv';
+  const key = isConv ? state.convKeys.get(thread.id) : state.roomKeys.get(thread.id);
+  if (!key || bytes.length === 0 || sending) return;
   sending = true;
   try {
-    const payload = await e2e.encryptBytes(roomKey, bytes, roomId, state.me.id);
-    const message = await api.sendMessage(roomId, { kind, mime, ...payload });
+    const payload = await e2e.encryptBytes(key, bytes, thread.id, state.me.id);
+    const message = isConv
+      ? await api.sendConversationMessage(thread.id, { kind, mime, ...payload })
+      : await api.sendMessage(thread.id, { kind, mime, ...payload });
     await handleIncomingMessage(message, { own: true });
   } catch (error) {
     if (error instanceof api.ApiError && error.status === 422) notify('Média trop volumineux pour le serveur.', 'error');
@@ -859,8 +1264,10 @@ async function toggleRecording() {
     stopRecording();
     return;
   }
-  const roomId = state.currentRoomId;
-  if (!roomId || !state.roomKeys.has(roomId)) return;
+  const thread = currentThread();
+  if (!thread) return;
+  const key = thread.kind === 'conv' ? state.convKeys.get(thread.id) : state.roomKeys.get(thread.id);
+  if (!key) return;
   if (!navigator.mediaDevices?.getUserMedia) {
     notify("Ce navigateur ne peut pas enregistrer de message vocal.", 'error');
     return;
@@ -1094,11 +1501,29 @@ function connectSocket() {
       case 'message':
         handleIncomingMessage(payload.message).catch((error) => reportError(error));
         break;
+      case 'dm':
+        handleIncomingMessage(payload.message).catch((error) => reportError(error));
+        break;
       case 'member_added':
         handleMemberAdded(payload).catch((error) => reportError(error));
         break;
       case 'presence':
         handlePresence(payload);
+        break;
+      case 'presence_dm':
+        handleConvPresence(payload);
+        break;
+      case 'friend_request':
+        handleFriendRequest(payload).catch((error) => reportError(error));
+        break;
+      case 'friend_accepted':
+        handleFriendAccepted(payload).catch((error) => reportError(error));
+        break;
+      case 'friend_declined':
+        handleFriendDeclined(payload);
+        break;
+      case 'role_changed':
+        handleRoleChanged(payload).catch((error) => reportError(error));
         break;
       case 'call_offer':
         void onIncomingCall(payload);
@@ -1144,13 +1569,20 @@ function scheduleReconnect() {
   }, delay);
 }
 
-/** Après une coupure : rattrape les messages manqués du salon ouvert. */
+/** Après une coupure : rattrape les messages manqués du fil ouvert. */
 async function resync() {
-  await refreshRooms();
-  const roomId = state.currentRoomId;
-  if (!roomId || !state.roomKeys.has(roomId)) return;
-  await loadLatest(roomId);
-  if (state.currentRoomId === roomId) renderMessages({ scroll: 'auto' });
+  await Promise.all([refreshRooms(), refreshConversations(), refreshFriends()]);
+  const thread = currentThread();
+  if (!thread) return;
+  if (thread.kind === 'conv') {
+    if (!state.convKeys.has(thread.id)) return;
+    await loadLatestConv(thread.id);
+    if (state.currentConvId === thread.id) renderMessages({ scroll: 'auto' });
+  } else {
+    if (!state.roomKeys.has(thread.id)) return;
+    await loadLatest(thread.id);
+    if (state.currentRoomId === thread.id) renderMessages({ scroll: 'auto' });
+  }
 }
 
 async function handleMemberAdded({ room_id: roomId, user }) {
@@ -1163,6 +1595,39 @@ async function handleMemberAdded({ room_id: roomId, user }) {
   if (roomId === state.currentRoomId) {
     await ensureRoom(roomId);
     await renderMembers();
+  }
+}
+
+function handleConvPresence({ user_id: userId, online }) {
+  state.convOnline.set(userId, online);
+  renderConvList();
+}
+
+async function handleFriendRequest({ from }) {
+  await refreshFriends();
+  const name = from.display_name || from.username;
+  notify(`${name} souhaite devenir votre ami.`);
+  announce(`Demande d'ami de ${name}`);
+}
+
+async function handleFriendAccepted({ user }) {
+  if (user.id === state.me.id) return;
+  await refreshFriends();
+  const name = user.display_name || user.username;
+  notify(`Vous êtes maintenant ami(e)s avec ${name}.`);
+  announce(`Vous êtes ami(e)s avec ${name}`);
+}
+
+function handleFriendDeclined({ user }) {
+  const name = user.display_name || user.username;
+  notify(`${name} a refusé votre demande d'ami.`);
+}
+
+async function handleRoleChanged({ room_id: roomId, user, role }) {
+  const detail = state.roomDetails.get(roomId);
+  if (detail) {
+    state.roomDetails.set(roomId, { ...detail, roles: { ...(detail.roles ?? {}), [user.id]: role } });
+    if (roomId === state.currentRoomId) await renderMembers();
   }
 }
 
