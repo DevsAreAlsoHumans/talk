@@ -57,7 +57,7 @@ app/                     # Backend FastAPI
   api/                   # endpoints (auth, rooms, messages, users, csrf)
   realtime/              # hub in-process + endpoint /ws
 frontend/                # HTML/CSS/JS vanilla (WebCrypto), servi à la racine
-tests/                   # 116 tests : unitaires + intégration + sécurité
+tests/                   # 117 tests : unitaires + intégration + sécurité
   helpers/crypto_client.py   # « navigateur de référence » en Python (validé contre le contrat E2E)
 ```
 
@@ -112,7 +112,7 @@ tests/                   # 116 tests : unitaires + intégration + sécurité
 | **Headers** | CSP (`default-src 'self'`, `connect-src 'self' ws: wss:`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy` restreinte, `X-XSS-Protection: 0`, HSTS (si HTTPS). |
 | **Sessions & secrets** | Cookie `HttpOnly` + `SameSite=Lax` (+ `Secure` en production), **rotation de session** à chaque connexion (anti-fixation), session stockée en Redis avec TTL 7 j. Secrets via variables d'environnement, **jamais commités** (`.env` ignoré). |
 | **Erreurs** | Handler global : réponses génériques `{"detail": "..."}`, aucune stack trace exposée (testé). |
-| **Bonus** | Rate-limit connexion/inscription (10 essais / 15 min → 429), anti-réutilisation de clé (nonce unique), WebSocket vérifiant cookie + origine (rejet 4401/1008). |
+| **Bonus** | Rate-limit connexion/inscription (10 essais / 15 min → 429), anti-réutilisation de clé (nonce unique), WebSocket vérifiant cookie + origine (rejet 4401/1008), **server-push uniquement** : le serveur est le seul émetteur d'événements WS (un client ne peut pas injecter de faux messages) et un client ne s'abonne qu'aux salons dont il est membre. |
 
 ---
 
@@ -147,7 +147,7 @@ Puis ouvrir **http://localhost:8000**.
 ## 7. Tests & qualité
 
 ```bash
-.venv/bin/pytest -v                 # 116 tests (unitaires + intégration + sécurité)
+.venv/bin/pytest -v                 # 117 tests (unitaires + intégration + sécurité)
 .venv/bin/ruff check .              # linter — 0 erreur
 .venv/bin/ruff format --check .     # formatage — conforme
 ```
@@ -182,6 +182,6 @@ La **CI** (`.github/workflows/ci.yml`) exécute à chaque push / pull request : 
 ## 9. Rendu
 
 - Branche : **`etudiant/barraud-teddy`** (CE projet).
-- CI : verte sur la branche (lint + 116 tests + build docker).
+- CI : verte sur la branche (lint + 117 tests + build docker).
 - Licence : Apache 2.0 (fichier `LICENSE`).
 - Énoncé du sujet : `EXAMEN.md` (référence).
