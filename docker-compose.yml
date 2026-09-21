@@ -34,7 +34,7 @@ services:
     environment: &app_env
       # ⚠️ Valeur de DÉVELOPPEMENT uniquement — en production, surcharger via
       # une vraie variable d'environnement ou un fichier .env (jamais committé).
-      SECRET_KEY: dev-only-secret-change-me
+      SECRET_KEY: dev-only-secret-key-change-me
       REDIS_URL: redis://redis:6379/0
       COOKIE_SECURE: "false"
     ports:

@@ -110,7 +110,7 @@ tests/                   # 117 tests : unitaires + intégration + sécurité
 | **E2E** | Clés privées et clair **jamais** transmis au serveur (§2). Nonce unique par message. Vérifié par tests de non-fuites de keys. |
 | **Validation & anti-XSS** | Pydantic stricts, limites (pseudo 3–32, mdp 8–128, message ≤ 4 Ko, clé publique ≤ 1000), rendu front 100 % `textContent` (aucun `innerHTML` avec données utilisateur). |
 | **Headers** | CSP (`default-src 'self'`, `connect-src 'self' ws: wss:`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy` restreinte, `X-XSS-Protection: 0`, HSTS (si HTTPS). |
-| **Sessions & secrets** | Cookie `HttpOnly` + `SameSite=Lax` (+ `Secure` en production), **rotation de session** à chaque connexion (anti-fixation), session stockée en Redis avec TTL 7 j. Secrets via variables d'environnement, **jamais commités** (`.env` ignoré). |
+| **Sessions & secrets** | Cookie `HttpOnly` + `SameSite=Lax` (+ `Secure` en production), **signé HMAC-SHA256** (anti-forgeage, `SECRET_KEY` effective), **rotation de session** à chaque connexion (anti-fixation), session stockée en Redis avec TTL 7 j. Secrets via variables d'environnement, **jamais commités** (`.env` ignoré). |
 | **Erreurs** | Handler global : réponses génériques `{"detail": "..."}`, aucune stack trace exposée (testé). |
 | **Bonus** | Rate-limit connexion/inscription (10 essais / 15 min → 429), anti-réutilisation de clé (nonce unique), WebSocket vérifiant cookie + origine (rejet 4401/1008), **server-push uniquement** : le serveur est le seul émetteur d'événements WS (un client ne peut pas injecter de faux messages) et un client ne s'abonne qu'aux salons dont il est membre. |
 

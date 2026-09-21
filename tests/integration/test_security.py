@@ -207,6 +207,24 @@ async def test_session_cookie_flags(client) -> None:
     assert "secure" not in set_cookie.lower()  # développement (COOKIE_SECURE=False)
 
 
+async def test_session_cookie_signature_tampering_rejected(make_client, client) -> None:
+    """Le cookie de session est signé HMAC : toute altération est rejetée."""
+    await fetch_csrf(client)
+    await register(client, "sec_tamp", "password123")
+    signed = client.cookies.get("session")
+    assert signed is not None and "." in signed  # sid.signature
+
+    # Un attaquant altère un caractère du sid (ou de la signature).
+    tampered = ("A" if signed[0] != "A" else "B") + signed[1:]
+
+    async with make_client() as forged_client:
+        forged_client.cookies.set("session", tampered)
+        assert (await forged_client.get("/api/me")).status_code == 401
+
+    # Session légitime : toujours active.
+    assert (await client.get("/api/me")).status_code == 200
+
+
 async def test_security_headers_present(client) -> None:
     """Headers de protection sur toutes les réponses (même les erreurs)."""
     response = await client.get("/api/me")  # 401, mais les headers sont posés
