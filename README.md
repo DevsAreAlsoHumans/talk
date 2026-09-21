@@ -57,7 +57,7 @@ app/                     # Backend FastAPI
   api/                   # endpoints (auth, rooms, messages, users, csrf)
   realtime/              # hub in-process + endpoint /ws
 frontend/                # HTML/CSS/JS vanilla (WebCrypto), servi à la racine
-tests/                   # 117 tests : unitaires + intégration + sécurité
+tests/                   # 118 tests : unitaires + intégration + sécurité
   helpers/crypto_client.py   # « navigateur de référence » en Python (validé contre le contrat E2E)
 ```
 
@@ -147,7 +147,7 @@ Puis ouvrir **http://localhost:8000**.
 ## 7. Tests & qualité
 
 ```bash
-.venv/bin/pytest -v                 # 117 tests (unitaires + intégration + sécurité)
+.venv/bin/pytest -v                 # 118 tests (unitaires + intégration + sécurité)
 .venv/bin/ruff check .              # linter — 0 erreur
 .venv/bin/ruff format --check .     # formatage — conforme
 ```
@@ -182,6 +182,6 @@ La **CI** (`.github/workflows/ci.yml`) exécute à chaque push / pull request : 
 ## 9. Rendu
 
 - Branche : **`etudiant/barraud-teddy`** (CE projet).
-- CI : verte sur la branche (lint + 117 tests + build docker).
+- CI : verte sur la branche (lint + 118 tests + build docker).
 - Licence : Apache 2.0 (fichier `LICENSE`).
 - Énoncé du sujet : `EXAMEN.md` (référence).
