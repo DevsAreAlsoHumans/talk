@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>talk — messagerie chiffrée de bout en bout</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main id="auth-screen" class="auth">
+      <section class="auth-card" aria-labelledby="wordmark">
+        <h1 id="wordmark" class="wordmark">talk</h1>
+        <p class="lede">
+          Des salons où seuls vos interlocuteurs peuvent lire. Chaque message est chiffré dans votre navigateur
+          avant d'être envoyé : le serveur ne voit jamais le texte.
+        </p>
+
+        <div class="tabs" role="tablist" aria-label="Accès au compte">
+          <button type="button" role="tab" id="tab-login" aria-selected="true" aria-controls="auth-form">Se connecter</button>
+          <button type="button" role="tab" id="tab-register" aria-selected="false" aria-controls="auth-form">Créer un compte</button>
+        </div>
+
+        <form id="auth-form" role="tabpanel" novalidate>
+          <label for="auth-username">Nom d'utilisateur</label>
+          <input id="auth-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required />
+          <p class="hint">3 à 32 caractères : lettres minuscules, chiffres et tiret bas.</p>
+
+          <label for="auth-password">Mot de passe</label>
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" required />
+
+          <div id="confirm-field" hidden>
+            <label for="auth-confirm">Confirmer le mot de passe</label>
+            <input id="auth-confirm" name="confirm" type="password" autocomplete="new-password" />
+          </div>
+          <p id="register-warning" class="note" hidden>
+            Ce mot de passe protège vos clés de chiffrement et ne peut pas être récupéré. Si vous le perdez, vos
+            messages resteront illisibles pour toujours.
+          </p>
+
+          <p id="auth-error" class="error" role="alert" hidden></p>
+          <button type="submit" id="auth-submit" class="primary">Se connecter</button>
+        </form>
+      </section>
+    </main>
+
+    <div id="app" class="app" hidden>
+      <aside id="rail" class="rail" aria-label="Salons">
+        <div class="rail-head"><span class="wordmark small">talk</span></div>
+        <nav class="rail-body" aria-label="Liste des salons">
+          <ul id="room-list" class="room-list"></ul>
+          <p id="room-empty" class="empty" hidden>Aucun salon pour l'instant. Créez-en un ci-dessous, ou demandez à un membre de vous ajouter au sien.</p>
+        </nav>
+        <form id="create-room-form" class="inline-form" autocomplete="off">
+          <label class="sr-only" for="new-room-name">Nom du nouveau salon</label>
+          <input id="new-room-name" maxlength="50" placeholder="Nom du nouveau salon" />
+          <button type="submit" class="primary">Créer</button>
+        </form>
+        <div class="account">
+          <button type="button" id="btn-profile" class="account id="vider" title="Modifier votre profil">
+            <span id="me-avatar" class="avatar" aria-hidden="true"></span>
+            <span id="me-name" class="account-name"></span>
+            <span class="sr-only">Modifier votre profil</span>
+          </button>
+          <button type="button" id="logout" class="link">Se déconnecter</button>
+        </div>
+      </aside>
+
+      <section class="chat" aria-label="Conversation">
+        <header class="chat-head">
+          <button type="button" id="toggle-rail" class="link narrow-only">Salons</button>
+          <h2 id="room-title" class="room-title">Aucun salon sélectionné</h2>
+          <span class="badge" id="e2e-badge" hidden>Chiffré de bout en bout</span>
+          <span id="conn-status" class="status" data-state="offline">Hors ligne</span>
+          <button type="button" id="toggle-members" class="link narrow-only">Membres</button>
+        </header>
+
+        <div id="messages" class="messages" tabindex="0" aria-label="Messages du salon">
+          <p class="empty">Choisissez un salon dans la liste, ou créez-en un.</p>
+        </div>
+
+        <form id="composer" class="composer" autocomplete="off">
+          <div class="composer-actions">
+            <label class="action" title="Envoyer une image chiffrée">
+              <span class="sr-only">Joindre une image</span>
+              <input type="file" id="file-image" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+              <span class="chip">Image</span>
+            </label>
+            <button type="button" id="btn-voice" class="chip" title="Enregistrer un message vocal chiffré" disabled>Message vocal</button>
+            <span id="voice-status" class="voice-status" hidden></span>
+          </div>
+          <div class="composer-row">
+            <label class="sr-only" for="composer-input">Votre message</label>
+            <textarea id="composer-input" rows="1" maxlength="2000" placeholder="Écrire un message chiffré" disabled></textarea>
+            <button type="submit" id="composer-send" class="primary" disabled>Envoyer</button>
+          </div>
+        </form>
+      </section>
+
+      <aside id="members" class="members" aria-label="Membres du salon">
+        <h3 class="members-title">Membres <span id="member-count" class="count"></span></h3>
+        <ul id="member-list" class="member-list"></ul>
+        <form id="add-member-form" class="inline-form stacked" autocomplete="off" hidden>
+          <label for="add-member-name">Ajouter un membre</label>
+          <input id="add-member-name" maxlength="32" placeholder="Nom d'utilisateur" autocapitalize="none" spellcheck="false" />
+          <button type="submit" class="primary">Ajouter</button>
+        </form>
+        <p class="note">
+          Les empreintes identifient les clés de chiffrement. Comparez-les avec vos interlocuteurs par un autre
+          canal pour vous assurer que personne ne s'interpose.
+        </p>
+      </aside>
+    </div>
+
+    <dialog id="profile-dialog" class="dialog" aria-labelledby="profile-title">
+      <form id="profile-form" method="dialog" novalidate>
+        <h3 id="profile-title">Mon profil</h3>
+        <div class="profile-head">
+          <img id="profile-preview" class="avatar large" alt="" hidden />
+          <div>
+            <label class="action" title="Choisir une image d'avatar">
+              <span class="sr-only">Choisir une image d'avatar</span>
+              <input type="file" id="profile-avatar" accept="image/png,image/jpeg,image/webp" />
+              <span class="chip">Choisir une image</span>
+            </label>
+            <p class="hint">
+              L'avatar est recadré en carré, chiffré avec la clé de chaque salon et jamais vu par le
+              serveur : seul un membre du salon peut le déchiffrer.
+            </p>
+          </div>
+        </div>
+        <label for="profile-name">Surnom</label>
+        <input id="profile-name" maxlength="32" autocapitalize="off" spellcheck="false" />
+        <label for="profile-bio">Biographie</label>
+        <textarea id="profile-bio" rows="3" maxlength="200"></textarea>
+        <p id="profile-error" class="error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" id="profile-cancel" class="link">Annuler</button>
+          <button type="submit" id="profile-save" class="primary">Enregistrer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="call-view" class="call-view" hidden>
+      <section class="call-card" role="dialog" aria-label="Appel vocal">
+        <p id="call-state" class="call-state"></p>
+        <p id="call-peer" class="call-peer"></p>
+        <svg class="call-wave" aria-hidden="true" viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.4 11.4 0 0 0 .58 3.6 1 1 0 0 1-.25 1z" /></svg>
+        <div class="call-actions">
+          <button type="button" id="call-accept" class="primary" hidden>Accepter</button>
+          <button type="button" id="call-decline" class="danger" hidden>Refuser</button>
+          <button type="button" id="call-mute" class="primary" hidden>Couper le micro</button>
+          <button type="button" id="call-end" class="danger">Raccrocher</button>
+        </div>
+        <audio id="call-remote" hidden autoplay></audio>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <div id="announcer" class="sr-only" aria-live="polite"></div>
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>
