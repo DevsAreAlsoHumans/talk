@@ -1,8 +1,8 @@
-# FEATURES.md — Plan d'évolution « talk » v2 (branche `etudiant/barraud-teddy`)
+# FEATURES.md — Plan d'évolution « talk » v2 + v3 (branche `etudiant/barraud-teddy`)
 
-> Document de traçabilité de la deuxième itération : nouvelles fonctionnalités,
+> Document de traçabilité des itérations 2 et 3 : nouvelles fonctionnalités,
 > contract API, décisions techniques. Chaque évolution est **rétro-compatible**
-> avec le contrat v1 (rien ne casse : les **142 tests**, dont les 118 initiaux,
+> avec le contrat v1 (rien ne casse : les **149 tests**, dont les 118 initiaux,
 > restent verts).
 
 ---
@@ -113,3 +113,64 @@ Le serveur **ignore** toujours toute trame client autre que `subscribe`/`unsubsc
 **Règles** : uniquement sur `etudiant/barraud-teddy` ; ajouts rétro-compatibles
 (un message échoué n'est pas un argument pour casser le contrat v1) ; chaque
 feature livrée avec ses tests et sa mise à jour README.
+
+---
+
+## 6. Itération v3 — confort Discord : regroupement, images E2E, menu Paramètres
+
+### 6.1 Direction produit
+
+| Besoin utilisateur | Fonctionnalité livrée | Bloc de la grille |
+|---|---|---|
+| « Les avatars se répètent pour mes messages successifs » | **Groupement visuel corrigé** : l'avatar et le pseudo ne s'affichent que sur le **premier** message d'une série consécutive du même auteur (texte resté aligné) | Frontend |
+| « J'aimerais partager des images/GIF » | **Envoi et affichage d'images/GIF** chiffrés de bout en bout (AES-256-GCM avec la clé du salon ; le serveur ne stocke que `nonce`+`ciphertext` ; rendu côté client en `data:` URL) | Fonctionnalités · Sécurité |
+| « Le coin réglages ne sert qu'à changer le mot de passe » | **Menu « Paramètres »** complet : profil (avatar + pseudo), copie d'identifiant, changement de mot de passe, déconnexion | Frontend · Fonctionnalités |
+
+### 6.2 Contrat d'API v3 (ajouts — rien d'existant ne change)
+
+| Méthode | Route | Rôle | CSRF |
+|---|---|---|---|
+| POST | `/api/rooms/{id}/attachments` | `{kind: "image", mime?, nonce, ciphertext}` → 201 `{"message": ...}`. `kind` **doit** être `"image"` ; `mime` optionnel (≤ 64 car., préfixe `image/` obligatoire) ; `ciphertext` b64 strict ≤ `MAX_ATTACHMENT_B64` = 6 000 000 (≈ 4,5 Mo décodés ; le client plafonne à **4 Mo**). Rôles identiques à `POST /messages` (auth, membre). Événement WS `new_message` diffusé | oui |
+
+**Champs `kind`/`mime` sur chaque message** (GET `/messages`, WS `new_message`) :
+- `kind`: `"text"` (défaut) ou `"image"` — `mime`: `null` (défaut) ou `image/*`.
+- **Rétro-compatibilité totale** : anciens messages sans ces champs → `kind="text"`, `mime=null` (défauts servis à l'hydratation) ; réponse `Message` inchangée pour le texte.
+- La suppression (`DELETE /messages/{id}`), la pagination et la déduplication ne changent pas : une image est un message comme un autre.
+
+### 6.3 Décisions techniques v3
+
+1. **Le serveur ne voit jamais l'image** : seul `{nonce, ciphertext}` (base64) + les
+   métadonnées `kind`/`mime` transitent et sont stockés. Le déchiffrement a lieu dans le
+   navigateur (WebCrypto `decryptBytes`), le rendu utilise une `data:` URL — autorisée par
+   la CSP `img-src 'self' data:`.
+2. **Regroupement** : la logique JS (`message--grouped` / `message--group-start`) existait mais
+   le sélecteur CSS ciblait `.message-avatar`, classe jamais posée (réelle : `.avatar--message`).
+   Sélecteur corrigé + `visibility: hidden` : l'avatar est masqué **sans perdre sa colonne**,
+   le texte des messages groupés reste aligné sur le premier (façon Discord).
+3. **Menu Paramètres** : remplace la paire de boutons (clé / déconnexion) par un menu
+   (`ui.openMenu` étendu avec `separator` et `header`), composé d'un en-tête profil non
+   cliquable, « Copier mon identifiant », « Changer le mot de passe » (réutilise
+   `openPasswordModal()` exposée par auth.js) et « Se déconnecter » (comportement conservé).
+4. **Client image** : limite 4 Mo binaires (marge sous la limite serveur b64), types `image/*`
+   acceptés (PNG/JPEG/GIF/WebP), re-sélection du même fichier possible (reset de l'input),
+   anti-doublon identique à l'envoi texte (course WS gérée via `seenIds`).
+
+### 6.4 Tests ajoutés (v3)
+
+`tests/integration/test_attachments.py` — **7 nouveaux tests** : image chiffrée créée et
+présente dans l'historique ; image sans `mime` (rien stocké ni renvoyé) ; rétro-compat
+message texte (`kind="text"`, shape v1 conservée) ; non-membre → 403 ; `ciphertext` > limite
+→ 422 ; `kind`/`mime` invalides ou champ inconnu → 422 (`extra="forbid"`) ; diffusion WS
+`new_message` avec `kind="image"` chez un abonné.
+
+- **Aucun test v1 modifié** : aucun n'assere un set exact de clés d'un message.
+- Le nombre total de tests passe de **142** à **149** (7 nouveaux).
+
+### 6.5 Smoke test réalisé sur le serveur réel (uvicorn + fakeredis)
+
+Register → salon → clé enveloppée (RSA-OAEP) → `POST /attachments` (PNG simulé chiffré en
+AES-256-GCM) → 201 `kind="image"`/`mime="image/png"` → présent dans `GET /messages` →
+**déchiffrement E2E restituant les octets d'origine** → non-membre → 403 → message texte
+`kind="text"`, `mime=null`. Les trois premières tentatives de script ont échoué pour des
+raisons de **script** (Origin `testserver` du helper vs serveur réel ; nonce dupliqué), jamais
+le produit.

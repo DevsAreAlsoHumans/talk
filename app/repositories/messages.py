@@ -5,6 +5,11 @@ Stockage Redis (le serveur ne voit jamais de texte clair) :
 - ``room:{id}:messages``  → sorted set ``(score=seq, membre=message:{id})``
 - ``message:{id}``        → hash ``{id, seq, room_id, author_id, nonce, ciphertext, created_at}``
 
+Chaque message porte en plus un ``kind`` (``"text"`` ou ``"image"``) ; le
+champ ``mime`` n'est stocké dans le hash que lorsqu'il est non vide (une
+pièce jointe image). Les anciens messages sans ces champs se lisent comme
+``kind="text"``, ``mime=None`` (rétro-compatibilité v1).
+
 Les messages contiennent uniquement du ciphertext + un nonce (base64).
 La suppression d'un message conserve son ``seq`` (trous voulus : le tri et la
 dédup front par id restent valides, ``ZREVRANGEBYSCORE`` gère les trous).
@@ -35,10 +40,27 @@ def _message_key(message_id: str) -> str:
     return f"{MESSAGE_PREFIX}{message_id}"
 
 
-def create_message(redis: Redis, room_id: str, author_id: str, nonce: str, ciphertext: str) -> dict:
-    """Crée un message chiffré et renvoie son enregistrement ``{id, seq, ...}``."""
+def create_message(
+    redis: Redis,
+    room_id: str,
+    author_id: str,
+    nonce: str,
+    ciphertext: str,
+    *,
+    kind: str = "text",
+    mime: str | None = None,
+) -> dict:
+    """Crée un message chiffré et renvoie son enregistrement ``{id, seq, ...}``.
+
+    ``kind`` distingue une pièce jointe (``"image"``) d'un message textuel
+    (``"text"``, défaut) ; ``mime`` n'est stocké dans le hash que lorsqu'il
+    est non vide. Les valeurs ``None`` sont exclues du stockage (jamais de
+    ``"None"`` en clair dans Redis), mais le dict renvoyé est complet —
+    identique à ce que renverra ``_hydrate`` pour le même enregistrement.
+    """
     message_id = uuid.uuid4().hex
     seq = redis.incr(_seq_key(room_id))
+    mime = mime or None
     message = {
         "id": message_id,
         "seq": seq,
@@ -47,9 +69,13 @@ def create_message(redis: Redis, room_id: str, author_id: str, nonce: str, ciphe
         "nonce": nonce,
         "ciphertext": ciphertext,
         "created_at": users.iso_utc_now(),
+        "kind": kind,
+        "mime": mime,
     }
     pipe = redis.pipeline()
-    pipe.hset(_message_key(message_id), mapping={k: str(v) for k, v in message.items()})
+    pipe.hset(
+        _message_key(message_id), mapping={k: str(v) for k, v in message.items() if v is not None}
+    )
     pipe.zadd(_feed_key(room_id), {message_id: seq})
     pipe.execute()
     return message
@@ -81,6 +107,9 @@ def _hydrate(redis: Redis, message_ids: list[str]) -> list[dict]:
 
     Les ids absents (supprimés) sont silencieusement ignorés — le feed derrière
     une page a pu changer entre la lecture du tri et la lecture des hashes.
+
+    Rétro-compatibilité : un ancien message sans ``kind``/``mime`` vaut
+    ``kind="text"``, ``mime=None``.
     """
     messages = []
     for message_id in message_ids:
@@ -96,6 +125,8 @@ def _hydrate(redis: Redis, message_ids: list[str]) -> list[dict]:
                 "nonce": raw["nonce"],
                 "ciphertext": raw["ciphertext"],
                 "created_at": raw["created_at"],
+                "kind": raw.get("kind", "text"),
+                "mime": raw.get("mime"),
             }
         )
     return messages

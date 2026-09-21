@@ -27,6 +27,15 @@ const PAGE_SIZE = 50;
  */
 const MAX_PLAINTEXT_BYTES = 3000;
 
+/**
+ * Limite CLIENT pour les pièces jointes : 4 Mo binaires. Le ciphertext base64
+ * (~1.34×) reste ainsi bien sous la limite serveur de 6 Mo.
+ */
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
+/** Extensions image acceptées en repli quand `file.type` est absent. */
+const IMAGE_EXTENSIONS = /\.(gif|png|jpe?g|webp)$/i;
+
 /** Callback de notification (posé par main.js). */
 let onToast = () => {};
 
@@ -104,6 +113,21 @@ export function initChat({ onToast: toastCallback }) {
       onToast(error.message || "Envoi impossible.", "error");
     }
   });
+
+  // Bouton trombone : ouvre le sélecteur de fichier (images/GIF uniquement).
+  const attachBtn = document.getElementById("btn-attach");
+  const attachInput = document.getElementById("attach-input");
+  if (attachBtn && attachInput) {
+    attachBtn.addEventListener("click", () => attachInput.click());
+    attachInput.addEventListener("change", async () => {
+      const file = attachInput.files && attachInput.files[0];
+      // Réinitialise pour autoriser le ré-envoi du même fichier.
+      attachInput.value = "";
+      if (file) {
+        await sendAttachment(file);
+      }
+    });
+  }
 }
 
 /* ============================================================
@@ -508,6 +532,8 @@ export async function sendMessage(text) {
       sender: user ? user.username : "",
       nonce,
       ciphertext,
+      kind: "text",
+      mime: null,
       created_at: new Date().toISOString(),
       encrypted: true,
     };
@@ -524,6 +550,130 @@ export async function sendMessage(text) {
     lastMessageId = Math.max(lastMessageId, seqOf(created));
   }
   scrollToBottom();
+  return true;
+}
+
+/* ============================================================
+   Envoi de pièces jointes (images / GIF) — chiffrement E2E
+   ============================================================ */
+
+/**
+ * Vrai si le fichier est une image acceptable (type MIME ou extension).
+ * Le repli par extension couvre les navigateurs qui ne renseignent pas le type.
+ * @param {File} file
+ * @returns {boolean}
+ */
+function isImageFile(file) {
+  const type = typeof file.type === "string" ? file.type : "";
+  return type.startsWith("image/") || IMAGE_EXTENSIONS.test(String(file.name || ""));
+}
+
+/**
+ * Lit un fichier en mémoire sous forme d'ArrayBuffer (API FileReader).
+ * @param {File} file
+ * @returns {Promise<ArrayBuffer>}
+ */
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Lecture impossible."));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+/**
+ * Envoie une image/GIF chiffrée : lecture binaire → `encryptBytes` (AES-256-GCM)
+ * → POST /api/rooms/{id}/attachments. Affiche ensuite le message localement avec
+ * le même anti-doublon que `sendMessage` (seenIds, course WS, dernier `seq`).
+ * @param {File} file Fichier sélectionné (≤ 4 Mo, image).
+ * @returns {Promise<boolean>} true si l'image a été envoyée.
+ */
+export async function sendAttachment(file) {
+  if (!file) {
+    return false;
+  }
+  if (!currentRoomId) {
+    onToast("Aucun salon sélectionné.");
+    return false;
+  }
+
+  const roomKey = crypto.getRoomKey(currentRoomId);
+  if (!roomKey) {
+    onToast(
+      "Clé de salon non disponible sur ce navigateur : " +
+        "attendez qu'un membre la partage puis cliquez sur « Actualiser clés ».",
+    );
+    return false;
+  }
+
+  if (!isImageFile(file)) {
+    onToast("Seules les images et GIFs sont acceptés.", "error");
+    return false;
+  }
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    onToast("Image trop lourde (limite de 4 Mo).", "error");
+    return false;
+  }
+
+  let bytes;
+  try {
+    bytes = new Uint8Array(await readFileAsArrayBuffer(file));
+  } catch {
+    onToast("Lecture du fichier impossible.", "error");
+    return false;
+  }
+
+  const mime = (file.type || "").startsWith("image/")
+    ? file.type
+    : sniffImageMime(bytes) || "image/png";
+
+  const user = getCurrentUser();
+  const roomId = currentRoomId;
+  const { nonce, ciphertext } = await crypto.encryptBytes(roomKey, bytes);
+
+  let response;
+  try {
+    response = await api(`/api/rooms/${roomId}/attachments`, {
+      method: "POST",
+      body: { kind: "image", mime, nonce, ciphertext },
+    });
+  } catch (error) {
+    onToast(error.message || "Envoi de l'image impossible.", "error");
+    return false;
+  }
+
+  // Même logique que sendMessage : métadonnées serveur ou message local de repli.
+  const created = response && typeof response === "object" ? response.message : null;
+  let msg;
+  if (created && created.id != null) {
+    msg = newMessageFromRaw(created);
+  } else {
+    localCounter += 1;
+    msg = {
+      id: "local-" + localCounter,
+      room_id: roomId,
+      author_id: user ? user.id : null,
+      sender: user ? user.username : "",
+      nonce,
+      ciphertext,
+      kind: "image",
+      mime,
+      created_at: new Date().toISOString(),
+      encrypted: true,
+    };
+  }
+
+  if (String(roomId) === String(currentRoomId) && !seenIds.has(msg.id)) {
+    hideThreadHint();
+    await appendMessage(msg, roomKey);
+    seenIds.add(msg.id);
+  }
+  if (created != null && Number.isFinite(seqOf(created))) {
+    lastMessageId = Math.max(lastMessageId, seqOf(created));
+  }
+  scrollToBottom();
+  onToast("Image envoyée.", "success");
   return true;
 }
 
@@ -588,6 +738,9 @@ function newMessageFromRaw(raw) {
     sender: senderName,
     nonce: raw.nonce || null,
     ciphertext: raw.ciphertext || null,
+    // Type de contenu : "text" par défaut, "image" pour une pièce jointe.
+    kind: raw.kind != null ? raw.kind : "text",
+    mime: raw.mime != null ? raw.mime : null,
     created_at: raw.created_at || raw.createdAt || null,
   };
 }
@@ -637,24 +790,12 @@ async function buildMessageNode(msg, roomKey) {
   }
   body.appendChild(header);
 
-  // Contenu déchiffré (jamais injecté via innerHTML).
-  const textEl = document.createElement("div");
-  textEl.className = "message-text";
-  let decryptedText = null;
-  if (msg.nonce && msg.ciphertext && roomKey) {
-    try {
-      decryptedText = await crypto.decryptMessage(roomKey, msg.nonce, msg.ciphertext);
-    } catch {
-      decryptedText = null;
-    }
-  }
-  if (decryptedText !== null) {
-    textEl.textContent = decryptedText;
+  // Contenu : texte ou image déchiffrés (jamais injecté via innerHTML).
+  if (msg.kind === "image") {
+    await appendImageContent(item, body, msg, roomKey);
   } else {
-    item.classList.add("message--locked");
-    textEl.textContent = "[Message chiffré — clé de salon non disponible sur ce navigateur]";
+    await appendEncryptedText(item, body, msg, roomKey);
   }
-  body.appendChild(textEl);
   item.appendChild(body);
 
   // Menu « Supprimer » : auteur uniquement, visible au survol.
@@ -679,6 +820,107 @@ async function buildMessageNode(msg, roomKey) {
   }
 
   return item;
+}
+
+/**
+ * Déchiffre le texte d'un message et l'ajoute à la colonne de contenu.
+ * En cas de clé manquante ou d'échec AEAD, marque le message « verrouillé ».
+ * @param {HTMLElement} item Noeud `.message`.
+ * @param {HTMLElement} body Colonne `.message-body`.
+ * @param {object} msg Message normalisé.
+ * @param {CryptoKey|null} roomKey Clé de salon.
+ */
+async function appendEncryptedText(item, body, msg, roomKey) {
+  const textEl = document.createElement("div");
+  textEl.className = "message-text";
+  let decryptedText = null;
+  if (msg.nonce && msg.ciphertext && roomKey) {
+    try {
+      decryptedText = await crypto.decryptMessage(roomKey, msg.nonce, msg.ciphertext);
+    } catch {
+      decryptedText = null;
+    }
+  }
+  if (decryptedText !== null) {
+    textEl.textContent = decryptedText;
+  } else {
+    item.classList.add("message--locked");
+    textEl.textContent =
+      "[Message chiffré — clé de salon non disponible sur ce navigateur]";
+  }
+  body.appendChild(textEl);
+}
+
+/**
+ * Déchiffre une image et l'affiche via une balise `<img>` dont la source est
+ * posée par propriété (`src`), jamais par `innerHTML`. Le MIME est celui
+ * annoncé par le message, sinon deviné depuis les premiers octets, sinon PNG.
+ * Repli « verrouillé » si la clé de salon manque ou si le déchiffrement échoue.
+ * @param {HTMLElement} item Noeud `.message`.
+ * @param {HTMLElement} body Colonne `.message-body`.
+ * @param {object} msg Message normalisé (kind === "image").
+ * @param {CryptoKey|null} roomKey Clé de salon.
+ */
+async function appendImageContent(item, body, msg, roomKey) {
+  let bytes = null;
+  if (msg.nonce && msg.ciphertext && roomKey) {
+    try {
+      bytes = await crypto.decryptBytes(roomKey, msg.nonce, msg.ciphertext);
+    } catch {
+      bytes = null;
+    }
+  }
+  if (!bytes) {
+    item.classList.add("message--locked");
+    const locked = document.createElement("div");
+    locked.className = "message-text";
+    locked.textContent = "[Image chiffrée — clé de salon non disponible]";
+    body.appendChild(locked);
+    return;
+  }
+
+  // MIME de l'annonce reconnu, sinon deviné depuis les octets, sinon PNG.
+  const announced = msg.mime && /^image\//.test(msg.mime) ? msg.mime : null;
+  const mime = announced || sniffImageMime(bytes) || "image/png";
+  const img = document.createElement("img");
+  img.className = "message-image";
+  img.src = `data:${mime};base64,${crypto.bytesToBase64(bytes)}`;
+  img.alt = "Image partagée";
+  img.loading = "lazy";
+  body.appendChild(img);
+}
+
+/**
+ * Devine un MIME d'image courant depuis la signature binaire (magic bytes).
+ * Utilisé uniquement quand le serveur n'a pas fourni de `mime`.
+ * @param {Uint8Array} bytes
+ * @returns {string|null} ex. "image/png", ou null si inconnu.
+ */
+function sniffImageMime(bytes) {
+  if (!bytes || bytes.length < 4) {
+    return null;
+  }
+  // PNG : 89 50 4E 47
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return "image/png";
+  }
+  // JPEG : FF D8
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    return "image/jpeg";
+  }
+  // GIF : 47 49 46 38 ("GIF8")
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return "image/gif";
+  }
+  // WEBP : "RIFF" .... "WEBP"
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return null;
 }
 
 /**

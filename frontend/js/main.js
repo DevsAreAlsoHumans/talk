@@ -212,6 +212,73 @@ function showAppView() {
 }
 
 /* ---------------------------------------------------------------------------
+   Menu « Paramètres » (identité du compte + actions)
+   ------------------------------------------------------------------------- */
+
+/**
+ * Copie l'identifiant de l'utilisateur courant puis notifie.
+ * Réutilise `rooms.copyTextToClipboard` (même repli execCommand que la copie
+ * de l'identifiant de salon) pour ne pas dupliquer la logique presse-papier.
+ */
+async function copyCurrentUserId() {
+  const user = auth.getCurrentUser();
+  if (!user || user.id == null) {
+    showToast("Identifiant indisponible.", "error");
+    return;
+  }
+  try {
+    await rooms.copyTextToClipboard(String(user.id));
+    showToast("Identifiant copié.", "success");
+  } catch {
+    showToast("Copie impossible sur ce navigateur.", "error");
+  }
+}
+
+/**
+ * Construit le menu « Paramètres » ancré sur le bouton d'en-tête :
+ * en-tête profil, copie d'id, changement de mot de passe, déconnexion.
+ * @param {HTMLElement} anchor Bouton `#btn-settings`.
+ */
+function openSettingsMenu(anchor) {
+  const user = auth.getCurrentUser();
+  const username = user && user.username ? user.username : "";
+  ui.openMenu(anchor, [
+    { header: true, label: username || "Utilisateur" },
+    { label: "Copier mon identifiant", onClick: copyCurrentUserId },
+    {
+      label: "Changer le mot de passe",
+      onClick: () => auth.openPasswordModal(),
+    },
+    { separator: true },
+    { label: "Se déconnecter", danger: true, onClick: handleLogout },
+  ]);
+}
+
+/**
+ * Déconnexion confirmée : détruit la session serveur, arrête le temps réel et
+ * revient à l'écran d'authentification (rechargement propre de l'application).
+ * Comportement repris à l'identique de l'ancien bouton `#btn-logout`.
+ */
+async function handleLogout() {
+  const ok = await ui.confirmDialog({
+    title: "Déconnexion",
+    message: "Se déconnecter de ce navigateur ?",
+    confirmLabel: "Se déconnecter",
+    danger: false,
+  });
+  if (!ok) {
+    return;
+  }
+  authenticated = false;
+  closeWs();
+  stopPolling();
+  ui.closeAllModals();
+  await auth.logout();
+  // Recharge propre de l'application (état mémoire remis à zéro).
+  window.location.reload();
+}
+
+/* ---------------------------------------------------------------------------
    Démarrage
    ------------------------------------------------------------------------- */
 
@@ -283,24 +350,11 @@ async function main() {
   rooms.initRooms(uiCallbacks);
   chat.initChat(uiCallbacks);
 
-  // Déconnexion (session détruite puis retour à l'écran d'authentification).
-  document.getElementById("btn-logout").addEventListener("click", async () => {
-    const ok = await ui.confirmDialog({
-      title: "Déconnexion",
-      message: "Se déconnecter de ce navigateur ?",
-      confirmLabel: "Se déconnecter",
-      danger: false,
-    });
-    if (!ok) {
-      return;
-    }
-    authenticated = false;
-    closeWs();
-    stopPolling();
-    ui.closeAllModals();
-    await auth.logout();
-    // Recharge propre de l'application (état mémoire remis à zéro).
-    window.location.reload();
+  // Menu « Paramètres » (haut gauche) : identité + actions de compte.
+  // Ce regroupement remplace les anciens boutons séparés de la sidebar.
+  document.getElementById("btn-settings").addEventListener("click", (event) => {
+    event.stopPropagation();
+    openSettingsMenu(event.currentTarget);
   });
 
   // Reconnexion au WS quand l'onglet redevient visible.

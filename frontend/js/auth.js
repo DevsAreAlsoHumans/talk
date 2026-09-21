@@ -161,11 +161,11 @@ export function initAuth({ onAuthenticated: cb, onToast: toastCallback }) {
   }
 
   /* ------------------------------------------------------------
-     Changement de mot de passe (modale accessible depuis la sidebar)
+     Changement de mot de passe.
+     Le déclencheur vit désormais dans le menu « Paramètres »
+     (voir main.js → openSettingsMenu), qui appelle openPasswordModal().
+     Ici on ne branche que la modale elle-même (annulation + soumission).
      ------------------------------------------------------------ */
-  document.getElementById("btn-change-password").addEventListener("click", () => {
-    openPasswordModal();
-  });
   document.getElementById("btn-cancel-change-password").addEventListener("click", () => {
     ui.closeModal(document.getElementById("modal-change-password"));
   });
@@ -177,8 +177,11 @@ export function initAuth({ onAuthenticated: cb, onToast: toastCallback }) {
   });
 }
 
-/** Ouvre la modale de changement de mot de passe (champs vidés). */
-function openPasswordModal() {
+/**
+ * Ouvre la modale de changement de mot de passe (champs vidés).
+ * Exportée pour être déclenchée depuis le menu « Paramètres » (main.js).
+ */
+export function openPasswordModal() {
   const modal = document.getElementById("modal-change-password");
   document.getElementById("cp-old").value = "";
   document.getElementById("cp-new").value = "";

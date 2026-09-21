@@ -127,8 +127,15 @@ export function closeMenu() {
 
 /**
  * Ouvre un menu contextuel ancré à un bouton, positionné en fixed.
+ *
+ * Entrées supportées (les menus existants restent compatibles) :
+ *   - `{label, danger?, disabled?, onClick?}` : entrée cliquable ;
+ *   - `{separator: true}` : séparateur horizontal non interactif ;
+ *   - `{header: true, label: pseudo}` : en-tête non cliquable (avatar teinté
+ *     + pseudo). Le pseudo passe par `textContent` (aucune donnée via HTML).
+ *
  * @param {HTMLElement} anchor Élément de référence (bouton "...").
- * @param {Array<{label: string, danger?: boolean, onClick?: () => void}>} items
+ * @param {Array<object>} items
  */
 export function openMenu(anchor, items) {
   closeMenu();
@@ -138,6 +145,18 @@ export function openMenu(anchor, items) {
   menu.setAttribute("role", "menu");
 
   for (const item of items) {
+    if (item.separator) {
+      const separator = document.createElement("div");
+      separator.className = "dropdown-separator";
+      separator.setAttribute("role", "separator");
+      menu.appendChild(separator);
+      continue;
+    }
+    if (item.header) {
+      menu.appendChild(buildMenuHeader(item.label));
+      continue;
+    }
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "dropdown-item" + (item.danger ? " dropdown-item--danger" : "");
@@ -180,6 +199,29 @@ export function openMenu(anchor, items) {
     firstItem.focus();
   }
   return { close: closeMenu };
+}
+
+/**
+ * En-tête de menu non interactif : avatar teinté (hue déterministe) + pseudo.
+ * @param {string} username Pseudo affiché (texte pur).
+ * @returns {HTMLElement}
+ */
+function buildMenuHeader(username) {
+  const name = String(username || "");
+  const header = document.createElement("div");
+  header.className = "dropdown-header";
+
+  const avatar = document.createElement("span");
+  avatar.className = "avatar avatar--sm " + avatarHueClass(name || "?");
+  avatar.textContent = name ? name.charAt(0).toUpperCase() : "?";
+  header.appendChild(avatar);
+
+  const label = document.createElement("span");
+  label.className = "dropdown-header-name";
+  label.textContent = name || "Inconnu";
+  header.appendChild(label);
+
+  return header;
 }
 
 /* ============================================================

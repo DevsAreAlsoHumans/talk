@@ -467,10 +467,13 @@ function requestCopyRoomId() {
  * - API moderne `navigator.clipboard.writeText` (contexte sécurisé) ;
  * - repli `document.execCommand("copy")` sur un `<textarea>` hors écran
  *   (classe `.clipboard-helper`, aucun style inline — CSP respectée).
+ *
+ * Exportée pour être réutilisée par le menu « Paramètres » (main.js) pour la
+ * copie de l'identifiant utilisateur, sans dupliquer la logique de repli.
  * @param {string} text
  * @returns {Promise<void>} résolue une fois le texte copié.
  */
-async function copyTextToClipboard(text) {
+export async function copyTextToClipboard(text) {
   if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
     try {
       await navigator.clipboard.writeText(text);

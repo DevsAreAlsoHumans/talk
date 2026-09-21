@@ -1,9 +1,14 @@
-"""Messages des salons : historique (polling), envoi et suppression, avec diffusion WS.
+"""Messages des salons : historique (polling), envoi, pièces jointes et suppression.
 
 Le serveur ne manipule que du chiffré (nonce + ciphertext, en base64). Après
 création, un événement ``new_message`` est diffusé aux abonnés WebSocket ;
 après suppression, un événement ``message_deleted``. L'historique est paginable
 (``?before=``/``?limit=``) avec un comportement par défaut identique à la v1.
+
+Les images/GIF trop volumineux pour ``POST /messages`` (ciphertext plafonné à
+4096 caractères) passent par ``POST /{room_id}/attachments`` : même stockage
+``message:{id}`` (nonce + ciphertext, jamais de clair), avec ``kind="image"`` et
+un ``mime`` optionnel ; l'événement WS et l'historique sont identiques.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from app.api.deps import get_current_user, get_room_or_404, require_member
 from app.db.redis import get_redis
 from app.realtime.hub import InProcessHub, get_hub
 from app.repositories import messages
-from app.schemas import MessageCreate
+from app.schemas import AttachmentCreate, MessageCreate
 
 router = APIRouter(prefix="/rooms", tags=["messages"])
 
@@ -63,6 +68,42 @@ def post_message(
     get_room_or_404(redis, room_id)
     require_member(redis, room_id, user["id"])
     message = messages.create_message(redis, room_id, user["id"], body.nonce, body.ciphertext)
+    background.add_task(
+        hub.publish,
+        room_id,
+        {"type": "new_message", "payload": message},
+    )
+    return {"message": message}
+
+
+@router.post("/{room_id}/attachments", response_model=dict, status_code=201)
+def post_attachment(
+    room_id: str,
+    body: AttachmentCreate,
+    background: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+    hub: InProcessHub = Depends(get_hub),
+) -> dict:
+    """Crée une pièce jointe chiffrée (image) et diffuse ``new_message``.
+
+    Mêmes contrôles d'accès que ``POST /messages`` (auth, 404 salon, 403 membre).
+    Le serveur ne stocke que ``nonce`` + ``ciphertext`` (base64) : le champ
+    ``kind`` vaut ``"image"`` et ``mime`` (optionnel) est conservé pour que le
+    frontend sache comment décoder l'image. La diffusion WebSocket est
+    strictement identique à celle d'un message textuel.
+    """
+    get_room_or_404(redis, room_id)
+    require_member(redis, room_id, user["id"])
+    message = messages.create_message(
+        redis,
+        room_id,
+        user["id"],
+        body.nonce,
+        body.ciphertext,
+        kind=body.kind,
+        mime=body.mime,
+    )
     background.add_task(
         hub.publish,
         room_id,

@@ -9,11 +9,12 @@ from app.schemas.auth import (
     UserPublic,
     valid_public_key,
 )
-from app.schemas.messages import Message, MessageCreate
+from app.schemas.messages import AttachmentCreate, Message, MessageCreate
 from app.schemas.rooms import KeyWrapRequest, MemberPublic, Room, RoomCreate
 
 __all__ = [
     "USERNAME_PATTERN",
+    "AttachmentCreate",
     "AuthResponse",
     "ChangePasswordRequest",
     "KeyWrapRequest",

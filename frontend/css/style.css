@@ -736,12 +736,17 @@ input[type="password"]:focus {
   margin-top: var(--space-2);
 }
 
-/* Message groupé : 2px, avatar et en-tête masqués (colonne conservée). */
+/* Message groupé : 2px au-dessus, avatar masqué et en-tête retiré.
+   L'avatar est masqué en `visibility` (et non `display`) pour conserver la
+   colonne : le texte des messages groupés reste ainsi aligné sur celui du
+   premier message du groupe (style Discord).
+   Le sélecteur cible `.avatar--message` (classe réellement posée par chat.js),
+   et non `.message-avatar` qui n'existe plus dans le DOM. */
 .message--grouped {
   margin-top: 2px;
 }
 
-.message--grouped .message-avatar {
+.message--grouped .avatar--message {
   visibility: hidden;
 }
 
@@ -792,6 +797,26 @@ input[type="password"]:focus {
 .message--locked .message-text {
   color: var(--text-dim);
   font-style: italic;
+}
+
+/* Pièce jointe image (déchiffrée puis posée en data: URL par chat.js). */
+.message-image {
+  display: block;
+  max-width: 360px;
+  max-height: 260px;
+  width: auto;
+  height: auto;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  margin-top: 2px;
+  cursor: zoom-in;
+  background: var(--bg-app);
+  transition: opacity var(--dur-1) ease, filter var(--dur-1) ease;
+}
+
+.message-image:hover {
+  opacity: 0.92;
+  filter: brightness(1.06);
 }
 
 /* Bouton d'actions du message (auteur uniquement), visible au survol. */
@@ -1047,6 +1072,32 @@ input[type="password"]:focus {
 .dropdown-item--danger:focus-visible {
   background: var(--danger);
   color: #fff;
+}
+
+/* En-tête de menu non cliquable : avatar teinté + pseudo. */
+.dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.6rem 0.55rem;
+  margin-bottom: 0.15rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.dropdown-header-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Séparateur horizontal entre groupes d'actions. */
+.dropdown-separator {
+  height: 1px;
+  margin: 0.3rem 0.4rem;
+  background: var(--border);
 }
 
 /* ------------------------------------------------------------

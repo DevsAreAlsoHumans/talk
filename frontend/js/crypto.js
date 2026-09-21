@@ -363,3 +363,52 @@ export async function decryptMessage(roomKey, nonceBase64, ciphertextBase64) {
   }
   return decodeText(plaintext);
 }
+
+/* ============================================================
+   Pièces jointes binaires (images / GIF), mêmes garanties que les messages
+   ============================================================ */
+
+/**
+ * Chiffre des octets binaires (image, GIF…) avec la clé de salon.
+ * Même schéma que `encryptMessage` : AES-256-GCM, nonce aléatoire de 12 octets,
+ * résultat encodé en base64. Aucune donnée en clair ne quitte le navigateur.
+ *
+ * @param {CryptoKey} roomKey
+ * @param {ArrayBuffer|Uint8Array} bytes Contenu binaire (ex. image).
+ * @returns {Promise<{nonce: string, ciphertext: string}>} (base64)
+ */
+export async function encryptBytes(roomKey, bytes) {
+  const nonce = crypto.getRandomValues(new Uint8Array(MESSAGE_NONCE_LENGTH));
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: nonce },
+    roomKey,
+    data,
+  );
+  return {
+    nonce: bytesToBase64(nonce),
+    ciphertext: bytesToBase64(ciphertext),
+  };
+}
+
+/**
+ * Déchiffre des octets binaires (image, GIF…) avec la clé de salon.
+ * @param {CryptoKey} roomKey
+ * @param {string} nonceBase64
+ * @param {string} ciphertextBase64
+ * @returns {Promise<Uint8Array>} contenu binaire clair.
+ * @throws {Error} si l'authentification AEAD échoue (clé/nonce invalides).
+ */
+export async function decryptBytes(roomKey, nonceBase64, ciphertextBase64) {
+  let plaintext;
+  try {
+    plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: base64ToBytes(nonceBase64) },
+      roomKey,
+      base64ToBytes(ciphertextBase64),
+    );
+  } catch (error) {
+    throw new Error("Déchiffrement impossible (clé de salon invalide ?).");
+  }
+  return new Uint8Array(plaintext);
+}
