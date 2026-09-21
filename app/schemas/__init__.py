@@ -10,7 +10,7 @@ from app.schemas.auth import (
     valid_public_key,
 )
 from app.schemas.messages import AttachmentCreate, Message, MessageCreate
-from app.schemas.rooms import KeyWrapRequest, MemberPublic, Room, RoomCreate
+from app.schemas.rooms import KeyWrapRequest, MemberPublic, Room, RoomCreate, RoomKeyView
 
 __all__ = [
     "USERNAME_PATTERN",
@@ -25,6 +25,7 @@ __all__ = [
     "RegisterRequest",
     "Room",
     "RoomCreate",
+    "RoomKeyView",
     "UserPublic",
     "valid_public_key",
 ]

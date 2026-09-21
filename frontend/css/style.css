@@ -736,10 +736,13 @@ input[type="password"]:focus {
   margin-top: var(--space-2);
 }
 
-/* Message groupé : 2px au-dessus, avatar masqué et en-tête retiré.
-   L'avatar est masqué en `visibility` (et non `display`) pour conserver la
-   colonne : le texte des messages groupés reste ainsi aligné sur celui du
-   premier message du groupe (style Discord).
+/* Message groupé : 2px au-dessus, avatar retiré du flux et en-tête masqué.
+   L'avatar est retiré du flux avec `display: none` (et non plus `visibility`)
+   pour que la hauteur de la ligne dépende uniquement du contenu : un texte
+   d'une ligne donne une ligne fine, un texte long donne une ligne haute.
+   Le `padding-left` du corps compense la colonne avatar (38px) + le `gap` de
+   `.message` (0.85rem) : le texte des messages groupés reste aligné sous le
+   corps du premier message du groupe (style Discord).
    Le sélecteur cible `.avatar--message` (classe réellement posée par chat.js),
    et non `.message-avatar` qui n'existe plus dans le DOM. */
 .message--grouped {
@@ -747,7 +750,11 @@ input[type="password"]:focus {
 }
 
 .message--grouped .avatar--message {
-  visibility: hidden;
+  display: none;
+}
+
+.message--grouped .message-body {
+  padding-left: calc(38px + 0.85rem);
 }
 
 .message--grouped .message-header {

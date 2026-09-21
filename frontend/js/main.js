@@ -331,6 +331,11 @@ async function main() {
         connectWs();
         startPolling();
 
+        // Restaure les clés de salon depuis les copies enveloppées du serveur
+        // (après un rechargement, elles ne vivent qu'en mémoire) pour que le
+        // premier salon ouvert s'affiche directement déchiffré.
+        await rooms.restoreRoomKeys();
+
         if (roomList.length > 0) {
           await rooms.selectRoom(roomList[0].id);
         } else {

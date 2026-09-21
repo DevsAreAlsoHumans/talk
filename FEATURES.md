@@ -174,3 +174,30 @@ AES-256-GCM) → 201 `kind="image"`/`mime="image/png"` → présent dans `GET /m
 `kind="text"`, `mime=null`. Les trois premières tentatives de script ont échoué pour des
 raisons de **script** (Origin `testserver` du helper vs serveur réel ; nonce dupliqué), jamais
 le produit.
+
+### 6.6 Correctifs v3.1 (retours utilisateur)
+
+| Problème signalé | Cause | Correctif |
+|---|---|---|
+| « Les messages groupés (2ᵉ, 3ᵉ…) sont trop grands » | L'avatar groupé était masqué en `visibility: hidden` mais **restait dans le flux flex** (38×38) → chaque ligne groupée faisait au minimum 38 px | `display: none` + `padding-left: calc(38px + 0.85rem)` sur `.message-body` : la ligne épouse la hauteur du texte et reste alignée sous le corps du premier message |
+| « Après rechargement de la page, plus accès au salon » | Les clés de salon ne vivent qu'en mémoire (`crypto.roomKeys`) et aucun chemin ne les restaurait ; le serveur n'exposait que l'**écriture** (`POST /keys`) | Nouvel endpoint de lecture + restauration automatique (voir ci-dessous) |
+
+**Nouvel endpoint v3.1 — restauration des clés :**
+
+| Méthode | Route | Rôle | CSRF |
+|---|---|---|---|
+| GET | `/api/rooms/{id}/keys` | Renvoie **la copie enveloppée du membre courant** : `{"room_id": "<id>", "wrapped_key": "<base64>"\|null}` — `null` si aucune copie à son nom ; 403 non-membre, 404 salon inconnu. La copie est chiffrée RSA-OAEP pour sa clé publique : même vue par un autre membre, elle resterait illisible | non |
+
+- **Frontend** : `rooms.restoreRoomKeys()` (appelé après `/api/me` au boot) récupère les copies
+  enveloppées de **tous** les salons et les dé-chiffre avec la clé privée locale ; restauration
+  opportuniste dans `selectRoom` si un salon est ouvert avant la fin du balayage. Le premier
+  salon ouvert s'affiche donc **directement déchiffré** après un F5.
+- Comportements conservés : membre sans copie à son nom → messages « verrouillés » (un autre
+  membre doit partager via « Actualiser clés » ou l'événement `room_key`) ; `refreshCurrentRoomKeys`
+  (ré-enveloppement *pour les autres*) inchangé.
+
+**Tests v3.1** — `tests/integration/test_room_keys.py` (3 nouveaux) : récupération exacte de sa
+copie enveloppée ; `null` avant partage puis **déchiffrement bout-en-bout** après partage (unwrap
++ relecture du message = preuve de la restauration) ; non-membre → 403. Total : **152 tests**.
+Smoke test sur le serveur réel : nouvelle session (simulation de rechargement) → `GET /keys` →
+`unwrap` → clé identique à celle du salon → message chiffré relu à l'identique.

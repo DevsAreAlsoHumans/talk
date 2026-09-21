@@ -1,7 +1,10 @@
 """Salons : listing, création, membres, join, leave, clés de salon enveloppées.
 
 Contrôles d'accès : 404 si le salon n'existe pas, 403 si l'appelant n'en est
-pas membre (sauf join).
+pas membre (sauf join). Les copies enveloppées de clés de salon s'écrivent via
+``POST /{room_id}/keys`` (diffusion WS ``room_key``) et se relisent via
+``GET /{room_id}/keys`` : lecture seule, membre du salon obligatoire, qui
+permet au frontend de restaurer sa copie après un rechargement de page.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from app.api.deps import get_current_user, get_room_or_404, require_member
 from app.db.redis import get_redis
 from app.realtime.hub import InProcessHub, get_hub
 from app.repositories import rooms, users
-from app.schemas import KeyWrapRequest, MemberPublic, Room, RoomCreate
+from app.schemas import KeyWrapRequest, MemberPublic, Room, RoomCreate, RoomKeyView
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -110,6 +113,28 @@ def leave_room(
         )
     response.status_code = 204
     return response
+
+
+@router.get("/{room_id}/keys", response_model=RoomKeyView)
+def get_my_wrapped_key(
+    room_id: str,
+    user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    """Renvoie la copie de la clé de salon enveloppée au nom de l'appelant.
+
+    Endpoint de lecture seul (aucune diffusion WebSocket, pas de CSRF requis) :
+    il permet au frontend de restaurer sa clé de salon après un rechargement
+    de page qui a vidé la mémoire du navigateur. 404 si le salon est inconnu,
+    403 si l'appelant n'en est pas membre ; ``wrapped_key`` vaut ``null`` tant
+    qu'aucune copie n'a été posée à son nom. Le serveur ne renvoie que le
+    chiffré RSA-OAEP stocké pour l'utilisateur courant — jamais la clé en
+    clair, jamais la copie d'un autre membre.
+    """
+    get_room_or_404(redis, room_id)
+    require_member(redis, room_id, user["id"])
+    wrapped_key = rooms.list_wrapped_keys(redis, room_id).get(user["id"])
+    return {"room_id": room_id, "wrapped_key": wrapped_key}
 
 
 @router.post("/{room_id}/keys", status_code=201)

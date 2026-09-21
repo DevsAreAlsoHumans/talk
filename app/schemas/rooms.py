@@ -33,6 +33,19 @@ class MemberPublic(BaseModel):
     online: bool = False
 
 
+class RoomKeyView(BaseModel):
+    """Réponse de ``GET /api/rooms/{room_id}/keys`` (lecture seule).
+
+    Renvoie la copie de la clé de salon enveloppée à destination de
+    l'utilisateur courant — jamais celle d'un autre membre, jamais de clé en
+    clair. ``wrapped_key`` vaut ``None`` tant qu'aucune copie n'a été posée
+    à son nom (200, pas d'erreur).
+    """
+
+    room_id: str
+    wrapped_key: str | None
+
+
 class KeyWrapRequest(BaseModel):
     """Corps de ``POST /api/rooms/{room_id}/keys`` (clé de salon enveloppée)."""
 

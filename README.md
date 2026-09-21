@@ -62,7 +62,7 @@ app/                     # Backend FastAPI
   api/                   # endpoints (auth, rooms, messages, users, csrf)
   realtime/              # hub in-process + endpoint /ws
 frontend/                # HTML/CSS/JS vanilla (WebCrypto), servi à la racine
-tests/                   # 149 tests : unitaires + intégration + sécurité
+tests/                   # 152 tests : unitaires + intégration + sécurité
   helpers/crypto_client.py   # « navigateur de référence » en Python (validé contre le contrat E2E)
 ```
 
@@ -101,6 +101,7 @@ tests/                   # 149 tests : unitaires + intégration + sécurité
 | POST | `/api/rooms/{id}/join` | Rejoindre un salon |
 | POST | `/api/rooms/{id}/leave` | Quitter un salon |
 | POST | `/api/rooms/{room_id}/keys` | Enregistrer une copie enveloppée de la clé de salon |
+| GET | `/api/rooms/{id}/keys` | Récupérer **sa propre** copie enveloppée (restauration des clés après un rechargement) |
 | GET | `/api/rooms/{id}/messages?after=<seq>` | Historique chiffré (ou reprise de connexion) |
 | GET | `/api/rooms/{id}/messages?limit=<n>` | Les `n` derniers messages (défaut historique complet) |
 | GET | `/api/rooms/{id}/messages?before=<seq>&limit=<n>` | Page des `n` messages antérieurs à `seq` (pagination remontante) |
@@ -158,7 +159,7 @@ Puis ouvrir **http://localhost:8000**.
 ## 7. Tests & qualité
 
 ```bash
-.venv/bin/pytest -v                 # 149 tests (unitaires + intégration + sécurité)
+.venv/bin/pytest -v                 # 152 tests (unitaires + intégration + sécurité)
 .venv/bin/ruff check .              # linter — 0 erreur
 .venv/bin/ruff format --check .     # formatage — conforme
 ```
@@ -201,6 +202,6 @@ La **CI** (`.github/workflows/ci.yml`) exécute à chaque push / pull request : 
 ## 9. Rendu
 
 - Branche : **`etudiant/barraud-teddy`** (CE projet).
-- CI : verte sur la branche (lint + 149 tests + build docker).
+- CI : verte sur la branche (lint + 152 tests + build docker).
 - Licence : Apache 2.0 (fichier `LICENSE`).
 - Énoncé du sujet : `EXAMEN.md` (référence).

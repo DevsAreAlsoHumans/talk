@@ -407,6 +407,15 @@ export async function selectRoom(roomId) {
 
   await refreshMembers();
 
+  // Restauration opportuniste : si la clé du salon manque (par ex. après un
+  // rechargement de page), on tente de la récupérer depuis la copie enveloppée
+  // que le serveur conserve à notre nom. Silencieux en cas d'échec.
+  // Sans risque de course avec un éventuel `restoreRoomKeys()` en vol :
+  // `storeRoomKey` est idempotent et les deux écrivent la même valeur de clé.
+  if (!crypto.getRoomKeyRaw(currentRoom.id)) {
+    await restoreRoomKey(currentRoom.id);
+  }
+
   // Ouvre le fil de discussion (chargement + déchiffrement de l'historique).
   await chat.openRoom(currentRoom.id, currentMembers);
 
@@ -437,6 +446,60 @@ export function hideRoomUI() {
   if (idBadge) {
     idBadge.hidden = true;
   }
+}
+
+/* ============================================================
+   Restauration des clés de salon (rechargement de page)
+   ============================================================ */
+
+/**
+ * Tente de restaurer la clé de salon d'un salon depuis la copie enveloppée que
+ * le serveur conserve à notre nom (GET /api/rooms/{id}/keys). Silencieux :
+ * tout échec renvoie `false` sans jamais lever d'exception (salon sauté).
+ * @param {string|number} roomId
+ * @returns {Promise<boolean>} true si une clé a été restaurée.
+ */
+async function restoreRoomKey(roomId) {
+  // Clé déjà présente en mémoire : rien à faire.
+  if (crypto.getRoomKeyRaw(roomId)) {
+    return false;
+  }
+  // Clé privée pas encore déchiffrée : la restauration est impossible.
+  const privateKey = crypto.getUserPrivateKey();
+  if (!privateKey) {
+    return false;
+  }
+  try {
+    const data = await api(`/api/rooms/${roomId}/keys`);
+    const wrapped = data && data.wrapped_key;
+    if (!wrapped) {
+      return false; // aucune copie enveloppée à notre nom
+    }
+    const { key, raw } = await crypto.unwrapRoomKeyFor(wrapped, privateKey);
+    crypto.storeRoomKey(roomId, { key, raw });
+    return true;
+  } catch {
+    return false; // erreur isolée : le salon est sauté
+  }
+}
+
+/**
+ * Restaure les clés de salon manquantes (après un F5, les clés ne vivent qu'en
+ * mémoire) depuis les copies enveloppées du serveur. Une erreur individuelle ne
+ * bloque pas les autres salons.
+ * @returns {Promise<number>} nombre de clés restaurées.
+ */
+export async function restoreRoomKeys() {
+  if (!crypto.getUserPrivateKey()) {
+    return 0;
+  }
+  let restored = 0;
+  for (const room of roomsList) {
+    if (await restoreRoomKey(room.id)) {
+      restored += 1;
+    }
+  }
+  return restored;
 }
 
 /* ============================================================
