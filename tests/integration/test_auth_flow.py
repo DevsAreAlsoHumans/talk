@@ -17,7 +17,15 @@ from tests.helpers.crypto_client import (
 async def test_register_returns_public_user_and_csrf(client) -> None:
     data = await register(client, "alice_r", "password123")
     user = data["user"]
-    assert set(user) == {"id", "username", "public_key", "created_at"}
+    assert set(user) == {
+        "id",
+        "username",
+        "public_key",
+        "created_at",
+        "display_name",
+        "about",
+    }
+    assert user["display_name"] is None and user["about"] is None
     assert data["csrf_token"]
     # Le mot de passe ne transite jamais dans la réponse.
     assert "password123" not in repr(data)

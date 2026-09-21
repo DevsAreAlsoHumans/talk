@@ -1,8 +1,8 @@
-# FEATURES.md — Plan d'évolution « talk » v2 + v3 (branche `etudiant/barraud-teddy`)
+# FEATURES.md — Plan d'évolution « Caché » (ex-talk) v2, v3, v3.1 & v4 (branche `etudiant/barraud-teddy`)
 
-> Document de traçabilité des itérations 2 et 3 : nouvelles fonctionnalités,
-> contract API, décisions techniques. Chaque évolution est **rétro-compatible**
-> avec le contrat v1 (rien ne casse : les **149 tests**, dont les 118 initiaux,
+> Document de traçabilité des itérations 2, 3, 3.1 et 4 : nouvelles fonctionnalités,
+> contrats API, décisions techniques. Chaque évolution est **rétro-compatible**
+> avec le contrat v1 (rien ne casse : les **161 tests**, dont les 118 initiaux,
 > restent verts).
 
 ---
@@ -201,3 +201,81 @@ copie enveloppée ; `null` avant partage puis **déchiffrement bout-en-bout** ap
 + relecture du message = preuve de la restauration) ; non-membre → 403. Total : **152 tests**.
 Smoke test sur le serveur réel : nouvelle session (simulation de rechargement) → `GET /keys` →
 `unwrap` → clé identique à celle du salon → message chiffré relu à l'identique.
+
+---
+
+## 7. Itération 4 (v4) — Markdown, édition de messages, profils « Discord-like », marque « Caché »
+
+### 7.1 Direction produit
+
+| Besoin utilisateur | Fonctionnalité livrée | Bloc de la grille |
+|---|---|---|
+| « Je veux mettre en forme mes messages (Discord) » | **Rendu Markdown** dans le fil : gras, italique, souligné, barré, code inline/blocs, citations, titres, listes, liens `http(s)` seuls | Fonctionnalités · Sécurité |
+| « J'ai écrit une bêtise, je veux corriger mon message » | **Édition d'un message** par son auteur (re-chiffré de bout en bout, badge « · modifié », diffusion temps réel) | Fonctionnalités |
+| « Je veux un profil à la Discord » | **Fiche profil** (avatar, `display_name`, `@username`, id copiable, « À propos ») + **personnalisation** (`display_name`, `about`) depuis le menu Paramètres | Fonctionnalités |
+| « talk, c'est pas très fun » | **Rebranding « Caché »** : nom affiché sur le site (page d'accueil, onglet, sidebar) | — |
+
+### 7.2 Contrat d'API v4 (ajouts — rien d'existant ne change)
+
+| Méthode | Route | Rôle | CSRF |
+|---|---|---|---|
+| PATCH | `/api/rooms/{room_id}/messages/{message_id}` | Éditer un message : `{nonce, ciphertext}` **sur le même modèle que `POST /messages`** (nouvelle version chiffrée du texte). Auteur uniquement (403 sinon) ; 404 si message inconnu ou d'un autre salon ; `created_at`/`seq`/`kind`/`mime` **préservés** ; le hash gagne `edited: 1`. Réponse 200 `{"message": {...}}` (avec `edited: true`) + événement WS **`message_updated`** (payload = message complet) | oui |
+| PATCH | `/api/me` | Profil public : `{display_name?: str\|null (≤ 32), about?: str\|null (≤ 500)}`, `extra="forbid"`, strip, **vide → `null`**, **champ omis → inchangé** (`model_fields_set`). Réponse 200 `{"user": <to_public>}` | oui |
+
+**Évolutions de forme (additives, rétro-compatibles) :**
+- `Message` gagne `edited: bool` (`false` par défaut ; les anciens messages hydratés valent `false`),
+  présent dans `GET /messages` et les événements WS.
+- `UserPublic` / `MemberPublic` / `/api/me` / `/api/users/{username}` / `/members` gagnent
+  `display_name: str\|null` et `about: str\|null` — profil d'**identité publique** (comme le
+  pseudo : **non chiffré**, volontairement).
+
+### 7.3 Décisions techniques v4
+
+1. **Édition = re-chiffrement** : le client déchiffre le message (clé du salon), modifie le
+   texte, puis le **re-chiffre en AES-256-GCM** (nouveau nonce) — le serveur ne reçoit, comme
+   toujours, que `{nonce, ciphertext}`. Rétro-compat totale : la suppression, la pagination, la
+   déduplication et le regroupement ne changent pas (même `id`/`seq`/`created_at`).
+2. **`message_updated`** : la mise à jour est remplacée **par `id`** dans le fil (pas de
+   réordonnancement) ; l'éditeur local ferme sa session d'édition après le 200 ; l'événement WS
+   met à jour les autres clients de façon idempotente.
+3. **Markdown sandboxé** : parseur **DOM pur** (`markdown.js`) — jamais d'`innerHTML` avec du
+   texte utilisateur, blocs `fences`/citations/titres/listes + inline `***`/`**`/`*`/`__`/`~~`/
+   `` ` ``/`[label](url)`/échappement `\x`. **Seuls les liens `http:`/`https:` deviennent des
+   `<a>`** (href par propriété ; `javascript:`/`data:`/`vbscript:` et le HTML brut restent du
+   texte littéral). Validé par 20 cas unitaires + un fuzz de 5 000 entrées hostiles (0 exception,
+   0 href dangereux).
+4. **Profil** : sur clic d'un avatar (message) ou d'une ligne de membre, ou « Mon profil » du
+   menu Paramètres → modale popout `profile.js` ; composants DOM, aucune ressource externe.
+   L'avatar (lette + teinte) reste dérivé du **username** pour rester stable ; le `display_name`
+   n'est que cosmétique (le login reste l'identifiant unique).
+5. **Rebranding** : la marque affichée devient **« Caché »** (titre, logo d'accueil,
+   `BASE_TITLE`, en-tête CSS). Les identifiants internes du produit (`talk.*` du localStorage,
+   nom du paquet, services Docker) sont **conservés** : renommer les clés localStorage aurait
+   rendu illisibles les clés privées existantes des utilisateurs.
+
+### 7.4 Tests ajoutés (v4)
+
+`tests/integration/test_edit_message.py` — **5 nouveaux tests** : édition par l'auteur avec
+preuve E2E (nouveau ciphertext dans `GET /messages`, `edited: true`, **déchiffrement du nouveau
+texte**, `created_at`/`seq` strictement inchangés) ; non-auteur → 403 ; message inconnu ou d'un
+autre salon → 404 ; corps invalide (ciphertext trop long, champ inconnu) → 422 ; diffusion WS
+`message_updated` chez un abonné.
+
+`tests/integration/test_profile.py` — **4 nouveaux tests** : mise à jour de son propre profil
+reflétée sur `/api/me`, `/api/users/{username}` et `/api/rooms/{id}/members` ; validations
+(longueurs > 32/500 → 422, champ inconnu → 422, vide → `null`, trim) ; non authentifié → 401 ;
+comptes neufs → `display_name`/`about` à `null`.
+
+- **Aucun test v1 cassé** : seules deux assertions de `tests/unit/test_repository.py` et des
+  shapes dans `test_auth_flow.py`/`test_rooms_flow.py` ont été **adaptées** (forme publique
+  désormais additive).
+- Le nombre total de tests passe de **152** à **161** (9 nouveaux).
+
+### 7.5 Smoke test v4 sur le serveur réel (uvicorn + fakeredis)
+
+Rebranding (« Caché » servi sur `/`) → register → création de salon + enveloppement de clé →
+`GET /keys` restitue la copie (dé-wrappe à l'identique) → envoi chiffré → **PATCH d'édition**
+(`edited: true`, `created_at`/`seq` intacts, nouveau texte re-déchiffrable) → édition par un
+non-auteur → 403 → `PATCH /api/me` (`display_name`/`about` visibles sur `/api/me`,
+`/api/users/{username}`, `/members`) → validations 422 (longueurs, champ inconnu) et effacement
+par `""` → `null`.

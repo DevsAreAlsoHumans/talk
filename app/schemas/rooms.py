@@ -25,12 +25,15 @@ class Room(BaseModel):
 
 
 class MemberPublic(BaseModel):
-    """Membre d'un salon : identité, clé publique (jamais de hash) et présence."""
+    """Membre d'un salon : identité, clé publique (jamais de hash), présence
+    et profil public personnalisable (``display_name``/``about``, optionnels)."""
 
     id: str
     username: str
     public_key: str
     online: bool = False
+    display_name: str | None = None
+    about: str | None = None
 
 
 class RoomKeyView(BaseModel):

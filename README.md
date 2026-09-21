@@ -1,21 +1,23 @@
-# talk — Chat chiffré de bout en bout
+# Caché — Chat chiffré de bout en bout
 
 > Application de messagerie type **Discord** avec **chiffrement de bout en bout** : le serveur ne
 > peut jamais lire le contenu des messages, ni accéder aux clés permettant de les déchiffrer.
 
 **Projet d'examen `SDV DEV 2026`** — branche `etudiant/barraud-teddy`.
 
-> Les évolutions des phases 2 et 3 (présence en ligne, quitter un salon, suppression de messages,
+> Les évolutions des phases 2, 3 et 4 (présence en ligne, quitter un salon, suppression de messages,
 > pagination remontante, changement de mot de passe, design « Discord-like », **messages groupés
-> sans avatar répété, envoi d'images/GIF chiffrées de bout en bout, menu Paramètres**) sont
+> sans avatar répété, envoi d'images/GIF chiffrés de bout en bout, menu Paramètres, rendu Markdown,
+> édition de ses messages, profils personnalisables « Discord-like »**, marque « Caché ») sont
 > détaillées dans [`FEATURES.md`](FEATURES.md).
 
 ---
 
 ## 1. Présentation
 
-`talk` permet à des utilisateurs de s'authentifier, de rejoindre des **salons** (création, liste,
-membres) et d'échanger des messages en temps réel — le tout **chiffré de bout en bout côté client**.
+`Caché` (ex-« talk ») permet à des utilisateurs de s'authentifier, de rejoindre des **salons**
+(création, liste, membres) et d'échanger des messages en temps réel — le tout **chiffré de bout en
+bout côté client**.
 
 Le chiffrement est réalisé **dans le navigateur** avec l'API Web Crypto :
 
@@ -62,7 +64,7 @@ app/                     # Backend FastAPI
   api/                   # endpoints (auth, rooms, messages, users, csrf)
   realtime/              # hub in-process + endpoint /ws
 frontend/                # HTML/CSS/JS vanilla (WebCrypto), servi à la racine
-tests/                   # 152 tests : unitaires + intégration + sécurité
+tests/                   # 161 tests : unitaires + intégration + sécurité
   helpers/crypto_client.py   # « navigateur de référence » en Python (validé contre le contrat E2E)
 ```
 
@@ -94,8 +96,9 @@ tests/                   # 152 tests : unitaires + intégration + sécurité
 | POST | `/api/auth/login` | Connexion → `{user, csrf_token}` |
 | POST | `/api/auth/logout` | Déconnexion (session détruite, cookie effacé) |
 | POST | `/api/auth/change-password` | Changement de mot de passe `{old_password, new_password}` (la clé privée est ré-chiffrée côté client) |
-| GET | `/api/me` | Profil + salons de l'utilisateur connecté |
-| GET | `/api/users/{username}` | Profil public (id, username, public_key) |
+| GET | `/api/me` | Profil + salons de l'utilisateur connecté (dont `display_name` / `about`) |
+| PATCH | `/api/me` | Modifier son profil public `{display_name? (≤ 32), about? (≤ 500)}` (vide → `null`) |
+| GET | `/api/users/{username}` | Profil public (id, username, public_key, display_name, about) |
 | GET/POST | `/api/rooms` | Liste / création de salon |
 | GET | `/api/rooms/{id}/members` | Membres d'un salon (avec clés publiques et présence `online`) |
 | POST | `/api/rooms/{id}/join` | Rejoindre un salon |
@@ -108,7 +111,8 @@ tests/                   # 152 tests : unitaires + intégration + sécurité
 | POST | `/api/rooms/{id}/messages` | Envoyer `{nonce, ciphertext}` (texte chiffré) |
 | POST | `/api/rooms/{id}/attachments` | Envoyer une image/GIF **chiffrée** `{kind: "image", mime, nonce, ciphertext}` (≤ 4 Mo) |
 | DELETE | `/api/rooms/{room_id}/messages/{message_id}` | Supprimer son message (auteur uniquement, salon du message vérifié) |
-| WS | `/ws` | Temps réel : `new_message`, `member_joined`, `room_key`, `presence`, `member_left`, `message_deleted` |
+| PATCH | `/api/rooms/{room_id}/messages/{message_id}` | Éditer son message `{nonce, ciphertext}` (re-chiffré ; auteur uniquement ; `created_at`/`seq` inchangés ; badge `edited: true`) |
+| WS | `/ws` | Temps réel : `new_message`, `member_joined`, `room_key`, `presence`, `member_left`, `message_deleted`, `message_updated` |
 
 ---
 
@@ -120,7 +124,7 @@ tests/                   # 152 tests : unitaires + intégration + sécurité
 | **Injections SQL / NoSQL** | Aucune requête construite à partir d'entrées utilisateur ; clés Redis typées sans opérateurs, validation stricte Pydantic en amont (types, longueurs, formats, `extra="forbid"`). Tentatives d'injection testées et rejetées (usage prévu, usernames avec `*`, `;`, `$`, espaces…). |
 | **Mots de passe** | **Argon2id** (`argon2-cffi`), hachage à sens unique, jamais stockés en clair, comparaison à temps constant. |
 | **E2E** | Clés privées et clair **jamais** transmis au serveur (§2). Nonce unique par message. Vérifié par tests de non-fuites de keys. |
-| **Validation & anti-XSS** | Pydantic stricts, limites (pseudo 3–32, mdp 8–128, message ≤ 4 Ko, pièce jointe chiffrée ≤ 4 Mo, clé publique ≤ 1000), rendu front 100 % `textContent`/propriétés DOM (aucun `innerHTML` avec données utilisateur). Les images déchiffrées sont affichées en `data:` URLs (CSP `img-src 'self' data:`). |
+| **Validation & anti-XSS** | Pydantic stricts, limites (pseudo 3–32, mdp 8–128, message ≤ 4 Ko, pièce jointe chiffrée ≤ 4 Mo, clé publique ≤ 1000, `display_name` ≤ 32, `about` ≤ 500), rendu front 100 % `textContent`/propriétés DOM (aucun `innerHTML` avec données utilisateur) : le Markdown est rendu par un **parseur DOM dédié** dont les seuls liens sont `http`/`https` (tout autre schéma, et le HTML brut, restent du texte). Les images déchiffrées sont affichées en `data:` URLs (CSP `img-src 'self' data:`). |
 | **Headers** | CSP (`default-src 'self'`, `connect-src 'self' ws: wss:`), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy` restreinte, `X-XSS-Protection: 0`, HSTS (si HTTPS). |
 | **Sessions & secrets** | Cookie `HttpOnly` + `SameSite=Lax` (+ `Secure` en production), **signé HMAC-SHA256** (anti-forgeage, `SECRET_KEY` effective), **rotation de session** à chaque connexion (anti-fixation), session stockée en Redis avec TTL 7 j. Secrets via variables d'environnement, **jamais commités** (`.env` ignoré). |
 | **Erreurs** | Handler global : réponses génériques `{"detail": "..."}`, aucune stack trace exposée (testé). |
@@ -159,7 +163,7 @@ Puis ouvrir **http://localhost:8000**.
 ## 7. Tests & qualité
 
 ```bash
-.venv/bin/pytest -v                 # 152 tests (unitaires + intégration + sécurité)
+.venv/bin/pytest -v                 # 161 tests (unitaires + intégration + sécurité)
 .venv/bin/ruff check .              # linter — 0 erreur
 .venv/bin/ruff format --check .     # formatage — conforme
 ```
@@ -202,6 +206,6 @@ La **CI** (`.github/workflows/ci.yml`) exécute à chaque push / pull request : 
 ## 9. Rendu
 
 - Branche : **`etudiant/barraud-teddy`** (CE projet).
-- CI : verte sur la branche (lint + 152 tests + build docker).
+- CI : verte sur la branche (lint + 161 tests + build docker).
 - Licence : Apache 2.0 (fichier `LICENSE`).
 - Énoncé du sujet : `EXAMEN.md` (référence).

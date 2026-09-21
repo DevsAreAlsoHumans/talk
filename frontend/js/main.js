@@ -16,6 +16,7 @@
 import * as auth from "./auth.js";
 import * as rooms from "./rooms.js";
 import * as chat from "./chat.js";
+import * as profile from "./profile.js";
 import * as ui from "./ui.js";
 
 /** URI du WebSocket sur le même hôte (protocole ws/wss selon la page). */
@@ -113,6 +114,11 @@ function connectWs() {
       case "message_deleted":
         chat.handleMessageDeleted(payload);
         break;
+      case "message_updated":
+        // Ré-édition d'un message par son auteur : re-rendu du contenu chez
+        // tous les clients du salon (idempotent avec la mise à jour locale).
+        chat.handleMessageUpdated(payload);
+        break;
       case "member_joined":
         rooms.handleMemberJoined(payload);
         break;
@@ -205,10 +211,13 @@ function showAppView() {
 
   const user = auth.getCurrentUser();
   const username = user && user.username ? user.username : "";
+  // Nom affiché : display_name sinon username. L'avatar (lettre + hue) reste
+  // déterministe sur le username (stabilité).
+  document.getElementById("user-username").textContent =
+    (user && user.display_name) || username || "";
   const avatarEl = document.getElementById("user-avatar");
   avatarEl.className = "avatar avatar--sm " + ui.avatarHueClass(username);
   avatarEl.textContent = username ? username.charAt(0).toUpperCase() : "?";
-  document.getElementById("user-username").textContent = username;
 }
 
 /* ---------------------------------------------------------------------------
@@ -236,14 +245,19 @@ async function copyCurrentUserId() {
 
 /**
  * Construit le menu « Paramètres » ancré sur le bouton d'en-tête :
- * en-tête profil, copie d'id, changement de mot de passe, déconnexion.
+ * en-tête profil (display_name || username), « Mon profil », copie d'id,
+ * changement de mot de passe, déconnexion.
  * @param {HTMLElement} anchor Bouton `#btn-settings`.
  */
 function openSettingsMenu(anchor) {
   const user = auth.getCurrentUser();
-  const username = user && user.username ? user.username : "";
+  const shownName = (user && (user.display_name || user.username)) || "Utilisateur";
   ui.openMenu(anchor, [
-    { header: true, label: username || "Utilisateur" },
+    { header: true, label: shownName },
+    {
+      label: "Mon profil",
+      onClick: () => profile.openProfileFor(user || {}),
+    },
     { label: "Copier mon identifiant", onClick: copyCurrentUserId },
     {
       label: "Changer le mot de passe",
@@ -354,6 +368,13 @@ async function main() {
 
   rooms.initRooms(uiCallbacks);
   chat.initChat(uiCallbacks);
+
+  // Fiches profil : clic sur un avatar de message ou sur une ligne du panneau
+  // membres. profile.openProfileFor détermine lui-même le mode édition
+  // (uniquement pour l'utilisateur courant).
+  chat.setMemberClickHandler((member) => profile.openProfileFor(member));
+  rooms.setMemberClickHandler((member) => profile.openProfileFor(member));
+  profile.setToast(showToast);
 
   // Menu « Paramètres » (haut gauche) : identité + actions de compte.
   // Ce regroupement remplace les anciens boutons séparés de la sidebar.

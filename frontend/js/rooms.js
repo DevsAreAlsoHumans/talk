@@ -24,17 +24,29 @@
 
 import { api } from "./api.js";
 import * as crypto from "./crypto.js";
-import { getCurrentUser } from "./auth.js";
+import { getCurrentUser, setCurrentUser } from "./auth.js";
 import * as chat from "./chat.js";
 import * as ui from "./ui.js";
 
 /** Titre de base (document.title), actualisé avec le total des non-lus. */
-const BASE_TITLE = "talk — messagerie chiffrée de bout en bout";
+const BASE_TITLE = "Caché — chat chiffré de bout en bout";
 
 /** Callbacks posés par main.js. */
 let onToast = () => {};
 let onRoomOpened = () => {};
 let onRoomsChanged = () => {};
+
+/** Gestionnaire de clic sur une ligne du panneau membres (posé par main.js). */
+let onMemberClick = () => {};
+
+/**
+ * Enregistre le gestionnaire de clic des lignes membres (main.js le branche
+ * sur profile.openProfileFor). Évite à rooms.js d'importer profile.js.
+ * @param {(member: object) => void} handler
+ */
+export function setMemberClickHandler(handler) {
+  onMemberClick = typeof handler === "function" ? handler : onMemberClick;
+}
 
 /** Salon actuellement sélectionné. */
 let currentRoom = null;
@@ -162,6 +174,11 @@ function showModalError(errorElementId, message) {
 /** Charge /api/me et construit la sidebar. @returns {Promise<Array>} salons. */
 export async function loadRooms() {
   const data = await api("/api/me");
+  // Le backend renvoie {user, rooms} : on rafraîchit l'utilisateur courant
+  // (display_name / about peuvent avoir changé depuis un autre appareil).
+  if (data && data.user && typeof data.user === "object") {
+    auth.setCurrentUser(data.user);
+  }
   roomsList = Array.isArray(data.rooms) ? data.rooms : [];
   renderSidebar();
   return roomsList;
@@ -700,6 +717,25 @@ function renderMemberList(listId, members, me) {
   for (const member of members) {
     const item = document.createElement("li");
     item.className = "member-item";
+    item.setAttribute("role", "button");
+    item.tabIndex = 0;
+    // Clic/Entrée → fiche profil (display_name || username pour l'affichage).
+    const openProfile = (event) => {
+      event.stopPropagation();
+      onMemberClick({
+        id: member.id,
+        username: member.username,
+        display_name: member.display_name || null,
+        about: member.about || null,
+      });
+    };
+    item.addEventListener("click", openProfile);
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openProfile(event);
+      }
+    });
 
     const avatarWrap = document.createElement("span");
     avatarWrap.className = "member-avatar-wrap";
@@ -718,7 +754,8 @@ function renderMemberList(listId, members, me) {
 
     const name = document.createElement("span");
     name.className = "member-name";
-    name.textContent = member.username || "Inconnu";
+    // Le display_name (si présent) prime ; l'avatar reste sur le username.
+    name.textContent = member.display_name || member.username || "Inconnu";
     item.appendChild(name);
 
     if (me && String(member.id) === String(me.id)) {
@@ -844,7 +881,8 @@ export async function handleMemberJoined(payload) {
 
   try {
     await wrapAndPostKey(roomId, member.id, publicKeyB64);
-    onToast("Clé de salon partagée avec « " + (member.username || "membre") + " ».", "success");
+    const memberName = member.display_name || member.username || "membre";
+    onToast("Clé de salon partagée avec « " + memberName + " ».", "success");
   } catch (error) {
     onToast("Partage de clé impossible : " + (error.message || "erreur"), "error");
   }

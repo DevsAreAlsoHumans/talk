@@ -385,6 +385,15 @@ export function getCurrentUser() {
   return currentUser;
 }
 
+/**
+ * Remplace l'utilisateur courant en mémoire (utilisé après un PATCH /api/me
+ * du profil : display_name / about mis à jour, identité inchangée).
+ * @param {object|null} user {id, username, public_key, created_at, display_name?, about?}
+ */
+export function setCurrentUser(user) {
+  currentUser = user && typeof user === "object" ? user : null;
+}
+
 /** @returns {string} pseudo de l'utilisateur courant (ou ""). */
 export function getCurrentUsername() {
   return currentUser ? currentUser.username : "";

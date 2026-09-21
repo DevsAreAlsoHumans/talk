@@ -17,12 +17,13 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("/{username}")
 def get_user(username: str, redis: Redis = Depends(get_redis)) -> dict:
-    """Profil public d'un utilisateur : ``{id, username, public_key}``, sinon 404."""
+    """Profil public d'un utilisateur : ``{id, username, public_key, created_at,
+    display_name, about}``, sinon 404.
+
+    Passé par ``users.to_public`` : ``display_name``/``about`` (profil public
+    personnalisable) sont inclus, à ``None`` pour les comptes antérieurs.
+    """
     user = users.get_by_username(redis, username)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    return {
-        "id": user["id"],
-        "username": user["username"],
-        "public_key": user["public_key"],
-    }
+    return users.to_public(user)

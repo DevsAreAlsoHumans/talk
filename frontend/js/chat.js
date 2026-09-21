@@ -12,10 +12,11 @@
  *     `?before=<seq>&limit=50` (page antérieure), en préservant le scroll.
  */
 
-import { api } from "./api.js";
+import { api, ApiError } from "./api.js";
 import * as crypto from "./crypto.js";
 import { getCurrentUser } from "./auth.js";
 import * as ui from "./ui.js";
+import { renderMarkdown } from "./markdown.js";
 
 /** Taille d'une page d'historique (50 derniers messages à l'ouverture). */
 const PAGE_SIZE = 50;
@@ -47,6 +48,16 @@ export function getCurrentRoomId() {
   return currentRoomId;
 }
 
+/**
+ * Enregistre le gestionnaire de clic sur l'avatar d'un message (main.js le
+ * branche sur profile.openProfileFor). Le détail d'implémentation de la fiche
+ * profil reste hors de chat.js (pas d'import croisé avec profile.js).
+ * @param {(member: object) => void} handler
+ */
+export function setMemberClickHandler(handler) {
+  onMemberClick = typeof handler === "function" ? handler : onMemberClick;
+}
+
 /** Plus grand `seq` connu : base du polling `?after=<seq>`. */
 let lastMessageId = 0;
 
@@ -65,8 +76,16 @@ function seqOf(raw) {
 /** Déduplication (anti-doublon entre WS, polling, pagination et envoi local). */
 const seenIds = new Set();
 
-/** Pseudo des membres : senderId → username (fourni à l'ouverture du salon). */
+/** Pseudo des membres : senderId → {username, display_name} (fournis à
+ *  l'ouverture du salon). Le `display_name` sert à l'affichage, l'avatar
+ *  (hue + initiale) reste déterministe sur le `username`. */
 let membersById = new Map();
+
+/** Gestionnaire de clic sur l'avatar d'un message (posé par main.js). */
+let onMemberClick = () => {};
+
+/** Édition inline en cours : {item, cancel, cleanup} ou null. */
+let editState = null;
 
 /** Compteur local pour les messages sans id retourné par le serveur. */
 let localCounter = 0;
@@ -140,7 +159,14 @@ export async function openRoom(roomId, members) {
   lastMessageId = 0;
   oldestSeq = null;
   seenIds.clear();
-  membersById = new Map((members || []).map((m) => [String(m.id), m.username]));
+  // membersById mappe vers {username, display_name} (le display_name est
+  // optionnel : les listes plus anciennes ne le fournissent pas encore).
+  membersById = new Map(
+    (members || []).map((m) => [
+      String(m.id),
+      { username: m.username || "", display_name: m.display_name || null },
+    ]),
+  );
   resetThread();
   await loadHistory();
 }
@@ -159,6 +185,7 @@ export async function reloadHistory() {
 
 /** Ferme proprement le fil (salon quitté ou plus aucun salon sélectionné). */
 export function closeRoom() {
+  cancelActiveEdit();
   currentRoomId = null;
   lastMessageId = 0;
   oldestSeq = null;
@@ -168,6 +195,7 @@ export function closeRoom() {
 
 /** Vide le fil et recrée le conteneur de pagination. */
 function resetThread() {
+  cancelActiveEdit();
   messagesEl = document.getElementById("messages");
   messagesEl.textContent = "";
   lastMsgEl = null;
@@ -430,6 +458,9 @@ function removeMessageNode(messageId) {
     `.message[data-message-id=${CSS.escape(String(messageId))}]`,
   );
   if (node) {
+    if (editState && editState.item === node) {
+      cancelActiveEdit();
+    }
     node.remove();
     normalizeGrouping();
     updateOldestSeq();
@@ -477,6 +508,314 @@ export async function pollNewMessages() {
     }
   }
   scrollToBottom();
+}
+
+/* ============================================================
+   Temps réel : message_updated
+   ============================================================ */
+
+/**
+ * Événement WS `message_updated` : le message a été ré-chiffré par son auteur.
+ * Idempotent avec la mise à jour locale (le PATCH 200 re-rend déjà) : on
+ * retrouve le noeud par `data-message-id`, on annule une éventuelle édition et
+ * on re-déchiffre/re-rend le contenu + badge « · modifié ».
+ */
+export async function handleMessageUpdated(payload) {
+  const roomId = payload && (payload.room_id != null ? payload.room_id : payload.roomId);
+  if (roomId == null || String(roomId) !== String(currentRoomId)) {
+    return;
+  }
+  const messageId = payload && payload.id;
+  if (messageId == null || !messagesEl) {
+    return;
+  }
+  const item = messagesEl.querySelector(
+    `.message[data-message-id=${CSS.escape(String(messageId))}]`,
+  );
+  if (!item) {
+    return;
+  }
+  if (editState && editState.item === item) {
+    cancelActiveEdit();
+  }
+  const roomKey = crypto.getRoomKey(currentRoomId);
+  const body = item.querySelector(".message-body");
+  if (!body) {
+    return;
+  }
+
+  // Supprime l'ancien contenu (texte markdown, image ou éditeur), l'en-tête est
+  // conservé (pseudo + heure).
+  for (const child of Array.from(body.children)) {
+    if (!child.classList.contains("message-header")) {
+      child.remove();
+    }
+  }
+
+  const msg = newMessageFromRaw(payload);
+  if (!msg) {
+    return;
+  }
+
+  // Badge « · modifié » synchronisé avec le payload (idempotent).
+  applyEditedBadge(item, msg.edited);
+
+  // État verrouillé éventuellement obsolète : on le retire avant le re-rendu
+  // (appendEncryptedText / appendImageContent le re-pose en cas d'échec).
+  item.classList.remove("message--locked");
+  if (msg.kind === "image") {
+    await appendImageContent(item, body, msg, roomKey);
+  } else {
+    await appendEncryptedText(item, body, msg, roomKey);
+  }
+}
+
+/** Ajoute ou retire le badge « · modifié » dans l'en-tête d'un message. */
+function applyEditedBadge(item, edited) {
+  const header = item.querySelector(".message-header");
+  if (!header) {
+    return;
+  }
+  const existing = item.querySelector(".message-edited");
+  if (edited && !existing) {
+    const badge = document.createElement("span");
+    badge.className = "message-edited";
+    badge.textContent = "· modifié";
+    header.appendChild(badge);
+  } else if (!edited && existing) {
+    existing.remove();
+  }
+}
+
+/* ============================================================
+   Édition inline d'un message (auteur uniquement)
+   ============================================================ */
+
+/**
+ * Annule l'édition en cours (rétablit l'aperçu markdown du dernier texte
+ * clair connu). Appelé par `resetThread`, `removeMessageNode`,
+ * `handleMessageUpdated` et lors d'un nouveau clic « Modifier ».
+ */
+function cancelActiveEdit() {
+  if (editState) {
+    const cancel = editState.cancel;
+    editState = null;
+    cancel();
+  }
+}
+
+/**
+ * Passe un message en mode édition inline : le `.message-text` est remplacé
+ * par un `<textarea>` pré-rempli (texte clair mémorisé) + barre d'action.
+ * Contrôles : Échap annule, Ctrl/Cmd+Entrée enregistre, bordure rouge si vide
+ * ou trop long (limite `MAX_PLAINTEXT_BYTES`, toast).
+ * Enregistrer → chiffrement AES-GCM (clé de salon) → `PATCH`.
+ * @param {HTMLElement} item Noeud `.message`.
+ * @param {object} msg Message normalisé (auteur courant vérifié en amont).
+ * @param {string} roomId Identifiant du salon.
+ */
+async function startEditMessage(item, msg, roomId) {
+  cancelActiveEdit();
+  const textEl = item.querySelector(".message-text");
+  if (!textEl) {
+    return; // message verrouillé ou image : aucun contenu éditable affiché
+  }
+
+  const roomKey = crypto.getRoomKey(roomId);
+  if (!roomKey) {
+    onToast(
+      "Clé de salon non disponible sur ce navigateur : modification impossible.",
+      "error",
+    );
+    return;
+  }
+
+  const clearText = item.dataset.clair != null ? item.dataset.clair : "";
+  const actionsBtn = item.querySelector(".message-actions-btn");
+
+  // Éditeur : <textarea> + barre Enregistrer/Annuler.
+  const editBox = document.createElement("div");
+  editBox.className = "message-edit";
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "edit-textarea";
+  textarea.value = clearText;
+  textarea.setAttribute("aria-label", "Modifier le message");
+  editBox.appendChild(textarea);
+
+  const actions = document.createElement("div");
+  actions.className = "edit-actions";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "btn btn-ghost btn-sm";
+  cancelBtn.textContent = "Annuler";
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "btn btn-primary btn-sm";
+  saveBtn.textContent = "Enregistrer";
+  actions.appendChild(cancelBtn);
+  actions.appendChild(saveBtn);
+  editBox.appendChild(actions);
+
+  textEl.replaceWith(editBox);
+  if (actionsBtn) {
+    actionsBtn.disabled = true;
+  }
+
+  /** Vrai si le contenu n'est pas enregistrable (vide ou trop long). */
+  const invalid = () => {
+    const value = textarea.value;
+    const bad = !value.trim() || crypto.encodeText(value).length > MAX_PLAINTEXT_BYTES;
+    textarea.classList.toggle("edit-textarea--error", bad);
+    return bad;
+  };
+
+  /** Rétablit l'aperçu markdown du texte clair actuel. */
+  const restorePreview = () => {
+    const restored = document.createElement("div");
+    restored.className = "message-text";
+    if (item.dataset.clair != null) {
+      renderMarkdown(restored, item.dataset.clair);
+    } else {
+      restored.textContent =
+        "[Message chiffré — clé de salon non disponible sur ce navigateur]";
+    }
+    editBox.replaceWith(restored);
+  };
+
+  const cleanup = () => {
+    textarea.removeEventListener("keydown", onKeydown);
+    textarea.removeEventListener("input", onInput);
+    document.removeEventListener("click", onClickOutside);
+    if (actionsBtn) {
+      actionsBtn.disabled = false;
+    }
+    if (editState && editState.item === item) {
+      editState = null;
+    }
+  };
+
+  const cancel = () => {
+    if (!editBox.isConnected) {
+      cleanup(); // le noeud a été détaché (fermeture de salon…) : rien à rendre
+      return;
+    }
+    restorePreview();
+    cleanup();
+  };
+
+  const save = async () => {
+    if (textarea.disabled) {
+      return;
+    }
+    const value = textarea.value;
+    if (invalid()) {
+      onToast(
+        "Message vide ou trop long (limite de 3000 octets).",
+        "error",
+      );
+      return;
+    }
+    textarea.disabled = true;
+    saveBtn.disabled = true;
+    cancelBtn.disabled = true;
+    try {
+      const { nonce, ciphertext } = await crypto.encryptMessage(roomKey, value);
+      // PATCH /api/rooms/{id}/messages/{id} — chiffré avec la clé de salon.
+      await api(`/api/rooms/${roomId}/messages/${msg.id}`, {
+        method: "PATCH",
+        body: { nonce, ciphertext },
+      });
+      // Mise à jour locale immédiate ; les autres clients recevront le WS
+      // `message_updated` (re-rendu idempotent).
+      msg.edited = true;
+      msg.nonce = nonce;
+      msg.ciphertext = ciphertext;
+      item.dataset.clair = value;
+      applyEditedBadge(item, true);
+      if (editBox.isConnected) {
+        restorePreview();
+      }
+      onToast("Message modifié.", "success");
+      cleanup();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        onToast("Seul l'auteur du message peut le modifier.", "error");
+      } else {
+        onToast(
+          (error && error.message) || "Modification impossible.",
+          "error",
+        );
+      }
+      // L'éditeur reste ouvert : l'utilisateur peut corriger ou annuler.
+    } finally {
+      textarea.disabled = false;
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+    }
+  };
+
+  const onKeydown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancel();
+    } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      save();
+    }
+  };
+  const onInput = () => {
+    invalid();
+  };
+  // « Clic ailleurs » (hors du message) → annulation propre de l'édition.
+  const onClickOutside = (event) => {
+    if (editState && editState.item === item && !item.contains(event.target)) {
+      cancel();
+    }
+  };
+
+  textarea.addEventListener("keydown", onKeydown);
+  textarea.addEventListener("input", onInput);
+  document.addEventListener("click", onClickOutside);
+
+  editState = { item, cancel, cleanup };
+
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+}
+
+/* ============================================================
+   Affichage du display_name (profil)
+   ============================================================ */
+
+/**
+ * Actualise l'affichage du nom de l'utilisateur courant après un PATCH /api/me :
+ * `membersById` (futurs messages) et les `.message-sender` déjà rendus.
+ * L'avatar (hue + initiale) reste basé sur le `username`.
+ * @param {object} user Utilisateur courant mis à jour.
+ */
+export function updateLocalDisplayName(user) {
+  if (!user || user.id == null) {
+    return;
+  }
+  const id = String(user.id);
+  membersById.set(id, {
+    username: user.username || "",
+    display_name: user.display_name || null,
+  });
+  if (!messagesEl) {
+    return;
+  }
+  const shown = user.display_name || user.username || "Inconnu";
+  for (const node of messagesEl.querySelectorAll(".message")) {
+    if (String(node.dataset.authorId || "") === id) {
+      const senderEl = node.querySelector(".message-sender");
+      if (senderEl) {
+        senderEl.textContent = shown;
+      }
+    }
+  }
 }
 
 /* ============================================================
@@ -709,8 +1048,11 @@ async function confirmDeleteMessage(msg, roomId) {
 
 /**
  * Normalise un message brut de l'API/WS.
- * Métadonnées serveur : `id` (UUID), `seq` (entier ordonnable), `author_id`.
+ * Métadonnées serveur : `id` (UUID), `seq` (entier ordonnable), `author_id`,
+ * `edited` (booléen, vrai après une modification).
  * On accepte aussi `roomId`, `sender_id`, `sender`, `username`… (défensif).
+ * Le `display_name` de l'auteur est résolu depuis `membersById` (l'objet
+ * `{username, display_name}`) avec repli sur les champs du payload.
  */
 function newMessageFromRaw(raw) {
   if (!raw || typeof raw !== "object") {
@@ -724,24 +1066,31 @@ function newMessageFromRaw(raw) {
       : raw.sender_id != null
         ? raw.sender_id
         : raw.sender;
+  const member = membersById.get(String(senderId)) || null;
   const senderName =
     raw.sender_username != null
       ? raw.sender_username
       : raw.username != null
         ? raw.username
-        : membersById.get(String(senderId)) || "";
+        : (member && member.username) || raw.sender || "";
+  const displayName =
+    raw.sender_display_name != null
+      ? raw.sender_display_name
+      : (member && member.display_name) || null;
 
   return {
     id: id != null ? id : null,
     room_id: roomId != null ? roomId : currentRoomId,
     sender_id: senderId != null ? senderId : null,
     sender: senderName,
+    display_name: displayName || null,
     nonce: raw.nonce || null,
     ciphertext: raw.ciphertext || null,
     // Type de contenu : "text" par défaut, "image" pour une pièce jointe.
     kind: raw.kind != null ? raw.kind : "text",
     mime: raw.mime != null ? raw.mime : null,
     created_at: raw.created_at || raw.createdAt || null,
+    edited: Boolean(raw.edited),
   };
 }
 
@@ -767,9 +1116,35 @@ async function buildMessageNode(msg, roomKey) {
   }
 
   // Avatar teinté par pseudo (masqué visuellement pour les messages groupés).
+  // La lettre et la hue restent déterministes sur le `username` : un
+  // `display_name` ne change jamais l'apparence de l'avatar.
   const avatar = document.createElement("span");
   avatar.className = "avatar avatar--message " + ui.avatarHueClass(msg.sender || "?");
   avatar.textContent = (msg.sender || "?").charAt(0).toUpperCase();
+  if (msg.sender_id != null) {
+    avatar.classList.add("message-avatar-btn");
+    avatar.setAttribute("role", "button");
+    avatar.tabIndex = 0;
+    avatar.setAttribute(
+      "aria-label",
+      "Voir le profil de " + (msg.display_name || msg.sender || "l'auteur"),
+    );
+    const openProfile = (event) => {
+      event.stopPropagation();
+      onMemberClick({
+        id: msg.sender_id,
+        username: msg.sender,
+        display_name: msg.display_name || null,
+      });
+    };
+    avatar.addEventListener("click", openProfile);
+    avatar.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openProfile(event);
+      }
+    });
+  }
   item.appendChild(avatar);
 
   // Colonne contenu : en-tête (pseudo + heure) puis texte.
@@ -780,13 +1155,21 @@ async function buildMessageNode(msg, roomKey) {
   header.className = "message-header";
   const sender = document.createElement("span");
   sender.className = "message-sender";
-  sender.textContent = msg.sender || "Inconnu";
+  // display_name || username : l'auteur est identifié par son nom d'affichage.
+  sender.textContent = msg.display_name || msg.sender || "Inconnu";
   header.appendChild(sender);
   if (msg.created_at) {
     const timeEl = document.createElement("span");
     timeEl.className = "message-time";
     timeEl.textContent = ui.formatTime(msg.created_at);
     header.appendChild(timeEl);
+  }
+  // Badge discret « · modifié » (message ré-écrit, auteur uniquement).
+  if (msg.edited) {
+    const editedBadge = document.createElement("span");
+    editedBadge.className = "message-edited";
+    editedBadge.textContent = "· modifié";
+    header.appendChild(editedBadge);
   }
   body.appendChild(header);
 
@@ -798,9 +1181,22 @@ async function buildMessageNode(msg, roomKey) {
   }
   item.appendChild(body);
 
-  // Menu « Supprimer » : auteur uniquement, visible au survol.
+  // Menu d'actions : « Modifier » (textes, non verrouillés) puis « Supprimer »
+  // — auteur uniquement, visible au survol.
   if (isOwn && msg.id != null && String(msg.id).indexOf("local-") !== 0) {
     const roomIdAtBuild = msg.room_id || currentRoomId;
+    const menuItems = [];
+    if (msg.kind !== "image" && !item.classList.contains("message--locked")) {
+      menuItems.push({
+        label: "Modifier",
+        onClick: () => startEditMessage(item, msg, roomIdAtBuild),
+      });
+    }
+    menuItems.push({
+      label: "Supprimer",
+      danger: true,
+      onClick: () => confirmDeleteMessage(msg, roomIdAtBuild),
+    });
     const actionsBtn = document.createElement("button");
     actionsBtn.type = "button";
     actionsBtn.className = "icon-btn message-actions-btn";
@@ -808,13 +1204,7 @@ async function buildMessageNode(msg, roomKey) {
     actionsBtn.appendChild(ui.icon("dots"));
     actionsBtn.addEventListener("click", (event) => {
       event.stopPropagation();
-      ui.openMenu(actionsBtn, [
-        {
-          label: "Supprimer",
-          danger: true,
-          onClick: () => confirmDeleteMessage(msg, roomIdAtBuild),
-        },
-      ]);
+      ui.openMenu(actionsBtn, menuItems);
     });
     item.appendChild(actionsBtn);
   }
@@ -824,6 +1214,8 @@ async function buildMessageNode(msg, roomKey) {
 
 /**
  * Déchiffre le texte d'un message et l'ajoute à la colonne de contenu.
+ * Le texte clair est mémorisé sur le noeud DOM (`item.dataset.clair`) pour
+ * être réutilisé par l'éditeur inline (modification).
  * En cas de clé manquante ou d'échec AEAD, marque le message « verrouillé ».
  * @param {HTMLElement} item Noeud `.message`.
  * @param {HTMLElement} body Colonne `.message-body`.
@@ -842,9 +1234,12 @@ async function appendEncryptedText(item, body, msg, roomKey) {
     }
   }
   if (decryptedText !== null) {
-    textEl.textContent = decryptedText;
+    // Le texte clair est conservé pour l'édition et le re-rendu.
+    item.dataset.clair = decryptedText;
+    renderMarkdown(textEl, decryptedText);
   } else {
     item.classList.add("message--locked");
+    delete item.dataset.clair;
     textEl.textContent =
       "[Message chiffré — clé de salon non disponible sur ce navigateur]";
   }

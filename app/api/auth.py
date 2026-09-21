@@ -13,7 +13,13 @@ from app.api.deps import client_ip, get_current_user
 from app.db.redis import get_redis
 from app.repositories import rooms as rooms_repo
 from app.repositories import users
-from app.schemas import AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest
+from app.schemas import (
+    AuthResponse,
+    ChangePasswordRequest,
+    LoginRequest,
+    ProfileUpdate,
+    RegisterRequest,
+)
 from app.security import passwords
 from app.security.passwords import hash_password, verify_password
 from app.security.ratelimit import login_rate_limited, reset_login_rate_limit
@@ -137,3 +143,28 @@ def me(
         "user": users.to_public(user),
         "rooms": [{"id": room["id"], "name": room["name"]} for room in rooms],
     }
+
+
+@me_router.patch("/me")
+def update_me(
+    body: ProfileUpdate,
+    user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    """Met à jour le profil public ``display_name``/``about`` (identité publique).
+
+    Contrairement aux messages, ces champs ne sont **pas** chiffrés : comme le
+    pseudo, ils sont visibles de tous (``to_public``) — pas de secret E2E.
+    Un champ absent du corps reste inchangé ; ``""`` ou une valeur d'espaces
+    l'efface (``None``, normalisé par ``ProfileUpdate``) ; la réponse 200
+    renvoie ``{"user": <public complet>}``. ``display_name`` plafonné à 32
+    caractères, ``about`` à 500 (422 sinon), champ inconnu → 422.
+    """
+    profile: dict[str, str | None] = {}
+    if "display_name" in body.model_fields_set:
+        profile["display_name"] = body.display_name
+    if "about" in body.model_fields_set:
+        profile["about"] = body.about
+    users.update_profile(redis, user["id"], **profile)
+    updated = users.get_by_id(redis, user["id"]) or user
+    return {"user": users.to_public(updated)}

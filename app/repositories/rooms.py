@@ -110,7 +110,8 @@ def _is_online(redis: Redis, user_id: str) -> bool:
 
 
 def list_members(redis: Redis, room_id: str) -> list[dict]:
-    """Membres du salon sous forme publique ``{id, username, public_key, online}``."""
+    """Membres du salon sous forme publique (id, username, public_key, online,
+    display_name, about — profil public optionnel, `None` par défaut)."""
     members = []
     for user_id in get_member_ids(redis, room_id):
         user = users.get_by_id(redis, user_id)
@@ -121,6 +122,8 @@ def list_members(redis: Redis, room_id: str) -> list[dict]:
                     "username": user["username"],
                     "public_key": user["public_key"],
                     "online": _is_online(redis, user_id),
+                    "display_name": user.get("display_name"),
+                    "about": user.get("about"),
                 }
             )
     members.sort(key=lambda m: m["username"])

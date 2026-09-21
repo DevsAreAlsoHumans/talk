@@ -64,6 +64,11 @@ class Message(BaseModel):
     ``kind`` et ``mime`` distinguent les pièces jointes des messages
     textuels ; leurs défauts (``"text"`` / ``None``) garantissent une réponse
     strictement inchangée pour les messages textuels v1.
+
+    ``edited`` vaut ``True`` dès qu'un message a été modifié par son auteur
+    (``PATCH …/messages/{id}``) : la version serveur ne garde que la dernière
+    version chiffrée (nonce + ciphertext) ; un ancien message sans ce champ
+    se lit ``edited=False`` (rétro-compatibilité).
     """
 
     id: str
@@ -75,3 +80,4 @@ class Message(BaseModel):
     created_at: str
     kind: str = "text"
     mime: str | None = None
+    edited: bool = False

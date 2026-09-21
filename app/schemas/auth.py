@@ -71,12 +71,42 @@ class ChangePasswordRequest(BaseModel):
 
 
 class UserPublic(BaseModel):
-    """Utilisateur sous forme publique (jamais de hash de mot de passe)."""
+    """Utilisateur sous forme publique (jamais de hash de mot de passe).
+
+    ``display_name`` et ``about`` sont de l'identité publique (comme le
+    pseudo) : optionnels, ils n'existent pas pour les comptes antérieurs à
+    leur introduction (rétro-compatibilité : `None`).
+    """
 
     id: str
     username: str
     public_key: str
     created_at: str
+    display_name: str | None = None
+    about: str | None = None
+
+
+class ProfileUpdate(BaseModel):
+    """Corps de ``PATCH /api/me`` : profil public personnalisable.
+
+    Ces champs sont **publics** (identité, comme le pseudo) : ils ne passent
+    pas par le chiffrement E2E. Les espaces de tête/queue sont supprimés et
+    une valeur vide (ou uniquement des espaces) est normalisée à ``None``
+    (effacement du champ). ``extra="forbid"`` : un champ inconnu renvoie 422.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, max_length=32)
+    about: str | None = Field(default=None, max_length=500)
+
+    @field_validator("display_name", "about")
+    @classmethod
+    def _strip_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 class AuthResponse(BaseModel):

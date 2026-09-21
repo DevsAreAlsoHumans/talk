@@ -37,8 +37,17 @@ def test_username_uniqueness_enforced(redis) -> None:
 def test_public_form_never_exposes_password(redis) -> None:
     user = _make_user(redis, "alice")
     public = users.to_public(user)
-    assert set(public) == {"id", "username", "public_key", "created_at"}
+    assert set(public) == {
+        "id",
+        "username",
+        "public_key",
+        "created_at",
+        "display_name",
+        "about",
+    }
     assert "password" not in public and "password_hash" not in public
+    # Profil public optionnel : absent du stockage → None (rétro-compatibilité).
+    assert public["display_name"] is None and public["about"] is None
 
 
 def test_unknown_user_returns_none(redis) -> None:
@@ -79,8 +88,16 @@ def test_room_list_members_public_and_sorted(redis) -> None:
 
     members = rooms.list_members(redis, room["id"])
     assert [m["username"] for m in members] == ["alice", "bob"]
-    assert set(members[0]) == {"id", "username", "public_key", "online"}
+    assert set(members[0]) == {
+        "id",
+        "username",
+        "public_key",
+        "online",
+        "display_name",
+        "about",
+    }
     assert "password_hash" not in members[0]
+    assert members[0]["display_name"] is None and members[0]["about"] is None
 
 
 def test_room_list_for_user_contains_owned_rooms(redis) -> None:

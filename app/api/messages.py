@@ -1,9 +1,17 @@
-"""Messages des salons : historique (polling), envoi, pièces jointes et suppression.
+"""Messages des salons : historique (polling), envoi, pièces jointes, édition
+et suppression.
 
 Le serveur ne manipule que du chiffré (nonce + ciphertext, en base64). Après
 création, un événement ``new_message`` est diffusé aux abonnés WebSocket ;
-après suppression, un événement ``message_deleted``. L'historique est paginable
-(``?before=``/``?limit=``) avec un comportement par défaut identique à la v1.
+après édition, ``message_updated`` ; après suppression, ``message_deleted``.
+L'historique est paginable (``?before=``/``?limit=``) avec un comportement par
+défaut identique à la v1.
+
+L'édition (``PATCH …/messages/{id}``) fait re-chiffrer le nouveau texte au
+client (AES-256-GCM, clé du salon) : le serveur ne reçoit que le nouveau
+``{nonce, ciphertext}``, le stocke à la place de l'ancien et pose
+``edited: 1``. ``created_at`` et ``seq`` restent inchangés ; ``kind``/``mime``
+sont préservés.
 
 Les images/GIF trop volumineux pour ``POST /messages`` (ciphertext plafonné à
 4096 caractères) passent par ``POST /{room_id}/attachments`` : même stockage
@@ -110,6 +118,50 @@ def post_attachment(
         {"type": "new_message", "payload": message},
     )
     return {"message": message}
+
+
+@router.patch("/{room_id}/messages/{message_id}", response_model=dict)
+def edit_message(
+    room_id: str,
+    message_id: str,
+    body: MessageCreate,
+    background: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
+    hub: InProcessHub = Depends(get_hub),
+) -> dict:
+    """Remplace le contenu chiffré d'un message — auteur uniquement.
+
+    Le corps réutilise ``MessageCreate`` : le client chiffre le nouveau texte
+    (AES-256-GCM, clé du salon) et n'envoie que ``{nonce, ciphertext}`` — le
+    serveur ne voit jamais de clair ni de clé. Le hash ``message:{id}`` reçoit
+    les nouveaux ``nonce``/``ciphertext`` et ``edited: 1`` ; ``created_at`` et
+    ``seq`` ne changent pas, ``kind``/``mime`` sont préservés.
+
+    Contrôles d'accès — identiques à DELETE : être membre du salon (403 sinon)
+    **et** le message doit appartenir au salon de l'URL (404 sinon, pour ne pas
+    fuiter l'existence d'un message hors du salon) ; seul l'auteur peut éditer
+    (403). L'événement WebSocket ``message_updated`` est diffusé aux abonnés
+    du salon en tâche de fond.
+    """
+    get_room_or_404(redis, room_id)
+    require_member(redis, room_id, user["id"])
+    message = messages.get_message(redis, message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    # Le message doit appartenir au salon de l'URL : 404 générique, on ne
+    # fuite pas l'existence du message hors du salon (même règle que DELETE).
+    if message["room_id"] != room_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if message["author_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="Only the author can edit this message")
+    updated = messages.update_message(redis, message_id, body.nonce, body.ciphertext)
+    background.add_task(
+        hub.publish,
+        room_id,
+        {"type": "message_updated", "payload": updated},
+    )
+    return {"message": updated}
 
 
 @router.delete("/{room_id}/messages/{message_id}", status_code=204)

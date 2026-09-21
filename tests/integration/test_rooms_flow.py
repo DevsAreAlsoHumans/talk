@@ -28,7 +28,15 @@ async def test_create_room_sets_owner_as_first_member(client) -> None:
     # Le créateur est le seul membre.
     members = (await client.get(f"/api/rooms/{room['id']}/members")).json()
     assert [member["username"] for member in members] == ["alice_rm"]
-    assert set(members[0]) == {"id", "username", "public_key", "online"}
+    assert set(members[0]) == {
+        "id",
+        "username",
+        "public_key",
+        "online",
+        "display_name",
+        "about",
+    }
+    assert members[0]["display_name"] is None and members[0]["about"] is None
 
 
 async def test_rooms_listing_contains_all_rooms(client) -> None:

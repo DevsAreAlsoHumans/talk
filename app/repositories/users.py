@@ -5,6 +5,9 @@ Stockage Redis :
 - ``username:{u}``   → ``id`` (index d'unicité du nom d'utilisateur, créé en SET NX)
 
 La forme publique d'un utilisateur ne contient jamais le hash de mot de passe.
+``display_name`` et ``about`` (profil public optionnel, non chiffré) sont
+absents des comptes qui n'en ont jamais défini — ``to_public`` les renvoie à
+``None`` (rétro-compatibilité).
 """
 
 from __future__ import annotations
@@ -17,6 +20,10 @@ from redis import Redis
 
 USER_PREFIX = "user:"
 USERNAME_INDEX_PREFIX = "username:"
+
+#: Sentinelle ``update_profile`` : champ non fourni au repository → inchangé
+#: (distinct d'un `None` explicite, qui efface le champ).
+_UNSET = object()
 
 
 def iso_utc_now() -> str:
@@ -84,11 +91,38 @@ def update_password(redis: Redis, user_id: str, password_hash: str) -> None:
     redis.set(_user_key(user_id), json.dumps(user))
 
 
+def update_profile(
+    redis: Redis,
+    user_id: str,
+    display_name: str | object | None = _UNSET,
+    about: str | object | None = _UNSET,
+) -> None:
+    """Met à jour le profil public ``display_name``/``about``.
+
+    Seuls les champs fournis sont réécrits (défaut ``_UNSET`` = inchangé) ;
+    une valeur explicite ``None`` efface le champ (c'est la normalisation de
+    ``ProfileUpdate`` : ``""`` → ``None``). Les autres champs du JSON
+    (pseudo, clé publique, hash) ne sont jamais touchés.
+    """
+    user = get_by_id(redis, user_id)
+    if user is None:
+        return
+    if display_name is not _UNSET:
+        user["display_name"] = display_name
+    if about is not _UNSET:
+        user["about"] = about
+    redis.set(_user_key(user_id), json.dumps(user))
+
+
 def to_public(user: dict) -> dict:
-    """Forme publique d'un utilisateur : id, username, clé publique, date."""
+    """Forme publique d'un utilisateur : id, username, clé publique, date et
+    profil public personnalisable (``display_name``/``about``, ``None`` par
+    défaut pour les comptes antérieurs)."""
     return {
         "id": user["id"],
         "username": user["username"],
         "public_key": user["public_key"],
         "created_at": user["created_at"],
+        "display_name": user.get("display_name"),
+        "about": user.get("about"),
     }
