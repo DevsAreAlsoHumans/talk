@@ -51,3 +51,9 @@ README.md                 # documentation personnelle (fonctionnement, sécurit�
 ---
 
 *Projet pédagogique — année 2026.*
+
+Choix de la base de donnée : MongoDB
+Raison : Redis est un In-memory data store, cela signifie que Redis est idéal pour la gestion de cache, sessions et données épémères. 
+Cependant, j'estime que pour une application de messagerie il est très important de pouvoir stocker les données durablement.
+Dans une messagerie, il faut stocker l'ensemble des conversations, les utilisateurs avec lesquels ont eu lieu ces conversations, leurs dates, les informations de connexion de chaque compte etc...
+Toutes ces informations sont primordiales pour créer une messagerie de qualité
