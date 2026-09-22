@@ -177,7 +177,7 @@ export async function loadRooms() {
   // Le backend renvoie {user, rooms} : on rafraîchit l'utilisateur courant
   // (display_name / about peuvent avoir changé depuis un autre appareil).
   if (data && data.user && typeof data.user === "object") {
-    auth.setCurrentUser(data.user);
+    setCurrentUser(data.user);
   }
   roomsList = Array.isArray(data.rooms) ? data.rooms : [];
   renderSidebar();
