@@ -18,6 +18,11 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Couverture de code
+.coverage
+coverage.xml
+htmlcov/
+
 # Build
 *.egg-info/
 build/
