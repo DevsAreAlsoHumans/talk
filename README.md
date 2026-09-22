@@ -1,4 +1,4 @@
-# Caché — Chat chiffré de bout en bout
+# Télécord — Chat chiffré de bout en bout
 
 > Application de messagerie type **Discord** avec **chiffrement de bout en bout** : le serveur ne
 > peut jamais lire le contenu des messages, ni accéder aux clés permettant de les déchiffrer.
@@ -8,14 +8,14 @@
 > Les évolutions des phases 2, 3 et 4 (présence en ligne, quitter un salon, suppression de messages,
 > pagination remontante, changement de mot de passe, design « Discord-like », **messages groupés
 > sans avatar répété, envoi d'images/GIF chiffrés de bout en bout, menu Paramètres, rendu Markdown,
-> édition de ses messages, profils personnalisables « Discord-like »**, marque « Caché ») sont
+> édition de ses messages, profils personnalisables « Discord-like »**, marque « Télécord ») sont
 > détaillées dans [`FEATURES.md`](FEATURES.md).
 
 ---
 
 ## 1. Présentation
 
-`Caché` (ex-« talk ») permet à des utilisateurs de s'authentifier, de rejoindre des **salons**
+`Télécord` permet à des utilisateurs de s'authentifier, de rejoindre des **salons**
 (création, liste, membres) et d'échanger des messages en temps réel — le tout **chiffré de bout en
 bout côté client**.
 

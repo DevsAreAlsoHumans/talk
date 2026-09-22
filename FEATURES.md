@@ -1,4 +1,4 @@
-# FEATURES.md — Plan d'évolution « Caché » (ex-talk) v2, v3, v3.1 & v4 (branche `etudiant/barraud-teddy`)
+# FEATURES.md — Plan d'évolution « Télécord » (ex-talk) v2, v3, v3.1 & v4 (branche `etudiant/barraud-teddy`)
 
 > Document de traçabilité des itérations 2, 3, 3.1 et 4 : nouvelles fonctionnalités,
 > contrats API, décisions techniques. Chaque évolution est **rétro-compatible**
@@ -204,7 +204,7 @@ Smoke test sur le serveur réel : nouvelle session (simulation de rechargement) 
 
 ---
 
-## 7. Itération 4 (v4) — Markdown, édition de messages, profils « Discord-like », marque « Caché »
+## 7. Itération 4 (v4) — Markdown, édition de messages, profils « Discord-like », marque « Télécord »
 
 ### 7.1 Direction produit
 
@@ -213,7 +213,7 @@ Smoke test sur le serveur réel : nouvelle session (simulation de rechargement) 
 | « Je veux mettre en forme mes messages (Discord) » | **Rendu Markdown** dans le fil : gras, italique, souligné, barré, code inline/blocs, citations, titres, listes, liens `http(s)` seuls | Fonctionnalités · Sécurité |
 | « J'ai écrit une bêtise, je veux corriger mon message » | **Édition d'un message** par son auteur (re-chiffré de bout en bout, badge « · modifié », diffusion temps réel) | Fonctionnalités |
 | « Je veux un profil à la Discord » | **Fiche profil** (avatar, `display_name`, `@username`, id copiable, « À propos ») + **personnalisation** (`display_name`, `about`) depuis le menu Paramètres | Fonctionnalités |
-| « talk, c'est pas très fun » | **Rebranding « Caché »** : nom affiché sur le site (page d'accueil, onglet, sidebar) | — |
+| « talk, c'est pas très fun » | **Rebranding « Télécord »** : nom affiché sur le site (page d'accueil, onglet, sidebar) | — |
 
 ### 7.2 Contrat d'API v4 (ajouts — rien d'existant ne change)
 
@@ -248,7 +248,7 @@ Smoke test sur le serveur réel : nouvelle session (simulation de rechargement) 
    menu Paramètres → modale popout `profile.js` ; composants DOM, aucune ressource externe.
    L'avatar (lette + teinte) reste dérivé du **username** pour rester stable ; le `display_name`
    n'est que cosmétique (le login reste l'identifiant unique).
-5. **Rebranding** : la marque affichée devient **« Caché »** (titre, logo d'accueil,
+5. **Rebranding** : la marque affichée devient **« Télécord »** (titre, logo d'accueil,
    `BASE_TITLE`, en-tête CSS). Les identifiants internes du produit (`talk.*` du localStorage,
    nom du paquet, services Docker) sont **conservés** : renommer les clés localStorage aurait
    rendu illisibles les clés privées existantes des utilisateurs.
@@ -273,7 +273,7 @@ comptes neufs → `display_name`/`about` à `null`.
 
 ### 7.5 Smoke test v4 sur le serveur réel (uvicorn + fakeredis)
 
-Rebranding (« Caché » servi sur `/`) → register → création de salon + enveloppement de clé →
+Rebranding (« Télécord » servi sur `/`) → register → création de salon + enveloppement de clé →
 `GET /keys` restitue la copie (dé-wrappe à l'identique) → envoi chiffré → **PATCH d'édition**
 (`edited: true`, `created_at`/`seq` intacts, nouveau texte re-déchiffrable) → édition par un
 non-auteur → 403 → `PATCH /api/me` (`display_name`/`about` visibles sur `/api/me`,

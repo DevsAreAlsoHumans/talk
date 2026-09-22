@@ -23,12 +23,12 @@ from app.realtime.ws import router as ws_router
 from app.security.csrf import CSRFMiddleware
 from app.security.headers import SecurityHeadersMiddleware
 
-logger = logging.getLogger("talk")
+logger = logging.getLogger("talk")  # nom technique conservé (identifiant interne)
 
 
 def create_app() -> FastAPI:
     """Construit l'application complète (routes API, WS, static, health)."""
-    app = FastAPI(title="talk", version="0.1.0")
+    app = FastAPI(title="Télécord", version="0.1.0")
     app.state.redis = client_from_url(settings.REDIS_URL)
     app.state.hub = InProcessHub()
 

@@ -29,7 +29,7 @@ import * as chat from "./chat.js";
 import * as ui from "./ui.js";
 
 /** Titre de base (document.title), actualisé avec le total des non-lus. */
-const BASE_TITLE = "Caché — chat chiffré de bout en bout";
+const BASE_TITLE = "Télécord — chat chiffré de bout en bout";
 
 /** Callbacks posés par main.js. */
 let onToast = () => {};
