@@ -164,6 +164,7 @@ Puis ouvrir **http://localhost:8000**.
 
 ```bash
 .venv/bin/pytest -v                 # 161 tests (unitaires + intégration + sécurité)
+.venv/bin/pytest --cov=app          # + couverture branches : 95,65 % sur app/ (seuil CI : 90 %)
 .venv/bin/ruff check .              # linter — 0 erreur
 .venv/bin/ruff format --check .     # formatage — conforme
 ```
@@ -179,7 +180,8 @@ Couverture des tests :
   non autorisés, non-fuite de texte clair, WebSocket non authentifié…).
 
 La **CI** (`.github/workflows/ci.yml`) exécute à chaque push / pull request : `ruff check` +
-`ruff format`, la suite `pytest` complète, et une vérification du build Docker.
+`ruff format`, la suite `pytest` complète **avec couverture de code** (seuil `--cov-fail-under` 90 %,
+couverture mesurée : **95,65 %** sur `app/`), et une vérification du build Docker.
 
 ---
 

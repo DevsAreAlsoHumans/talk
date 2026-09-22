@@ -4,7 +4,8 @@
 #
 # Jobs :
 #   1. lint          — ruff check + ruff format (qualité du code) ;
-#   2. test          — pytest (unitaires + intégration) avec rapport JUnit ;
+#   2. test          — pytest (unitaires + intégration) avec couverture
+#                      (--cov, seuil fail_under=90) et rapport JUnit ;
 #   3. docker-build  — build de l'image (sanitize, sans push).
 # ---------------------------------------------------------------------------
 name: CI
@@ -50,8 +51,8 @@ jobs:
       - name: Install runtime + dev dependencies
         run: pip install -e ".[dev]"
 
-      - name: Run tests
-        run: pytest -v --junitxml=junit.xml
+      - name: Run tests with coverage
+        run: pytest -v --cov=app --cov-report=term-missing:skip-covered --cov-report=xml --junitxml=junit.xml
 
       - name: Upload pytest report
         if: always()
@@ -59,6 +60,14 @@ jobs:
         with:
           name: pytest-report
           path: junit.xml
+          if-no-files-found: warn
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
           if-no-files-found: warn
 
   docker-build:

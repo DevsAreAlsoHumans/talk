@@ -21,6 +21,7 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-asyncio",
+    "pytest-cov",
     "httpx",
     "fakeredis",
     "ruff",
@@ -32,6 +33,22 @@ include = ["app*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+# La CI échoue si la couverture du code de l'application passe sous ce seuil.
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise AssertionError",
+    "if __name__ == .__main__.:",
+]
 
 [tool.ruff]
 line-length = 100
