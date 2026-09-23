@@ -828,10 +828,10 @@ input[type="password"]:focus {
   filter: brightness(1.06);
 }
 
-/* Bouton d'actions du message (auteur uniquement), TOUJOURS visible :
-   la découverte « au survol seul » masquait le bouton sur écran tactile et
-   rendait Modifier/Supprimer introuvables. Le survol affine l'affordance
-   (fond + couleur via .icon-btn:hover). */
+/* Bouton d'actions du message (auteur uniquement), TOUJOURS visible et au
+   PREMIER PLAN : le `z-index` le hisse au-dessus du texte et des rangées de
+   messages suivantes ; le fond opaque + la bordure le rendent lisible même
+   quand il recouvre un message long. */
 .message-actions-btn {
   position: absolute;
   top: 0.25rem;
@@ -839,6 +839,9 @@ input[type="password"]:focus {
   width: 30px;
   height: 30px;
   opacity: 1;
+  z-index: 10;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
 }
 
 /* Indicateur central quand le fil est vide. */

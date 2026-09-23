@@ -10,15 +10,37 @@
  *     (`element.style.left/top`), conformément au `style-src 'self'` de la CSP.
  */
 
-/* Icônes : marquage interne constant (jamais de donnée utilisateur). */
+/* Icônes : construites via l'API DOM (jamais d'innerHTML ni de donnée
+   utilisateur). Les pastilles du menu « … » sont des <circle> FILLES du svg
+   (balises auto-fermantes impossibles en HTML : `template.innerHTML` les
+   imbriquerait — DOM malformé au paste). */
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-const ICON_MARKUP = {
-  dots: '<circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>',
-};
+/** Pastilles du menu d'actions « … » : [cx, cy] dans un viewBox 24x24. */
+const DOTS_POSITIONS = [
+  [12, 5],
+  [12, 12],
+  [12, 19],
+];
 
 /** Icônes composées de pastilles pleines (fill currentColor, sans stroke). */
 const SOLID_ICONS = new Set(["dots"]);
+
+/**
+ * Crée un cercle SVG isolé (pastille du menu « … »).
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @returns {SVGCircleElement}
+ */
+function makeCircle(cx, cy, r) {
+  const circle = document.createElementNS(SVG_NS, "circle");
+  circle.setAttributeNS(null, "cx", String(cx));
+  circle.setAttributeNS(null, "cy", String(cy));
+  circle.setAttributeNS(null, "r", String(r));
+  return circle;
+}
 
 /**
  * Construit une icône SVG autonome.
@@ -31,9 +53,11 @@ export function icon(name) {
   svg.setAttributeNS(null, "aria-hidden", "true");
   svg.classList.add("icon");
 
-  const template = document.createElement("template");
-  template.innerHTML = ICON_MARKUP[name]; // constante du module, jamais d'utilisateur
-  svg.appendChild(template.content.cloneNode(true));
+  if (name === "dots") {
+    for (const [cx, cy] of DOTS_POSITIONS) {
+      svg.appendChild(makeCircle(cx, cy, 1.5));
+    }
+  }
 
   if (SOLID_ICONS.has(name)) {
     svg.setAttributeNS(null, "fill", "currentColor");
