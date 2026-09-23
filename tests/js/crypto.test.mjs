@@ -15,6 +15,7 @@ import {
   fromBase64,
   generateIdentity,
   generateRoomKey,
+  importWrapKey,
   toBase64,
   unwrapRoomKey,
   wrapRoomKey,
@@ -54,6 +55,18 @@ test('la clé d\'enveloppe est non extractable : le JavaScript ne peut pas la li
   const { wrapKey } = await deriveKeys('mot de passe', 'alice', ITERATIONS);
   assert.equal(wrapKey.extractable, false);
   await assert.rejects(crypto.subtle.exportKey('raw', wrapKey));
+});
+
+test('restauration de session : les octets persistés reconstruisent la clé d\'enveloppe', async () => {
+  const password = 'un mot de passe très solide';
+  const username = 'alice';
+  const { wrapKey, wrapBits } = await deriveKeys(password, username, ITERATIONS);
+  const identity = await generateIdentity();
+  const encryptedPrivateKey = await encryptPrivateKey(identity.pkcs8, wrapKey);
+  const restored = await importWrapKey(wrapBits); // ce qui est conservé en sessionStorage
+  assert.equal(restored.extractable, false);
+  const privateKey = await decryptPrivateKey(encryptedPrivateKey, restored);
+  assert.equal(privateKey.extractable, false);
 });
 
 test('clé publique : point non compressé P-256 de 65 octets', async () => {

@@ -150,6 +150,8 @@ La documentation interactive de FastAPI (`/docs`) est désactivée : surface d'a
 - **WebSocket + Redis pub/sub.** Les routes HTTP publient l'événement sur un canal Redis, chaque instance le relaie à
   ses WebSockets : le temps réel fonctionne avec plusieurs workers. Le client se reconnecte seul (délai croissant)
   et rattrape les messages manqués. L'envoi passe par REST (donc par le CSRF), le WebSocket ne sert qu'à recevoir.
+  En filet de sécurité, la liste des amis et des demandes est rafraîchie quand l'onglet redevient visible et toutes
+  les 60 s : un événement perdu (socket mort, onglet en arrière-plan) finit par s'afficher sans refresh manuel.
   La taille de trame est portée à **4 Mo** (`--ws-max-size 4194304`) pour que le relais de présence et de signalisation
   tienne largement dans une trame, même avec des réseaux clients lents.
 - **WebRTC pour les appels.** Les échanges vocaux sont **de bout en bout** (`RTCPeerConnection` direct entre les deux
@@ -164,6 +166,10 @@ La documentation interactive de FastAPI (`/docs`) est désactivée : surface d'a
   entièrement lisible dans `frontend/`. (`package.json` ne sert qu'aux tests.)
 - **Un secret d'authentification dérivé plutôt que le mot de passe** : sans cela, le serveur verrait le mot de passe
   à chaque connexion et pourrait dériver la clé qui protège la clé privée — le « bout en bout » serait une façade.
+- **Session tenue au refresh sans saisie du mot de passe** : la clé de déverrouillage (dérivée du mot de passe) est
+  conservée en `sessionStorage` uniquement. Elle ne déchiffre que la clé privée renvoyée par le serveur avec un cookie
+  de session HttpOnly (inaccessible au JavaScript) ; elle est purgée à la déconnexion, à l'expiration de la session et à
+  la fermeture de l'onglet. `localStorage`/`indexedDB` ne sont jamais utilisés : rien ne survit à l'onglet.
 
 ### Modèle de données Redis
 
@@ -230,7 +236,7 @@ ruff check . && ruff format --check .
 
 | Niveau | Contenu |
 |---|---|
-| `tests/unit/` | Hachage Argon2id · jetons CSRF (signature, liaison à la session) et origine · protocole de chiffrement (aller-retour, altération, mauvaise clé, rejeu dans un autre salon, IV uniques) · schémas (injections, formats, tailles) · limitation de débit · hygiène du frontend (pas d'`innerHTML`, pas de code inline, pas de stockage web) · interopérabilité JS ↔ Python |
+| `tests/unit/` | Hachage Argon2id · jetons CSRF (signature, liaison à la session) et origine · protocole de chiffrement (aller-retour, altération, mauvaise clé, rejeu dans un autre salon, IV uniques) · schémas (injections, formats, tailles) · limitation de débit · hygiène du frontend (pas d'`innerHTML`, pas de code inline, pas de `localStorage`/`indexedDB` ; seule la clé de déverrouillage est conservée en `sessionStorage`, dans `app.js`) · interopérabilité JS ↔ Python |
 | `tests/integration/` | Parcours complet *inscription → connexion → salon → ajout de membre → envoi → réception → historique* · **vérification que Redis ne contient ni texte clair ni clé** · amis (demande, acceptation, refus, retrait) · conversations directes (création chiffrée, réservée aux amis, une par paire, messages/IV/limitation de débit) · grades (chef → sous-chef, droits) · pagination · WebSocket · contrôle d'accès (non-membre, non-propriétaire) · CSRF absent/invalide/lié à une autre session, origine étrangère · injections · en-têtes, cookies, erreurs génériques, CORS absent · limitation de débit · rotation et destruction de session |
 | `tests/js/` | Le vrai `crypto.js` sous Node : dérivation, enveloppes de clés, messages, clés non extractables, empreintes, lecture de vecteurs produits par Python |
 | `tests/ui/` | Le vrai frontend (`app.js`) piloté dans jsdom contre un vrai serveur et un vrai Redis, avec deux utilisateurs |
@@ -279,6 +285,9 @@ uvicorn app.main:create_app --factory --reload
 - **Confiance dans les clés publiques.** Le serveur fournit la clé publique d'un utilisateur au moment de l'ajout ; un serveur malveillant pourrait en substituer une. Les **empreintes** affichées dans la liste des membres permettent de le détecter en les comparant hors bande ; il n'y a pas de vérification automatique.
 - **Le code JavaScript vient du serveur** : un serveur compromis pourrait servir un client piégé. C'est une limite inhérente au chiffrement de bout en bout dans une page web (une extension ou une application native la lèverait).
 - **Pas de rotation de clé de salon** ni de retrait de membre (non demandés) : un ancien membre garderait la clé d'un salon. Une seule clé par salon : pas de secret futur (forward secrecy) comme dans Signal.
+- **Clé de déverrouillage en `sessionStorage`** : compromis de confort pour rester connecté au refresh. Elle reste
+  confinée à l'onglet (fermeture = purge) et ne vaut rien sans le cookie de session HttpOnly. Un XSS reste malgré tout
+  un compromis complet — comme dans toute page web chiffrée (voir ci-dessus).
 - **Mot de passe perdu = données perdues** (par construction) ; le changement de mot de passe n'est pas implémenté.
 - **Limitation de débit par adresse IP** : derrière un reverse proxy, configurer les en-têtes de confiance d'uvicorn (`--proxy-headers`, `--forwarded-allow-ips`).
 - **Taille des trames WebSocket** : 4 Mo (paramètre uvicorn `--ws-max-size`). Un média plus gros que ~2 Mo chiffré est refusé (422) ; le navigateur limite déjà à 2 Mo après ré-échantillonnage.

@@ -14,6 +14,7 @@ const HISTORY_PAGE_SIZE = 50;
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const NEAR_BOTTOM_PX = 96;
+const FRIENDS_REFRESH_MS = 60_000;
 const REVEAL_GLYPHS = '▒░▓#%&*+=?';
 const REVEAL_FRAMES = 12;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -27,6 +28,18 @@ const RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 const ROLE_OWNER = 'owner';
 const ROLE_CO = 'co';
 const ROLE_MEMBER = 'member';
+
+/**
+ * Seule la clé de déverrouillage (dérivée du mot de passe) est conservée en sessionStorage :
+ * elle déchiffre la clé privée que le serveur renvoie avec une session valide (cookie de session
+ * HttpOnly, invisible au JavaScript). Effacée à la déconnexion comme à la fermeture de l'onglet ;
+ * aucun stockage persistant, jamais la clé privée elle-même.
+ */
+const WRAP_KEY_STORAGE = 'talk:wrap-key';
+// Canal mémoire entre onglets de la même origine : sessionStorage est propre à chaque onglet,
+// donc un onglet dupliqué n'a pas la clé ; on la lui prête brièvement (BroadcastChannel, aucun
+// stockage persistant) pour restaurer la session sans redemander le mot de passe.
+const WRAP_CHANNEL = 'talk:wrap-key:sync';
 
 const timeFormat = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' });
 const dayFormat = new Intl.DateTimeFormat('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -136,6 +149,7 @@ const state = {
   incoming: null, // { id, name, offer } appels entrants en attente
   recorder: null, // enregistrement vocal en cours
   recordingStartedAt: 0,
+  wrapChannel: null, // BroadcastChannel de partage de la clé entre onglets (mémoire seule)
 };
 
 // ---------- Retours à l'utilisateur ----------
@@ -215,7 +229,7 @@ function describeAuthError(error) {
 }
 
 async function register(username, password) {
-  const { wrapKey, authSecret } = await e2e.deriveKeys(password, username);
+  const { wrapKey, wrapBits, authSecret } = await e2e.deriveKeys(password, username);
   const identity = await e2e.generateIdentity();
   await api.register({
     username,
@@ -223,15 +237,15 @@ async function register(username, password) {
     public_key: identity.publicKey,
     encrypted_private_key: await e2e.encryptPrivateKey(identity.pkcs8, wrapKey),
   });
-  await completeLogin(username, wrapKey, authSecret);
+  await completeLogin(username, wrapKey, wrapBits, authSecret);
 }
 
 async function login(username, password) {
-  const { wrapKey, authSecret } = await e2e.deriveKeys(password, username);
-  await completeLogin(username, wrapKey, authSecret);
+  const { wrapKey, wrapBits, authSecret } = await e2e.deriveKeys(password, username);
+  await completeLogin(username, wrapKey, wrapBits, authSecret);
 }
 
-async function completeLogin(username, wrapKey, authSecret) {
+async function completeLogin(username, wrapKey, wrapBits, authSecret) {
   const { user, csrf_token: csrfToken } = await api.login({ username, auth_secret: authSecret });
   api.setCsrfToken(csrfToken);
   try {
@@ -240,6 +254,7 @@ async function completeLogin(username, wrapKey, authSecret) {
     await api.logout().catch(() => {});
     throw error;
   }
+  sessionStorage.setItem(WRAP_KEY_STORAGE, wrapBits);
   state.me = {
     id: user.id,
     username: user.username,
@@ -252,6 +267,81 @@ async function completeLogin(username, wrapKey, authSecret) {
   el.authPassword.value = '';
   el.authConfirm.value = '';
   await enterApp();
+}
+
+/**
+ * Tente de rétablir la session après un refresh : on ne redemande le mot de passe que si
+ * la clé de déverrouillage est absente, la session expirée (401 → purge de la clé) ou le
+ * déchiffrement impossible. Aucune donnée n'est conservée ailleurs qu'en sessionStorage.
+ */
+async function restoreSession() {
+  let wrapBits = sessionStorage.getItem(WRAP_KEY_STORAGE);
+  if (!wrapBits) wrapBits = await requestWrapKeyFromTabs();
+  if (!wrapBits) return false;
+  let user;
+  try {
+    user = await api.me();
+  } catch (error) {
+    if (error instanceof api.ApiError && error.status === 401) sessionStorage.removeItem(WRAP_KEY_STORAGE);
+    return false;
+  }
+  try {
+    const wrapKey = await e2e.importWrapKey(wrapBits);
+    state.privateKey = await e2e.decryptPrivateKey(user.encrypted_private_key, wrapKey);
+  } catch (error) {
+    sessionStorage.removeItem(WRAP_KEY_STORAGE);
+    return false;
+  }
+  state.me = {
+    id: user.id,
+    username: user.username,
+    publicKey: user.public_key,
+    displayName: user.display_name,
+    bio: user.bio,
+    theme: user.theme === 'light' ? 'light' : 'dark',
+  };
+  applyTheme(user.theme);
+  await enterApp();
+  return true;
+}
+
+let wrapKeyResolver = null;
+
+/** Partage la clé de déverrouillage aux autres onglets de la même origine (mémoire uniquement). */
+function setupWrapChannel() {
+  if (typeof BroadcastChannel === 'undefined') return;
+  const channel = new BroadcastChannel(WRAP_CHANNEL);
+  channel.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'ask-wrap') {
+      const wrapBits = sessionStorage.getItem(WRAP_KEY_STORAGE);
+      if (wrapBits) channel.postMessage({ type: 'wrap', wrapKey: wrapBits });
+    } else if (data.type === 'wrap' && typeof data.wrapKey === 'string' && wrapKeyResolver) {
+      sessionStorage.setItem(WRAP_KEY_STORAGE, data.wrapKey);
+      const resolve = wrapKeyResolver;
+      wrapKeyResolver = null;
+      resolve(data.wrapKey);
+    }
+  });
+  state.wrapChannel = channel;
+}
+
+/** Demande la clé d'enveloppe aux autres onglets et attend (brièvement) une réponse. */
+function requestWrapKeyFromTabs() {
+  const channel = state.wrapChannel;
+  if (!channel) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      wrapKeyResolver = null;
+      resolve(null);
+    }, 500);
+    wrapKeyResolver = (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    };
+    channel.postMessage({ type: 'ask-wrap' });
+  });
 }
 
 el.authForm.addEventListener('submit', async (event) => {
@@ -288,6 +378,8 @@ async function enterApp() {
   el.meName.textContent = state.me.displayName || state.me.username;
   updateOwnAvatar(null);
   connectSocket();
+  clearInterval(state.friendsTimer);
+  state.friendsTimer = setInterval(syncFriendsQuietly, FRIENDS_REFRESH_MS);
   await Promise.all([refreshRooms(), refreshConversations(), refreshFriends()]);
   if (state.rooms.length > 0) await selectRoom(state.rooms[0].id);
   else if (state.convs.length > 0) await selectConversation(state.convs[0].id);
@@ -296,7 +388,12 @@ async function enterApp() {
 
 function resetSession() {
   state.loggedIn = false;
+  state.wrapChannel?.close();
+  state.wrapChannel = null;
+  wrapKeyResolver = null;
+  sessionStorage.removeItem(WRAP_KEY_STORAGE);
   clearTimeout(state.reconnectTimer);
+  clearInterval(state.friendsTimer);
   const socket = state.socket;
   state.socket = null;
   socket?.close(1000);
@@ -316,6 +413,7 @@ function resetSession() {
     friendRequests: [],
     everConnected: false,
     reconnectAttempt: 0,
+    friendsTimer: null,
     incoming: null,
     call: null,
     recorder: null,
@@ -608,6 +706,17 @@ async function refreshFriends() {
   renderFriendRequests();
 }
 
+/** Filet de sécurité : si un événement WebSocket a été perdu (socket mort, onglet en arrière-plan),
+ *  une demande d'ami finit quand même par s'afficher, sans attendre un refresh manuel. */
+function syncFriendsQuietly() {
+  if (!state.loggedIn) return;
+  refreshFriends().catch(() => {}); // reprise silencieuse : le prochain passage retentera
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (state.loggedIn && document.visibilityState === 'visible') syncFriendsQuietly();
+});
+
 function renderFriendRequests() {
   clear(el.friendRequests);
   el.friendRequestsGroup.hidden = state.friendRequests.length === 0;
@@ -715,7 +824,12 @@ function setRailTab(tab) {
 }
 
 el.tabSessions.addEventListener('click', () => setRailTab('sessions'));
-el.tabFriends.addEventListener('click', () => setRailTab('friends'));
+el.tabFriends.addEventListener('click', () => {
+  setRailTab('friends');
+  // Recharge toujours les amis à l'ouverture de l'onglet : une demande peut avoir été
+  // envoyée pendant que la connexion WebSocket était coupée, sans événement pour la rejouer.
+  void refreshFriends().catch(() => {});
+});
 
 async function fillAvatars(roomId) {
   const detail = state.roomDetails.get(roomId);
@@ -1634,7 +1748,17 @@ function handleConvPresence({ user_id: userId, online }) {
 }
 
 async function handleFriendRequest({ from }) {
-  await refreshFriends();
+  // Affichage immédiat depuis l'événement : la demande apparaît même si le rechargement
+  // de la liste échoue ou arrive trop tard.
+  if (from?.id && !state.friendRequests.some((r) => r.id === from.id)) {
+    state.friendRequests.push(from);
+    renderFriendRequests();
+  }
+  try {
+    await refreshFriends();
+  } catch (error) {
+    reportError(error, "La liste d'attente d'amis n'a pas pu être actualisée.");
+  }
   const name = from.display_name || from.username;
   notify(`${name} souhaite devenir votre ami.`);
   announce(`Demande d'ami de ${name}`);
@@ -1642,7 +1766,17 @@ async function handleFriendRequest({ from }) {
 
 async function handleFriendAccepted({ user }) {
   if (user.id === state.me.id) return;
-  await refreshFriends();
+  if (user?.id) {
+    state.friendRequests = state.friendRequests.filter((r) => r.id !== user.id);
+    if (!state.friends.some((f) => f.id === user.id)) state.friends.push(user);
+    renderFriendRequests();
+    renderFriendList();
+  }
+  try {
+    await refreshFriends();
+  } catch (error) {
+    reportError(error, "La liste d'amis n'a pas pu être actualisée.");
+  }
   const name = user.display_name || user.username;
   notify(`Vous êtes maintenant ami(e)s avec ${name}.`);
   announce(`Vous êtes ami(e)s avec ${name}`);
@@ -1893,5 +2027,7 @@ if (!globalThis.crypto?.subtle) {
   el.authSubmit.disabled = true;
 } else {
   setAuthMode('login');
+  setupWrapChannel();
+  void restoreSession();
 }
 el.authUsername.focus();

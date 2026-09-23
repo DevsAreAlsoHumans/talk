@@ -15,3 +15,6 @@ htmlcov/
 
 # Node (tests frontend)
 node_modules/
+
+# Fichiers jetables (sorties de tests, notes de travail)
+*.log

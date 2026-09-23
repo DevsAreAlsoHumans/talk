@@ -30,7 +30,9 @@ class Settings(BaseSettings):
     # Cookies : `Secure` activé par défaut. Chrome et Firefox l'acceptent sur
     # http://localhost ; pour Safari ou un autre hôte en HTTP, mettre COOKIE_SECURE=false.
     cookie_secure: bool = True
-    session_ttl_seconds: int = 8 * 3600
+    # Durée de validité d'une session (cookie HttpOnly + empreinte dans Redis). Longue pour ne
+    # pas déconnecter l'utilisateur en cours d'utilisation ; surchargeable par SESSION_TTL_SECONDS.
+    session_ttl_seconds: int = 30 * 24 * 3600
 
     # Limitation de débit : nombre de tentatives autorisées par fenêtre.
     login_ip_limit: int = 20

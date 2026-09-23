@@ -33,7 +33,14 @@ class SessionStore:
     async def get_user_id(self, session_id: str | None) -> str | None:
         if not session_id or len(session_id) > MAX_SESSION_ID_LENGTH:
             return None
-        return await self._redis.get(self._key(session_id))
+        key = self._key(session_id)
+        user_id = await self._redis.get(key)
+        if user_id is not None:
+            # Session glissante : chaque requête authentifiée repousse l'échéance.
+            # Seule une inactivité ≥ session_ttl_seconds (et non la durée depuis la
+            # connexion) expire la session : pas de déconnexion en plein usage.
+            await self._redis.expire(key, self._ttl)
+        return user_id
 
     async def destroy(self, session_id: str | None) -> None:
         if session_id and len(session_id) <= MAX_SESSION_ID_LENGTH:

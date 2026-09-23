@@ -80,7 +80,15 @@ export async function deriveKeys(password, username, iterations = PBKDF2_ITERATI
     hkdfBits(masterBits, 'talk-auth-secret'),
   ]);
   const wrapKey = await subtle.importKey('raw', wrapBits, 'AES-GCM', false, ['encrypt', 'decrypt']);
-  return { wrapKey, authSecret: toBase64(authBits) };
+  return { wrapKey, wrapBits: toBase64(wrapBits), authSecret: toBase64(authBits) };
+}
+
+/**
+ * Réimporte la clé d'enveloppe depuis ses octets (restauration de session au refresh).
+ * La CryptoKey reste NON extractable : seul ce module peut s'en servir.
+ */
+export async function importWrapKey(wrapBitsBase64) {
+  return subtle.importKey('raw', fromBase64(wrapBitsBase64), 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
 // ---------- 2. Identité (paire de clés ECDH) ----------

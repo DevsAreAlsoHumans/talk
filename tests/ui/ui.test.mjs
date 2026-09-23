@@ -41,17 +41,23 @@ globalThis.WebSocket = class extends WebSocketBase {
   constructor(url) { super(url, { headers: { Origin: BASE, Cookie: cookieHeader(cookies) } }); }
 };
 
-const dom = new JSDOM(readFileSync(new URL('index.html', FRONTEND), 'utf8'), { url: `${BASE}/`, pretendToBeVisual: true });
-const { window } = dom;
-Object.assign(globalThis, { window, document: window.document, location: window.location, Node: window.Node });
+const { window } = bootWindow();
+Object.assign(globalThis, { window, document: window.document, location: window.location, Node: window.Node, sessionStorage: window.sessionStorage });
 globalThis.matchMedia = () => ({ matches: false }); // animation de déchiffrement active
 if (URL.createObjectURL === undefined) {
   let fakeUrlSeq = 0;
   URL.createObjectURL = () => `blob:ui-${++fakeUrlSeq}`;
   URL.revokeObjectURL = () => {};
 }
-window.HTMLDialogElement.prototype.showModal = function showModal() { this.setAttribute('open', ''); };
-window.HTMLDialogElement.prototype.close = function close() { this.removeAttribute('open'); };
+
+/** Nouvelle fenêtre jsdom sur la même page : simule un refresh (sessionStorage + cookies conservés). */
+function bootWindow() {
+  const dom = new JSDOM(readFileSync(new URL('index.html', FRONTEND), 'utf8'), { url: `${BASE}/`, pretendToBeVisual: true });
+  const w = dom.window;
+  w.HTMLDialogElement.prototype.showModal = function showModal() { this.setAttribute('open', ''); };
+  w.HTMLDialogElement.prototype.close = function close() { this.removeAttribute('open'); };
+  return { dom, window: w };
+}
 const errors = [];
 const realConsoleError = console.error;
 console.error = (...args) => {
@@ -128,6 +134,7 @@ setValue('#auth-confirm', 'un mot de passe solide');
 submit($('#auth-form'));
 await waitFor(() => !$('#auth-screen').hidden === false && !$('#app').hidden, 'entrée dans l\'application');
 ok($('#me-name').textContent === 'alice', 'connecté en tant qu\'alice');
+ok(sessionStorage.getItem('talk:wrap-key') !== null, 'clé de déverrouillage conservée en sessionStorage (refresh sans saisie du mot de passe)');
 await waitFor(() => !$('#room-empty').hidden, 'état vide');
 ok(true, 'état vide : invitation à créer un salon');
 ok($('#composer-input').disabled, 'composeur désactivé sans salon');
@@ -179,6 +186,15 @@ await bob.say(roomId, 'Salut Alice, ici Bob 👋');
 await waitFor(() => $$('.msg .body').some((node) => node.textContent === 'Salut Alice, ici Bob 👋'), 'message de bob reçu en direct (après animation)');
 ok($$('.msg .author').some((node) => node.textContent === 'bob'), 'message de bob reçu sans recharger');
 
+console.log('Demande d\'ami');
+await bob.call('POST', '/api/friends/requests', { username: 'alice' });
+// L'événement WebSocket doit suffire : aucun clic, aucun refresh requis.
+await waitFor(() => $$('#friend-requests li').length === 1, 'demande d\'ami visible en temps réel (sans clic ni refresh)');
+ok($('#friend-requests').textContent.includes('bob'), 'bob apparaît dans les demandes reçues');
+$('#tab-friends').click();
+ok($$('#friend-requests li').length === 1, 'la demande reste visible dans l\'onglet Amis');
+$('#tab-sessions').click();
+
 console.log('Profil');
 $('#btn-profile').click();
 await waitFor(() => $('#profile-dialog').open, 'dialogue de profil ouvert');
@@ -225,6 +241,7 @@ console.log('Déconnexion / reconnexion');
 $('#logout').click();
 await waitFor(() => !$('#auth-screen').hidden && $('#app').hidden, 'retour à l\'écran de connexion');
 ok(cookies.size === 0 || ![...cookies.keys()].some((name) => name.includes('session')), 'cookie de session supprimé');
+ok(sessionStorage.getItem('talk:wrap-key') === null, 'clé de déverrouillage purgée à la déconnexion');
 ok((await realFetch(`${BASE}/api/rooms`, { headers: { Cookie: 'x=1' } })).status === 401, 'API inaccessible sans session');
 
 setValue('#auth-username', 'alice'); setValue('#auth-password', 'mauvais mot de passe');
@@ -236,6 +253,7 @@ ok($('#auth-submit').disabled === false && $('#auth-submit').textContent === 'Se
 setValue('#auth-password', 'un mot de passe solide');
 submit($('#auth-form'));
 await waitFor(() => !$('#app').hidden, 'reconnexion');
+ok(sessionStorage.getItem('talk:wrap-key') !== null, 'clé de déverrouillage de nouveau conservée après reconnexion');
 await waitFor(() => $$('#room-list button').length === 2, 'salons rechargés');
 $$('button.room').find((button) => button.textContent.includes('général')).click();
 await waitFor(() => $$('.msg .body').length >= 3, 'historique rechargé');
@@ -243,8 +261,21 @@ const texts = $$('.msg .body').map((node) => node.textContent);
 ok(texts.includes(secret) && texts.includes('Salut Alice, ici Bob 👋'), 'historique déchiffré avec la clé privée restaurée depuis le mot de passe');
 ok(!texts.some((text) => text.includes('indéchiffrable')), 'aucun message indéchiffrable');
 
+console.log('Refresh : la session est rétablie sans saisie du mot de passe');
+const savedWrapKey = sessionStorage.getItem('talk:wrap-key');
+ok(savedWrapKey !== null, 'clé de déverrouillage présente avant le refresh');
+const refreshed = bootWindow().window;
+Object.assign(globalThis, { window: refreshed, document: refreshed.document, location: refreshed.location, Node: refreshed.Node, sessionStorage: refreshed.sessionStorage });
+refreshed.sessionStorage.setItem('talk:wrap-key', savedWrapKey); // comme un vrai refresh : sessionStorage conservé
+await import(new URL('js/app.js', FRONTEND).href + `?refresh=${Date.now()}`);
+await waitFor(() => !$('#auth-screen').hidden === false && !$('#app').hidden, 'entrée dans l\'application après refresh, sans login');
+ok($('#me-name').textContent === 'Alicia', 'connecté en tant qu\'alice (surnom restauré) après refresh, sans re-saisie du mot de passe');
+await waitFor(() => $$('#room-list button').length === 2, 'salons rechargés après refresh');
+ok(true, 'salons rechargés après refresh');
+
 $('#logout').click();
 await waitFor(() => $('#app').hidden, 'déconnexion finale');
+ok(sessionStorage.getItem('talk:wrap-key') === null, 'clé de déverrouillage de nouveau purgée');
 ok(errors.filter((line) => !line.includes('Identifiants invalides')).length === 0, `aucune erreur inattendue en console (${errors.length} au total)`);
 console.log(`\n${passed} vérifications OK`);
 process.exit(0);
