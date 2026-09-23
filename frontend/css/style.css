@@ -828,18 +828,16 @@ input[type="password"]:focus {
   filter: brightness(1.06);
 }
 
-/* Bouton d'actions du message (auteur uniquement), visible au survol. */
+/* Bouton d'actions du message (auteur uniquement), TOUJOURS visible :
+   la découverte « au survol seul » masquait le bouton sur écran tactile et
+   rendait Modifier/Supprimer introuvables. Le survol affine l'affordance
+   (fond + couleur via .icon-btn:hover). */
 .message-actions-btn {
   position: absolute;
   top: 0.25rem;
   right: 0.5rem;
   width: 30px;
   height: 30px;
-  opacity: 0;
-}
-
-.message:hover .message-actions-btn,
-.message:focus-within .message-actions-btn {
   opacity: 1;
 }
 
