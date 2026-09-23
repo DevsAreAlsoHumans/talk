@@ -828,20 +828,44 @@ input[type="password"]:focus {
   filter: brightness(1.06);
 }
 
-/* Bouton d'actions du message (auteur uniquement), TOUJOURS visible et au
-   PREMIER PLAN : le `z-index` le hisse au-dessus du texte et des rangées de
-   messages suivantes ; le fond opaque + la bordure le rendent lisible même
-   quand il recouvre un message long. */
+/* Bouton d'actions du message (Modifier/Supprimer — auteur uniquement),
+   style Discord : masqué par défaut, révélé au survol de la ligne du
+   message (ou au focus clavier via :focus-within). Pas de bordure ; fond
+   discret au survol du bouton lui-même. Tant qu'il est masqué, il n'attrape
+   PAS les clics (pointeur transparent) : la sélection du texte reste libre.
+   Le z-index le garde au premier plan quand il est révélé (au-dessus du
+   texte et des rangées suivantes). Sur écran tactile (:hover inexistant ou
+   figé), il reste visible pour rester accessible. */
 .message-actions-btn {
   position: absolute;
   top: 0.25rem;
   right: 0.5rem;
   width: 30px;
   height: 30px;
-  opacity: 1;
+  opacity: 0;
+  pointer-events: none;
   z-index: 10;
+  transition: opacity var(--dur-1) ease;
+}
+
+.message:hover .message-actions-btn,
+.message:focus-within .message-actions-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Fond discret au survol du bouton lui-même (légèrement plus foncé que la
+   ligne survolée : le bouton reste discernable sur le fond --bg-hover). */
+.message-actions-btn:hover,
+.message-actions-btn:focus-visible {
   background: var(--bg-elevated);
-  border: 1px solid var(--border);
+}
+
+@media (hover: none) {
+  .message-actions-btn {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* Indicateur central quand le fil est vide. */
