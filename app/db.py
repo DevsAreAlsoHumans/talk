@@ -1,6 +1,6 @@
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
-from app.config import Settings
+from app.config import Settings, settings
 
 
 class Mongo:

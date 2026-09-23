@@ -10,7 +10,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MONGODB_URI", "mongo_uri"),
     )
     mongo_dbname: str = Field(
-        default="talk",
+        default="Talk",
         validation_alias=AliasChoices("MONGODB_DBNAME", "mongo_dbname"),
     )
 
