@@ -190,6 +190,15 @@ class UpdateProfileRequest(StrictModel):
     bio: Bio
 
 
+Theme = Literal["dark", "light"]
+
+
+class UpdateThemeRequest(StrictModel):
+    """Préférence d'affichage (mode sombre / clair), propre à chaque compte."""
+
+    theme: Theme
+
+
 class AvatarRequest(StrictModel):
     iv: Iv
     ciphertext: AvatarCiphertext
@@ -214,6 +223,7 @@ class UserPublic(BaseModel):
 class UserSelf(UserPublic):
     display_name: str
     bio: str
+    theme: str = "dark"
     encrypted_private_key: str
 
 

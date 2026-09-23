@@ -36,6 +36,23 @@ def test_profile_validation(alice, bob):
         assert response.status_code == 422
 
 
+def test_theme_preference_is_per_user_and_persisted(alice, bob):
+    assert alice.get("/api/me").json()["theme"] == "dark"
+
+    response = alice.put("/api/me/theme", {"theme": "light"})
+    assert response.status_code == 200
+    assert response.json()["theme"] == "light"
+    assert alice.get("/api/me").json()["theme"] == "light"
+
+    # Le thème est une préférence personnelle : les autres comptes et les membres de salon n'y ont pas accès.
+    assert bob.get("/api/me").json()["theme"] == "dark"
+    detail = alice.create_room()
+    assert "theme" not in alice.get(f"/api/rooms/{detail}").json()["members"][0]
+
+    for payload in [{"theme": "blue"}, {}, {"theme": "LIGHT"}]:
+        assert alice.put("/api/me/theme", payload).status_code == 422
+
+
 def test_avatar_is_stored_encrypted_inside_the_room_only(alice, bob):
     room_id = alice.create_room()
     alice.add_member(room_id, bob)

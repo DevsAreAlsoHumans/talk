@@ -196,6 +196,7 @@ La documentation interactive de FastAPI (`/docs`) est désactivée : surface d'a
 | POST | `/api/auth/register` · `/login` · `/logout` | Inscription, connexion, déconnexion |
 | GET | `/api/auth/me` | Utilisateur courant |
 | GET · PUT | `/api/users/{pseudo}` · `/api/me/profile` | Clé publique d'un utilisateur · mettre à jour surnom et biographie |
+| PUT | `/api/me/theme` | Préférence d'affichage du compte : `dark` ou `light` |
 | GET · POST | `/api/rooms` | Lister · créer un salon (avec la clé enveloppée pour soi) |
 | GET | `/api/rooms/{id}` | Détail : membres, ma clé enveloppée, présence, avatars chiffrés |
 | POST | `/api/rooms/{id}/members` | Ajouter un membre (chef ou sous-chef ; fournit la clé enveloppée pour lui) |

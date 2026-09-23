@@ -3,7 +3,6 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
     <title>talk — messagerie chiffrée de bout en bout</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/style.css" />
@@ -170,6 +169,13 @@
         <input id="profile-name" maxlength="32" autocapitalize="off" spellcheck="false" />
         <label for="profile-bio">Biographie</label>
         <textarea id="profile-bio" rows="3" maxlength="200"></textarea>
+        <div class="theme-picker" role="group" aria-label="Apparence">
+          <span class="theme-label">Apparence</span>
+          <div class="theme-options">
+            <button type="button" id="theme-dark" class="theme-opt" aria-pressed="true">Sombre</button>
+            <button type="button" id="theme-light" class="theme-opt" aria-pressed="false">Clair</button>
+          </div>
+        </div>
         <p id="profile-error" class="error" role="alert" hidden></p>
         <div class="dialog-actions">
           <button type="button" id="profile-cancel" class="link">Annuler</button>

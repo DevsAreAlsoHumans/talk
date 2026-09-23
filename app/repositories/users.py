@@ -27,6 +27,7 @@ class UserRepository:
             "username": username,
             "display_name": username,
             "bio": "",
+            "theme": "dark",
             "password_hash": password_hash,
             "public_key": public_key,
             "encrypted_private_key": encrypted_private_key,
@@ -45,4 +46,9 @@ class UserRepository:
     async def update_profile(self, user_id: str, *, display_name: str, bio: str) -> dict[str, str]:
         """Met à jour le profil visible du compte (surnom, biographie)."""
         await self._redis.hset(f"user:{user_id}", mapping={"display_name": display_name, "bio": bio})
+        return await self.get(user_id)
+
+    async def set_theme(self, user_id: str, *, theme: str) -> dict[str, str]:
+        """Mémorise la préférence d'affichage du compte (mode sombre / clair)."""
+        await self._redis.hset(f"user:{user_id}", mapping={"theme": theme})
         return await self.get(user_id)

@@ -80,6 +80,7 @@ export function history(roomId, before, limit) {
 
 export const sendMessage = (roomId, payload) => request('POST', `/api/rooms/${roomId}/messages`, payload);
 export const updateProfile = (payload) => request('PUT', '/api/me/profile', payload);
+export const updateTheme = (payload) => request('PUT', '/api/me/theme', payload);
 export const setAvatar = (roomId, payload) => request('PUT', `/api/rooms/${roomId}/avatar`, payload);
 export const setRole = (roomId, payload) => request('POST', `/api/rooms/${roomId}/roles`, payload);
 

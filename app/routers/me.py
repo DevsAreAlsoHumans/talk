@@ -8,7 +8,7 @@ le nom d'utilisateur. L'avatar, lui, est chiffré de bout en bout par salon (voi
 from fastapi import APIRouter
 
 from app.deps import AuthDep, UsersDep
-from app.schemas import UpdateProfileRequest, UserSelf
+from app.schemas import UpdateProfileRequest, UpdateThemeRequest, UserSelf
 
 router = APIRouter(prefix="/api/me", tags=["me"])
 
@@ -21,3 +21,8 @@ async def current_profile(auth: AuthDep) -> dict[str, str]:
 @router.put("/profile", response_model=UserSelf)
 async def update_profile(body: UpdateProfileRequest, auth: AuthDep, users: UsersDep) -> dict[str, str]:
     return await users.update_profile(auth.user["id"], display_name=body.display_name, bio=body.bio)
+
+
+@router.put("/theme", response_model=UserSelf)
+async def update_theme(body: UpdateThemeRequest, auth: AuthDep, users: UsersDep) -> dict[str, str]:
+    return await users.set_theme(auth.user["id"], theme=body.theme)

@@ -90,6 +90,8 @@ const el = {
   profileError: $('#profile-error'),
   profileSave: $('#profile-save'),
   profileCancel: $('#profile-cancel'),
+  themeDark: $('#theme-dark'),
+  themeLight: $('#theme-light'),
   callView: $('#call-view'),
   callState: $('#call-state'),
   callPeer: $('#call-peer'),
@@ -244,7 +246,9 @@ async function completeLogin(username, wrapKey, authSecret) {
     publicKey: user.public_key,
     displayName: user.display_name,
     bio: user.bio,
+    theme: user.theme === 'light' ? 'light' : 'dark',
   };
+  applyTheme(user.theme);
   el.authPassword.value = '';
   el.authConfirm.value = '';
   await enterApp();
@@ -1336,6 +1340,32 @@ function resetVoiceUI() {
 function stopRecording() {
   state.recorder?.mediaRecorder.stop();
 }
+
+// ---------- Apparence (mode sombre / clair) ----------
+
+function applyTheme(theme) {
+  const mode = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = mode === 'light' ? 'light' : '';
+  el.themeDark.setAttribute('aria-pressed', String(mode === 'dark'));
+  el.themeLight.setAttribute('aria-pressed', String(mode === 'light'));
+}
+
+async function persistTheme(theme) {
+  try {
+    const updated = await api.updateTheme({ theme });
+    if (state.me) state.me.theme = updated.theme;
+  } catch (error) {
+    reportError(error, "Impossible d'enregistrer cette préférence.");
+  }
+}
+
+function setTheme(theme) {
+  applyTheme(theme);
+  void persistTheme(theme);
+}
+
+el.themeDark.addEventListener('click', () => setTheme('dark'));
+el.themeLight.addEventListener('click', () => setTheme('light'));
 
 // ---------- Profil et avatar ----------
 
