@@ -64,3 +64,14 @@ Choix du chiffrement :
 - nom, email , n° de tel : chiffré
 - pour les mdp : hashage
 La raison est que le chiffrement symétrique est meilleur pour chiffrer rapidement bcp de données.
+
+Cmt fonctionnera l'application : 
+- Chaque compte aura un id et devra être créé avec un numéro de téléphone et éventuellement une adresse mail, il aura aussi une date de création
+- Chaque utilisateur pourra démarrer une conversation avec qqn même s'il ne le connaît pas, il faudra pour cela envoyer une demande de discussion et qu'il l'accepte
+- Pour discuter avec qqn, il faut qu'il recherche l'identifiant ou le code (#) de la personne  
+- Chaque utilisateur pourra ajouter qqn en ami à condition que ledit ami ait accepté sa demande d'amis
+
+Cmt sera organisée la base de données : 
+- Compte / User (id_compte, identifiant, n° téléphone, email (facultatif), mdp_hashé, date_création) //il faut  
+- Conversation (id_conversation, id_user, date_création, date_dernier_message) // chaque conversation doit être unique et donc pouvoir être retrouvée avec son id
+- messages (id_user, id_message, text_message, date_message) //date_message contient l'heure du message
