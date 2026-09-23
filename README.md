@@ -57,3 +57,10 @@ Raison : Redis est un In-memory data store, cela signifie que Redis est idéal p
 Cependant, j'estime que pour une application de messagerie il est très important de pouvoir stocker les données durablement.
 Dans une messagerie, il faut stocker l'ensemble des conversations, les utilisateurs avec lesquels ont eu lieu ces conversations, leurs dates, les informations de connexion de chaque compte etc...
 Toutes ces informations sont primordiales pour créer une messagerie de qualité
+
+Choix du chiffrement : 
+- pour les messages : chiffrement symétrique
+- pour les noms d'utilisateur : pas de chiffrement
+- nom, email , n° de tel : chiffré
+- pour les mdp : hashage
+La raison est que le chiffrement symétrique est meilleur pour chiffrer rapidement bcp de données.
