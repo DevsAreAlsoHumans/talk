@@ -137,6 +137,18 @@ export function initAuth({ onAuthenticated: cb, onToast: toastCallback }) {
     } catch (error) {
       if (error instanceof LockedAccountError) {
         showLocked(error.message);
+      } else if (
+        mode === "login" &&
+        error instanceof ApiError &&
+        error.status === 401 &&
+        error.message === "Invalid credentials"
+      ) {
+        // Compte inconnu ou mot de passe erroné (ex. silo Redis vidé lors d'un
+        // redémarrage) : on oriente vers la création de compte.
+        showError(
+          "Identifiants incorrects. Vérifiez votre pseudo et votre mot de passe, " +
+            "ou choisissez « S'inscrire » pour recréer votre compte.",
+        );
       } else {
         showError(error.message || "Erreur inconnue.");
       }
