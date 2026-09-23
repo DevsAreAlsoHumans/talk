@@ -144,6 +144,21 @@
 
           <!-- Zone de saisie -->
           <form id="message-form" class="message-form" hidden>
+            <!-- Barre « Modification » (style Discord) : affichée pendant
+                 l'édition d'un message, au-dessus de la zone de saisie. -->
+            <div id="edit-banner" class="message-edit-banner" hidden>
+              <span id="edit-banner-label" class="message-edit-banner-label"></span>
+              <button id="btn-cancel-edit" type="button"
+                      class="icon-btn message-edit-banner-cancel"
+                      aria-label="Annuler la modification"
+                      title="Annuler (Échap)">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
             <div class="message-form-pill">
               <button id="btn-attach" type="button" class="icon-btn icon-btn--attach"
                       aria-label="Envoyer une image ou un GIF" title="Envoyer une image ou un GIF">

@@ -935,15 +935,42 @@ input[type="password"]:focus {
   flex-shrink: 0;
 }
 
-/* Édition inline d'un message : textarea + barre d'actions. */
-.message-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  margin-top: 2px;
+/* Message en cours de modification : fond + barre d'accent à gauche — le
+   message édité reste identifiable dans le fil (style Discord). */
+.message--editing,
+.message--editing:hover {
+  background: var(--bg-hover);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.edit-textarea,
+/* Barre « Modification » au-dessus de la zone de saisie (style Discord) :
+   auteur · heure : extrait du message en cours d'édition. */
+.message-edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.message-edit-banner-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+}
+
+.message-edit-banner-cancel {
+  width: 26px;
+  height: 26px;
+}
+
 .profile-about-input {
   width: 100%;
   min-height: 64px;
@@ -957,23 +984,10 @@ input[type="password"]:focus {
   resize: vertical;
 }
 
-.edit-textarea:focus,
 .profile-about-input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.25);
-}
-
-/* Bordure rouge : contenu vide ou au-delà de MAX_PLAINTEXT_BYTES. */
-.edit-textarea--error {
-  border-color: var(--danger);
-  box-shadow: 0 0 0 3px rgba(242, 63, 67, 0.2);
-}
-
-.edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
 }
 
 /* ------------------------------------------------------------

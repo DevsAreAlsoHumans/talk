@@ -84,7 +84,7 @@ let membersById = new Map();
 /** Gestionnaire de clic sur l'avatar d'un message (posé par main.js). */
 let onMemberClick = () => {};
 
-/** Édition inline en cours : {item, cancel, cleanup} ou null. */
+/** Édition en cours (style Discord) : {item, msg, roomId, originalValue, cancel}. */
 let editState = null;
 
 /** Compteur local pour les messages sans id retourné par le serveur. */
@@ -119,6 +119,17 @@ export function initChat({ onToast: toastCallback }) {
     const input = document.getElementById("message-input");
     const text = input.value;
     if (!text.trim()) {
+      // En mode édition, un envoi à vide mérite un retour (le message resté
+      // en édition reste surligné avec la barre « Modification »).
+      if (editState) {
+        onToast("Le message ne peut pas être vide.", "error");
+      }
+      return;
+    }
+    // Mode édition (style Discord) : le bouton d'envoi applique la
+    // modification du message chargé dans la zone de saisie.
+    if (editState) {
+      await saveEdit(text);
       return;
     }
     input.value = "";
@@ -133,6 +144,17 @@ export function initChat({ onToast: toastCallback }) {
     }
   });
 
+  // Échap : annule une modification en cours et restaure la saisie précédente.
+  const composerInput = document.getElementById("message-input");
+  if (composerInput) {
+    composerInput.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && editState) {
+        event.preventDefault();
+        cancelActiveEdit();
+      }
+    });
+  }
+
   // Bouton trombone : ouvre le sélecteur de fichier (images/GIF uniquement).
   const attachBtn = document.getElementById("btn-attach");
   const attachInput = document.getElementById("attach-input");
@@ -143,6 +165,7 @@ export function initChat({ onToast: toastCallback }) {
       // Réinitialise pour autoriser le ré-envoi du même fichier.
       attachInput.value = "";
       if (file) {
+        cancelActiveEdit(); // une pièce jointe met fin à la modification
         await sendAttachment(file);
       }
     });
@@ -588,13 +611,14 @@ function applyEditedBadge(item, edited) {
 }
 
 /* ============================================================
-   Édition inline d'un message (auteur uniquement)
+   Édition d'un message dans la zone de saisie (style Discord)
    ============================================================ */
 
 /**
- * Annule l'édition en cours (rétablit l'aperçu markdown du dernier texte
- * clair connu). Appelé par `resetThread`, `removeMessageNode`,
- * `handleMessageUpdated` et lors d'un nouveau clic « Modifier ».
+ * Annule l'édition en cours : restaure la zone de saisie (contenu précédent),
+ * retire le surlignage du message ciblé et masque la barre « Modification ».
+ * Appelé par `resetThread`, `removeMessageNode`, `handleMessageUpdated`,
+ * le bouton « Annuler », Échap, et lors d'un nouveau clic « Modifier ».
  */
 function cancelActiveEdit() {
   if (editState) {
@@ -604,23 +628,82 @@ function cancelActiveEdit() {
   }
 }
 
+/** Barre « Modification » : éléments HTML (mis en cache à la première use). */
+let editBannerEl = null;
+let editBannerLabelEl = null;
+
+function ensureEditBanner() {
+  if (editBannerEl) {
+    return true;
+  }
+  editBannerEl = document.getElementById("edit-banner");
+  editBannerLabelEl = document.getElementById("edit-banner-label");
+  const cancelBtn = document.getElementById("btn-cancel-edit");
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", cancelActiveEdit);
+  }
+  return editBannerEl != null;
+}
+
+function hideEditBanner() {
+  if (editBannerEl) {
+    editBannerEl.hidden = true;
+  }
+}
+
 /**
- * Passe un message en mode édition inline : le `.message-text` est remplacé
- * par un `<textarea>` pré-rempli (texte clair mémorisé) + barre d'action.
- * Contrôles : Échap annule, Ctrl/Cmd+Entrée enregistre, bordure rouge si vide
- * ou trop long (limite `MAX_PLAINTEXT_BYTES`, toast).
- * Enregistrer → chiffrement AES-GCM (clé de salon) → `PATCH`.
+ * Affiche la barre « Modification » au-dessus de la zone de saisie.
+ * Libellé en texte pur (jamais de HTML) : « Modification — auteur · heure :
+ * extrait » (extrait tronqué par CSS, plein texte en tooltip).
+ * @param {object} msg Message normalisé.
+ * @param {string} clearText Texte clair chargé dans la zone de saisie.
+ */
+function showEditBanner(msg, clearText) {
+  if (!ensureEditBanner()) {
+    return;
+  }
+  const sender = msg.display_name || msg.sender || "Inconnu";
+  const time = msg.created_at ? ui.formatTime(msg.created_at) : "";
+  const excerpt = clearText != null ? String(clearText).trim() : "";
+  let label = "Modification — " + sender;
+  if (time) {
+    label += " · " + time;
+  }
+  if (excerpt) {
+    label += " : " + excerpt;
+  }
+  editBannerLabelEl.textContent = label;
+  if (excerpt) {
+    editBannerLabelEl.title = excerpt;
+  } else {
+    editBannerLabelEl.removeAttribute("title");
+  }
+  editBannerEl.hidden = false;
+}
+
+/**
+ * Passe un message en mode édition (style Discord) : son contenu clair se
+ * charge dans la zone de saisie EN BAS, la barre « Modification » apparaît
+ * au-dessus et le message ciblé est surligné dans le fil. Envoyer (bouton ↵
+ * ou Entrée) applique la modification ; Échap ou « Annuler » restaure la
+ * saisie précédente.
+ * Contrôles : message verrouillé (clé absente) ou clé de salon manquante
+ * → toast et refus. Texte vide ou au-delà de `MAX_PLAINTEXT_BYTES` → toast.
  * @param {HTMLElement} item Noeud `.message`.
  * @param {object} msg Message normalisé (auteur courant vérifié en amont).
  * @param {string} roomId Identifiant du salon.
  */
-async function startEditMessage(item, msg, roomId) {
+function startEditMessage(item, msg, roomId) {
   cancelActiveEdit();
-  const textEl = item.querySelector(".message-text");
-  if (!textEl) {
-    return; // message verrouillé ou image : aucun contenu éditable affiché
-  }
 
+  const clearText = item.dataset.clair;
+  if (clearText == null) {
+    onToast(
+      "Message verrouillé (clé de salon absente) : modification impossible.",
+      "error",
+    );
+    return;
+  }
   const roomKey = crypto.getRoomKey(roomId);
   if (!roomKey) {
     onToast(
@@ -630,159 +713,88 @@ async function startEditMessage(item, msg, roomId) {
     return;
   }
 
-  const clearText = item.dataset.clair != null ? item.dataset.clair : "";
-  const actionsBtn = item.querySelector(".message-actions-btn");
+  const input = document.getElementById("message-input");
+  if (!input) {
+    return;
+  }
+  const originalValue = input.value;
 
-  // Éditeur : <textarea> + barre Enregistrer/Annuler.
-  const editBox = document.createElement("div");
-  editBox.className = "message-edit";
+  // Le message à modifier apparaît en bas, dans la zone de saisie.
+  input.value = clearText;
+  input.disabled = false;
+  input.focus();
+  input.setSelectionRange(clearText.length, clearText.length);
 
-  const textarea = document.createElement("textarea");
-  textarea.className = "edit-textarea";
-  textarea.value = clearText;
-  textarea.setAttribute("aria-label", "Modifier le message");
-  editBox.appendChild(textarea);
+  item.classList.add("message--editing");
+  showEditBanner(msg, clearText);
 
-  const actions = document.createElement("div");
-  actions.className = "edit-actions";
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "btn btn-ghost btn-sm";
-  cancelBtn.textContent = "Annuler";
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.className = "btn btn-primary btn-sm";
-  saveBtn.textContent = "Enregistrer";
-  actions.appendChild(cancelBtn);
-  actions.appendChild(saveBtn);
-  editBox.appendChild(actions);
+  editState = {
+    item,
+    msg,
+    roomId,
+    originalValue,
+    cancel: () => {
+      item.classList.remove("message--editing");
+      hideEditBanner();
+      input.value = originalValue;
+    },
+  };
+}
 
-  textEl.replaceWith(editBox);
-  if (actionsBtn) {
-    actionsBtn.disabled = true;
+/**
+ * Applique la modification en cours : chiffre le nouveau texte (AES-GCM,
+ * clé du salon), `PATCH` le message, re-rend la ligne (badge « · modifié »)
+ * et referme l'édition. En cas d'erreur, l'édition reste active.
+ * @param {string} value Texte saisi dans la zone de composition.
+ */
+async function saveEdit(value) {
+  const state = editState;
+  if (!state) {
+    return;
+  }
+  const input = document.getElementById("message-input");
+  const sendBtn = document.getElementById("btn-send");
+  if (!value || !value.trim()) {
+    onToast("Le message ne peut pas être vide.", "error");
+    return;
+  }
+  if (crypto.encodeText(value).length > MAX_PLAINTEXT_BYTES) {
+    onToast("Message trop long (limite de 3000 octets).", "error");
+    return;
   }
 
-  /** Vrai si le contenu n'est pas enregistrable (vide ou trop long). */
-  const invalid = () => {
-    const value = textarea.value;
-    const bad = !value.trim() || crypto.encodeText(value).length > MAX_PLAINTEXT_BYTES;
-    textarea.classList.toggle("edit-textarea--error", bad);
-    return bad;
-  };
-
-  /** Rétablit l'aperçu markdown du texte clair actuel. */
-  const restorePreview = () => {
-    const restored = document.createElement("div");
-    restored.className = "message-text";
-    if (item.dataset.clair != null) {
-      renderMarkdown(restored, item.dataset.clair);
+  input.disabled = true;
+  if (sendBtn) {
+    sendBtn.disabled = true;
+  }
+  try {
+    const roomKey = crypto.getRoomKey(state.roomId);
+    const { nonce, ciphertext } = await crypto.encryptMessage(roomKey, value);
+    // PATCH /api/rooms/{id}/messages/{id} — chiffré avec la clé de salon.
+    const res = await api(
+      `/api/rooms/${state.roomId}/messages/${state.msg.id}`,
+      { method: "PATCH", body: { nonce, ciphertext } },
+    );
+    // Re-rendu local immédiat (contenu + badge « · modifié ») ; les autres
+    // clients recevront le WS `message_updated` (re-rendu idempotent).
+    const updated =
+      res && res.message ? res.message : { ...state.msg, nonce, ciphertext, edited: true };
+    await handleMessageUpdated(updated);
+    cancelActiveEdit();
+    onToast("Message modifié.", "success");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      onToast("Seul l'auteur du message peut le modifier.", "error");
     } else {
-      restored.textContent =
-        "[Message chiffré — clé de salon non disponible sur ce navigateur]";
+      onToast((error && error.message) || "Modification impossible.", "error");
     }
-    editBox.replaceWith(restored);
-  };
-
-  const cleanup = () => {
-    textarea.removeEventListener("keydown", onKeydown);
-    textarea.removeEventListener("input", onInput);
-    document.removeEventListener("click", onClickOutside);
-    if (actionsBtn) {
-      actionsBtn.disabled = false;
+  } finally {
+    input.disabled = false;
+    if (sendBtn) {
+      sendBtn.disabled = false;
     }
-    if (editState && editState.item === item) {
-      editState = null;
-    }
-  };
-
-  const cancel = () => {
-    if (!editBox.isConnected) {
-      cleanup(); // le noeud a été détaché (fermeture de salon…) : rien à rendre
-      return;
-    }
-    restorePreview();
-    cleanup();
-  };
-
-  const save = async () => {
-    if (textarea.disabled) {
-      return;
-    }
-    const value = textarea.value;
-    if (invalid()) {
-      onToast(
-        "Message vide ou trop long (limite de 3000 octets).",
-        "error",
-      );
-      return;
-    }
-    textarea.disabled = true;
-    saveBtn.disabled = true;
-    cancelBtn.disabled = true;
-    try {
-      const { nonce, ciphertext } = await crypto.encryptMessage(roomKey, value);
-      // PATCH /api/rooms/{id}/messages/{id} — chiffré avec la clé de salon.
-      await api(`/api/rooms/${roomId}/messages/${msg.id}`, {
-        method: "PATCH",
-        body: { nonce, ciphertext },
-      });
-      // Mise à jour locale immédiate ; les autres clients recevront le WS
-      // `message_updated` (re-rendu idempotent).
-      msg.edited = true;
-      msg.nonce = nonce;
-      msg.ciphertext = ciphertext;
-      item.dataset.clair = value;
-      applyEditedBadge(item, true);
-      if (editBox.isConnected) {
-        restorePreview();
-      }
-      onToast("Message modifié.", "success");
-      cleanup();
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 403) {
-        onToast("Seul l'auteur du message peut le modifier.", "error");
-      } else {
-        onToast(
-          (error && error.message) || "Modification impossible.",
-          "error",
-        );
-      }
-      // L'éditeur reste ouvert : l'utilisateur peut corriger ou annuler.
-    } finally {
-      textarea.disabled = false;
-      saveBtn.disabled = false;
-      cancelBtn.disabled = false;
-    }
-  };
-
-  const onKeydown = (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      cancel();
-    } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      event.preventDefault();
-      save();
-    }
-  };
-  const onInput = () => {
-    invalid();
-  };
-  // « Clic ailleurs » (hors du message) → annulation propre de l'édition.
-  const onClickOutside = (event) => {
-    if (editState && editState.item === item && !item.contains(event.target)) {
-      cancel();
-    }
-  };
-
-  textarea.addEventListener("keydown", onKeydown);
-  textarea.addEventListener("input", onInput);
-  document.addEventListener("click", onClickOutside);
-
-  editState = { item, cancel, cleanup };
-
-  textarea.focus();
-  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    input.focus();
+  }
 }
 
 /* ============================================================
@@ -1215,7 +1227,7 @@ async function buildMessageNode(msg, roomKey) {
 /**
  * Déchiffre le texte d'un message et l'ajoute à la colonne de contenu.
  * Le texte clair est mémorisé sur le noeud DOM (`item.dataset.clair`) pour
- * être réutilisé par l'éditeur inline (modification).
+ * être réutilisé par l'éditeur (modification dans la zone de saisie).
  * En cas de clé manquante ou d'échec AEAD, marque le message « verrouillé ».
  * @param {HTMLElement} item Noeud `.message`.
  * @param {HTMLElement} body Colonne `.message-body`.
