@@ -1,7 +1,6 @@
 const DATABASE_NAME = "talk-e2ee";
 const DATABASE_VERSION = 1;
 const IDENTITY_STORE = "identity";
-const PRIMARY_IDENTITY = "primary-device";
 const RSA_ALGORITHM = { name: "RSA-OAEP", hash: "SHA-256" };
 
 const textEncoder = new TextEncoder();
@@ -74,14 +73,15 @@ async function generateIdentityKeyPair() {
   return { keyPair, publicJwk };
 }
 
-export async function loadOrCreateIdentity(deviceName) {
-  let record = await runStoreRequest("readonly", (store) => store.get(PRIMARY_IDENTITY));
+export async function loadOrCreateIdentity(accountId, deviceName) {
+  const recordId = `account:${accountId}`;
+  let record = await runStoreRequest("readonly", (store) => store.get(recordId));
   if (!record) {
     const generated = await generateIdentityKeyPair();
     const keyId = crypto.randomUUID();
     const publicJwk = { ...generated.publicJwk, kid: keyId };
     record = {
-      id: PRIMARY_IDENTITY,
+      id: recordId,
       keyId,
       keyPair: generated.keyPair,
       publicJwk,
@@ -132,7 +132,10 @@ export async function unwrapRoomKey(wrappedKey, identity) {
       identity.privateKey,
       base64ToBytes(wrappedKey),
     );
-    return await importRoomKey(rawKey);
+    return {
+      roomKey: await importRoomKey(rawKey),
+      rawRoomKey: rawKey,
+    };
   } catch {
     throw new Error("Cette enveloppe de clé ne peut pas être ouverte sur cet appareil");
   }
