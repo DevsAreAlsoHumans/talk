@@ -41,10 +41,18 @@ jobs:
       - name: Lint
         run: ruff check . && ruff format --check .
 
-      - name: Test
+      - name: Test backend
         run: pytest -q
         env:
           REDIS_URL: redis://localhost:6379/15
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test frontend
+        run: npm --prefix frontend test
 
       - name: Validate Docker Compose
         run: docker compose config --quiet
