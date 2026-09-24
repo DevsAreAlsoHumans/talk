@@ -64,6 +64,23 @@ def test_login_failures_are_generic(app, client):
     assert wrong_password.json()["error"]["message"] == unknown_user.json()["error"]["message"]
 
 
+def test_login_rotates_and_revokes_previous_session(client):
+    register_user(client, "alice", "Mot de passe très sûr 2026!")
+    old_session = client.cookies.get("talk_session")
+    response = client.post(
+        "/api/auth/login",
+        headers=csrf_headers(client),
+        json={"username": "alice", "password": "Mot de passe très sûr 2026!"},
+    )
+    assert response.status_code == 200
+    new_session = client.cookies.get("talk_session")
+    assert new_session != old_session
+
+    client.cookies.clear()
+    client.cookies.set("talk_session", old_session)
+    assert client.get("/api/auth/me").status_code == 401
+
+
 def test_validation_errors_do_not_echo_password(client):
     password = "mot-de-passe-a-ne-pas-echoir"
     response = client.post(

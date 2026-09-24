@@ -67,6 +67,12 @@ async def _start_session(
     return csrf_token
 
 
+async def _revoke_request_session(request: Request, store: RedisStore, settings: Settings) -> None:
+    token = request.cookies.get(settings.session_cookie_name)
+    if token:
+        await store.delete_session(hash_token(token))
+
+
 @router.get("/csrf", summary="Obtenir un jeton CSRF")
 async def csrf_token(
     request: Request,
@@ -128,6 +134,7 @@ async def register(
             detail="Ce nom d'utilisateur est déjà utilisé",
         ) from exc
 
+    await _revoke_request_session(request, store, settings)
     csrf_token_value = await _start_session(response, store, settings, user["id"])
     return {
         "user": await _user_payload(store, user),
@@ -155,8 +162,8 @@ async def login(
         limit=settings.login_rate_limit,
         window_seconds=settings.login_rate_window,
     )
-    credentials = await store.get_user_by_username(payload.username)
-    user = await store.get_user(credentials["id"]) if credentials else None
+    user = await store.get_user_by_username(payload.username)
+    credentials = await store.get_user_credentials(user["id"]) if user else None
     password_hash = credentials.get("password_hash") if credentials else None
     password_valid = await run_in_threadpool(
         verify_password_or_dummy, password_hash, payload.password
@@ -167,6 +174,7 @@ async def login(
             detail="Identifiants incorrects",
         )
 
+    await _revoke_request_session(request, store, settings)
     csrf_token_value = await _start_session(response, store, settings, user["id"])
     return {
         "user": await _user_payload(store, user),
@@ -194,9 +202,7 @@ async def logout(
     store: RedisStore = Depends(get_store),
     user: dict[str, Any] = Depends(get_current_user),
 ) -> dict[str, bool]:
-    token = request.cookies.get(settings.session_cookie_name)
-    if token:
-        await store.delete_session(hash_token(token))
+    await _revoke_request_session(request, store, settings)
     response.delete_cookie(settings.session_cookie_name, path="/")
     response.delete_cookie(settings.csrf_cookie_name, path="/")
     return {"ok": True}
