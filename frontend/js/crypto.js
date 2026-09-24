@@ -47,9 +47,15 @@ function runStoreRequest(mode, operation) {
         const transaction = database.transaction(IDENTITY_STORE, mode);
         const store = transaction.objectStore(IDENTITY_STORE);
         const request = operation(store);
-        request.onsuccess = () => resolve(request.result);
+        let result;
+        request.onsuccess = () => {
+          result = request.result;
+        };
         request.onerror = () => reject(request.error || new Error("Échec IndexedDB"));
-        transaction.oncomplete = () => database.close();
+        transaction.oncomplete = () => {
+          database.close();
+          resolve(result);
+        };
         transaction.onerror = () => reject(transaction.error || new Error("Échec IndexedDB"));
       }),
   );

@@ -486,7 +486,9 @@ async function createChannel(event) {
     });
     closeDialog(elements.channelDialog);
     elements.channelForm.reset();
-    state.channels.push(channel);
+    if (!state.channels.some((item) => item.id === channel.id)) {
+      state.channels.push(channel);
+    }
     state.channels.sort((left, right) => left.created_at - right.created_at);
     await selectChannel(channel.id);
     showToast(`Le canal #${channel.name} a été créé.`);
@@ -803,7 +805,8 @@ async function handleRealtimeEvent(event) {
     ) {
       scheduleMessageRefresh();
     } else {
-      showToast(`Nouveau message dans #${message.channel_id.slice(0, 6)}…`);
+      const channel = state.channels.find((item) => item.id === message.channel_id);
+      showToast(`Nouveau message dans ${channel ? `#${channel.name}` : "un autre salon"}.`);
     }
     return;
   }
