@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -147,7 +148,10 @@ def create_app(
 
     @application.get("/api/health", tags=["système"])
     async def health(request: Request) -> dict[str, str]:
-        healthy = await request.app.state.store.ping()
+        try:
+            healthy = await request.app.state.store.ping()
+        except RedisError:
+            healthy = False
         if not healthy:
             return JSONResponse(status_code=503, content={"status": "unavailable"})
         return {"status": "ok"}
