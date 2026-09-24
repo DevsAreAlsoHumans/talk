@@ -57,9 +57,7 @@ async def require_csrf(
 ) -> None:
     cookie_token = request.cookies.get(settings.csrf_cookie_name)
     header_token = request.headers.get(CSRF_HEADER)
-    if not cookie_token or not header_token or not constant_time_equal(
-        cookie_token, header_token
-    ):
+    if not cookie_token or not header_token or not constant_time_equal(cookie_token, header_token):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Jeton CSRF absent ou invalide",

@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -42,22 +42,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         while True:
             raw_message = await websocket.receive_text()
             if len(raw_message) > 2048:
-                await websocket.send_json(
-                    {"type": "error", "code": "payload_too_large"}
-                )
+                await websocket.send_json({"type": "error", "code": "payload_too_large"})
                 await websocket.close(code=1009)
                 return
             try:
                 event = json.loads(raw_message)
             except json.JSONDecodeError:
-                await websocket.send_json(
-                    {"type": "error", "code": "invalid_json"}
-                )
+                await websocket.send_json({"type": "error", "code": "invalid_json"})
                 continue
             if not isinstance(event, dict):
-                await websocket.send_json(
-                    {"type": "error", "code": "invalid_event"}
-                )
+                await websocket.send_json({"type": "error", "code": "invalid_event"})
                 continue
             await _handle_event(websocket, event)
     except WebSocketDisconnect:
@@ -66,13 +60,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         await manager.disconnect(user["id"], websocket)
 
 
-async def _handle_event(websocket: WebSocket, event: Dict[str, Any]) -> None:
+async def _handle_event(websocket: WebSocket, event: dict[str, Any]) -> None:
     event_type = event.get("type")
     if event_type == "ping":
-        await websocket.send_json(
-            {"type": "pong", "nonce": str(event.get("nonce", ""))[:128]}
-        )
+        await websocket.send_json({"type": "pong", "nonce": str(event.get("nonce", ""))[:128]})
     else:
-        await websocket.send_json(
-            {"type": "error", "code": "unsupported_event"}
-        )
+        await websocket.send_json({"type": "error", "code": "unsupported_event"})

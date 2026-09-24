@@ -1,6 +1,5 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import List
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,11 +34,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     @property
-    def origin_list(self) -> List[str]:
+    def origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
 
     @property
-    def host_list(self) -> List[str]:
+    def host_list(self) -> list[str]:
         return [host.strip() for host in self.allowed_hosts.split(",") if host.strip()]
 
     @property

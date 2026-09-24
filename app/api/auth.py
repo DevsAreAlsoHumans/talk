@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
@@ -20,7 +20,6 @@ from app.security import (
     verify_password_or_dummy,
 )
 from app.storage import (
-    IdentityKeyConflictError,
     RedisStore,
     UsernameAlreadyExistsError,
 )
@@ -28,7 +27,7 @@ from app.storage import (
 router = APIRouter(prefix="/api/auth", tags=["authentification"])
 
 
-async def _user_payload(store: RedisStore, user: Dict[str, Any]) -> Dict[str, Any]:
+async def _user_payload(store: RedisStore, user: dict[str, Any]) -> dict[str, Any]:
     return {**user, "identity_keys": await store.list_identity_keys(user["id"])}
 
 
@@ -72,7 +71,7 @@ async def _start_session(
 async def csrf_token(
     response: Response,
     settings: Settings = Depends(get_settings),
-) -> Dict[str, str]:
+) -> dict[str, str]:
     token = generate_token(32)
     response.set_cookie(
         key=settings.csrf_cookie_name,
@@ -98,7 +97,7 @@ async def register(
     response: Response,
     settings: Settings = Depends(get_settings),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     await enforce_rate_limit(
         request,
         store,
@@ -139,7 +138,7 @@ async def login(
     response: Response,
     settings: Settings = Depends(get_settings),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     await enforce_rate_limit(
         request,
         store,
@@ -169,9 +168,9 @@ async def login(
 
 @router.get("/me", summary="Obtenir la session courante")
 async def current_session(
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return {"user": await _user_payload(store, user)}
 
 
@@ -185,8 +184,8 @@ async def logout(
     response: Response,
     settings: Settings = Depends(get_settings),
     store: RedisStore = Depends(get_store),
-    user: Dict[str, Any] = Depends(get_current_user),
-) -> Dict[str, bool]:
+    user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, bool]:
     token = request.cookies.get(settings.session_cookie_name)
     if token:
         await store.delete_session(hash_token(token))

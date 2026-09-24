@@ -1,4 +1,5 @@
-from typing import Any, Dict, Iterable, List, Sequence, Set
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -17,18 +18,14 @@ from app.storage import ChannelAlreadyExistsError, RedisStore
 router = APIRouter(prefix="/api/rooms", tags=["salons"])
 
 
-async def _require_membership(
-    store: RedisStore, room_id: str, user_id: str
-) -> Dict[str, Any]:
+async def _require_membership(store: RedisStore, room_id: str, user_id: str) -> dict[str, Any]:
     room = await store.get_room(room_id)
     if room is None or not await store.is_room_member(room_id, user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salon introuvable")
     return room
 
 
-async def _require_owner(
-    store: RedisStore, room_id: str, user_id: str
-) -> Dict[str, Any]:
+async def _require_owner(store: RedisStore, room_id: str, user_id: str) -> dict[str, Any]:
     room = await _require_membership(store, room_id, user_id)
     if room["owner_id"] != user_id:
         raise HTTPException(
@@ -38,10 +35,8 @@ async def _require_owner(
     return room
 
 
-async def _resolve_invites(
-    store: RedisStore, usernames: Iterable[str]
-) -> List[Dict[str, Any]]:
-    users: Dict[str, Dict[str, Any]] = {}
+async def _resolve_invites(store: RedisStore, usernames: Iterable[str]) -> list[dict[str, Any]]:
+    users: dict[str, dict[str, Any]] = {}
     for username in usernames:
         user = await store.get_user_by_username(username)
         if user is None:
@@ -55,12 +50,12 @@ async def _resolve_invites(
 
 async def _validate_envelopes(
     store: RedisStore,
-    member_ids: Set[str],
+    member_ids: set[str],
     envelopes: Sequence[KeyEnvelopeInput],
     *,
     expected_version: int,
     require_every_member: bool,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     prepared = [envelope.model_dump(mode="json") for envelope in envelopes]
     fields = {
         (
@@ -76,7 +71,7 @@ async def _validate_envelopes(
             detail="La requête contient des enveloppes de clé en double",
         )
 
-    covered_members: Set[str] = set()
+    covered_members: set[str] = set()
     for member_id in member_ids:
         identity_keys = await store.list_identity_keys(member_id)
         valid_key_ids = {item["key_id"] for item in identity_keys}
@@ -114,9 +109,9 @@ def _manager(request: Request) -> ConnectionManager:
 
 @router.get("", summary="Lister ses salons")
 async def list_rooms(
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return {"rooms": await store.list_rooms(user["id"])}
 
 
@@ -129,12 +124,10 @@ async def list_rooms(
 async def create_room(
     payload: RoomCreateRequest,
     request: Request,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
-    invited_users = await _resolve_invites(
-        store, [invite.username for invite in payload.invites]
-    )
+) -> dict[str, Any]:
+    invited_users = await _resolve_invites(store, [invite.username for invite in payload.invites])
     members = {user["id"]: user}
     members.update({member["id"]: member for member in invited_users})
     envelopes = await _validate_envelopes(
@@ -161,9 +154,9 @@ async def create_room(
 @router.get("/{room_id}", summary="Obtenir un salon")
 async def get_room(
     room_id: str,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     room = await _require_membership(store, room_id, user["id"])
     return {
         "room": room,
@@ -174,9 +167,9 @@ async def get_room(
 @router.get("/{room_id}/keys", summary="Obtenir les enveloppes de clé")
 async def get_room_keys(
     room_id: str,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     await _require_membership(store, room_id, user["id"])
     return {"key_envelopes": await store.get_room_keys(room_id)}
 
@@ -191,9 +184,9 @@ async def add_room_member(
     room_id: str,
     payload: RoomMemberRequest,
     request: Request,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     room = await _require_owner(store, room_id, user["id"])
     invited_users = await _resolve_invites(store, [payload.username])
     invited = invited_users[0]
@@ -227,9 +220,9 @@ async def share_room_keys(
     room_id: str,
     payload: RoomKeyShareRequest,
     request: Request,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     room = await _require_owner(store, room_id, user["id"])
     member_ids = set(await store.all_room_member_ids(room_id))
     envelopes = await _validate_envelopes(
@@ -256,9 +249,9 @@ async def rotate_room_keys(
     room_id: str,
     payload: RoomKeyRotateRequest,
     request: Request,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     room = await _require_owner(store, room_id, user["id"])
     member_ids = set(await store.all_room_member_ids(room_id))
     envelopes = await _validate_envelopes(
@@ -283,9 +276,9 @@ async def rotate_room_keys(
 @router.get("/{room_id}/channels", summary="Lister les canaux")
 async def list_channels(
     room_id: str,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     await _require_membership(store, room_id, user["id"])
     return {"channels": await store.list_channels(room_id)}
 
@@ -300,9 +293,9 @@ async def create_channel(
     room_id: str,
     payload: ChannelCreateRequest,
     request: Request,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     await _require_membership(store, room_id, user["id"])
     try:
         channel = await store.create_channel(room_id, payload.name)

@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/channels", tags=["messages"])
 
 async def _channel_context(
     store: RedisStore, channel_id: str, user_id: str
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     channel = await store.get_channel(channel_id)
     if channel is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Canal introuvable")
@@ -23,9 +23,7 @@ async def _channel_context(
     return channel, room
 
 
-async def _message_with_sender(
-    store: RedisStore, message: Dict[str, Any]
-) -> Dict[str, Any]:
+async def _message_with_sender(store: RedisStore, message: dict[str, Any]) -> dict[str, Any]:
     sender = await store.get_user(message["sender_id"])
     return {**message, "sender": sender}
 
@@ -35,13 +33,11 @@ async def list_messages(
     channel_id: str,
     limit: int = Query(default=50, ge=1, le=100),
     before: Optional[int] = Query(default=None, ge=1),
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     channel, _ = await _channel_context(store, channel_id, user["id"])
-    messages, next_cursor = await store.list_messages(
-        channel["id"], before=before, limit=limit
-    )
+    messages, next_cursor = await store.list_messages(channel["id"], before=before, limit=limit)
     return {
         "messages": [await _message_with_sender(store, message) for message in messages],
         "next_cursor": next_cursor,
@@ -58,9 +54,9 @@ async def create_message(
     channel_id: str,
     payload: MessageCreateRequest,
     request: Request,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     channel, room = await _channel_context(store, channel_id, user["id"])
     if payload.key_version != room["key_version"]:
         raise HTTPException(

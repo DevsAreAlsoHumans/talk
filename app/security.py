@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import re
 import secrets
-from typing import Optional, Tuple
+from typing import Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
@@ -71,9 +71,7 @@ def decode_base64url(value: str, *, expected_bytes: Optional[int] = None) -> byt
         raise InvalidBase64Error("La valeur n'est pas du Base64URL valide") from exc
 
     if expected_bytes is not None and len(decoded) != expected_bytes:
-        raise InvalidBase64Error(
-            f"La valeur doit faire exactement {expected_bytes} octets"
-        )
+        raise InvalidBase64Error(f"La valeur doit faire exactement {expected_bytes} octets")
     return decoded
 
 
@@ -81,6 +79,6 @@ def encode_base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
-def split_display_name(value: str) -> Tuple[str, str]:
+def split_display_name(value: str) -> tuple[str, str]:
     normalized = " ".join(value.split())
     return normalized, normalized.casefold()

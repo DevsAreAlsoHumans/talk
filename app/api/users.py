@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -17,13 +17,11 @@ router = APIRouter(prefix="/api", tags=["utilisateurs"])
 )
 async def add_identity_key(
     payload: IdentityKeyInput,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     try:
-        return await store.add_identity_key(
-            user["id"], payload.model_dump(mode="json")
-        )
+        return await store.add_identity_key(user["id"], payload.model_dump(mode="json"))
     except IdentityKeyConflictError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -34,9 +32,9 @@ async def add_identity_key(
 @router.get("/users", summary="Rechercher des utilisateurs")
 async def search_users(
     query: str = Query(min_length=2, max_length=32),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, List[Dict[str, Any]]]:
+) -> dict[str, list[dict[str, Any]]]:
     normalized = query.casefold()
     return {"users": await store.search_users(normalized)}
 
@@ -47,9 +45,9 @@ async def search_users(
 )
 async def user_identity_keys(
     username: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     store: RedisStore = Depends(get_store),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     try:
         normalized = normalize_username(username)
     except ValueError as exc:

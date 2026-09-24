@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -8,8 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api import auth, messages, rooms, users, websocket
 from app.config import Settings, get_settings
@@ -53,9 +53,7 @@ def create_app(
 
     docs_url = "/docs" if app_settings.docs_enabled and not app_settings.is_production else None
     openapi_url = (
-        "/openapi.json"
-        if app_settings.docs_enabled and not app_settings.is_production
-        else None
+        "/openapi.json" if app_settings.docs_enabled and not app_settings.is_production else None
     )
     application = FastAPI(
         title="Talk",
@@ -97,9 +95,7 @@ def create_app(
         if request.url.path.startswith("/api"):
             response.headers["Cache-Control"] = "no-store"
         if app_settings.is_production:
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
     @application.exception_handler(RequestValidationError)
@@ -128,9 +124,7 @@ def create_app(
         )
 
     @application.exception_handler(StarletteHTTPException)
-    async def http_error_handler(
-        request: Request, exc: StarletteHTTPException
-    ) -> JSONResponse:
+    async def http_error_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         code_by_status = {
             400: "bad_request",
             401: "authentication_required",
@@ -152,7 +146,7 @@ def create_app(
         )
 
     @application.get("/api/health", tags=["système"])
-    async def health(request: Request) -> Dict[str, str]:
+    async def health(request: Request) -> dict[str, str]:
         healthy = await request.app.state.store.ping()
         if not healthy:
             return JSONResponse(status_code=503, content={"status": "unavailable"})
@@ -168,13 +162,9 @@ def create_app(
     assets_directory = frontend_directory / "assets"
     scripts_directory = frontend_directory / "js"
     if assets_directory.is_dir():
-        application.mount(
-            "/assets", StaticFiles(directory=str(assets_directory)), name="assets"
-        )
+        application.mount("/assets", StaticFiles(directory=str(assets_directory)), name="assets")
     if scripts_directory.is_dir():
-        application.mount(
-            "/js", StaticFiles(directory=str(scripts_directory)), name="scripts"
-        )
+        application.mount("/js", StaticFiles(directory=str(scripts_directory)), name="scripts")
 
     @application.get("/", include_in_schema=False)
     async def frontend() -> FileResponse:

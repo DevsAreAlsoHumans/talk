@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -43,7 +43,7 @@ class PublicJWK(APIModel):
     n: str = Field(min_length=300, max_length=1024)
     e: str = Field(min_length=2, max_length=16)
     ext: Literal[True]
-    key_ops: List[Literal["encrypt"]] = Field(default_factory=lambda: ["encrypt"], max_length=1)
+    key_ops: list[Literal["encrypt"]] = Field(default_factory=lambda: ["encrypt"], max_length=1)
     kid: Optional[UUID] = None
 
     @model_validator(mode="after")
@@ -133,8 +133,8 @@ class UsernameInvite(APIModel):
 class RoomCreateRequest(APIModel):
     name: str = Field(min_length=1, max_length=48)
     channel_name: str = Field(min_length=1, max_length=32)
-    invites: List[UsernameInvite] = Field(default_factory=list, max_length=20)
-    key_envelopes: List[KeyEnvelopeInput] = Field(min_length=1, max_length=1000)
+    invites: list[UsernameInvite] = Field(default_factory=list, max_length=20)
+    key_envelopes: list[KeyEnvelopeInput] = Field(min_length=1, max_length=1000)
 
     @field_validator("name", "channel_name")
     @classmethod
@@ -147,7 +147,7 @@ class RoomCreateRequest(APIModel):
 
 class RoomMemberRequest(APIModel):
     username: str = Field(min_length=3, max_length=32)
-    key_envelopes: List[KeyEnvelopeInput] = Field(min_length=1, max_length=200)
+    key_envelopes: list[KeyEnvelopeInput] = Field(min_length=1, max_length=200)
 
     @field_validator("username")
     @classmethod
@@ -156,7 +156,7 @@ class RoomMemberRequest(APIModel):
 
 
 class RoomKeyShareRequest(APIModel):
-    key_envelopes: List[KeyEnvelopeInput] = Field(min_length=1, max_length=1000)
+    key_envelopes: list[KeyEnvelopeInput] = Field(min_length=1, max_length=1000)
 
 
 class RoomKeyRotateRequest(RoomKeyShareRequest):
@@ -210,4 +210,4 @@ class ErrorDetail(APIModel):
 
 class ErrorResponse(APIModel):
     error: ErrorDetail
-    details: Optional[List[Dict[str, Any]]] = None
+    details: Optional[list[dict[str, Any]]] = None
