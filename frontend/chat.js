@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  console.log("%c[talk] chat.js v2 chargé", "color:#8d6ff2;font-weight:bold");
+
   const el = {
     logoutBtn: document.getElementById("logout-btn"),
     searchInput: document.getElementById("search-input"),
@@ -650,6 +652,10 @@
   el.logoutBtn?.addEventListener("click", logout);
 
   el.groupBtn?.addEventListener("click", showGroupModal);
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest && event.target.closest("#group-btn");
+    if (trigger) showGroupModal();
+  });
   el.groupCancelBtn?.addEventListener("click", closeGroupModal);
   el.groupCreateBtn?.addEventListener("click", createGroupConversation);
   el.groupSearchInput?.addEventListener("keydown", (event) => {
