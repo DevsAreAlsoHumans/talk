@@ -2,6 +2,21 @@
 RESUME_PRIVE.md
 .env
 .env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node (uniquement si des outils frontend JS sont ajoutés)
+node_modules/
 
 # Artefacts
 .DS_Store

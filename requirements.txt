@@ -1,0 +1,5 @@
+argon2-cffi>=23.1,<26
+fastapi>=0.115,<1
+pydantic-settings>=2.7,<3
+redis>=5.2,<7
+uvicorn[standard]>=0.34,<1
