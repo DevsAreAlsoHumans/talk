@@ -39,11 +39,13 @@ async def _start_session(
 ) -> str:
     session_token = generate_token(48)
     csrf_token = generate_token(32)
+    csrf_expires_at = int(time.time()) + settings.csrf_ttl_seconds
     expires_at = int(time.time()) + settings.session_ttl_seconds
     await store.create_session(
         token_hash=hash_token(session_token),
         user_id=user_id,
         csrf_token=csrf_token,
+        csrf_expires_at=csrf_expires_at,
         expires_at=expires_at,
     )
     response.set_cookie(
@@ -70,7 +72,9 @@ async def _start_session(
 async def _revoke_request_session(request: Request, store: RedisStore, settings: Settings) -> None:
     token = request.cookies.get(settings.session_cookie_name)
     if token:
-        await store.delete_session(hash_token(token))
+        token_hash = hash_token(token)
+        await store.delete_session(token_hash)
+        await request.app.state.manager.disconnect_session(token_hash)
 
 
 @router.get("/csrf", summary="Obtenir un jeton CSRF")
@@ -86,7 +90,8 @@ async def csrf_token(
         token_hash = hash_token(session_token)
         session = await store.get_session(token_hash)
         if session is not None:
-            await store.update_session_csrf(token_hash, token)
+            csrf_expires_at = int(time.time()) + settings.csrf_ttl_seconds
+            await store.update_session_csrf(token_hash, token, csrf_expires_at)
     response.set_cookie(
         key=settings.csrf_cookie_name,
         value=token,

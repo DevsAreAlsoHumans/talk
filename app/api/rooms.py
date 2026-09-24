@@ -13,7 +13,8 @@ from app.schemas import (
     RoomKeyShareRequest,
     RoomMemberRequest,
 )
-from app.storage import ChannelAlreadyExistsError, RedisStore
+from app.security import decode_base64url
+from app.storage import ChannelAlreadyExistsError, ConcurrentRoomUpdateError, RedisStore
 
 router = APIRouter(prefix="/api/rooms", tags=["salons"])
 
@@ -74,7 +75,9 @@ async def _validate_envelopes(
     covered_members: set[str] = set()
     for member_id in member_ids:
         identity_keys = await store.list_identity_keys(member_id)
-        valid_key_ids = {item["key_id"] for item in identity_keys}
+        valid_key_sizes = {
+            item["key_id"]: len(decode_base64url(item["public_key"]["n"])) for item in identity_keys
+        }
         for envelope in prepared:
             if envelope["recipient_id"] != member_id:
                 continue
@@ -83,10 +86,16 @@ async def _validate_envelopes(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Version de clé de salon incorrecte",
                 )
-            if envelope["key_id"] not in valid_key_ids:
+            expected_size = valid_key_sizes.get(envelope["key_id"])
+            if expected_size is None:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="Une enveloppe cible une clé publique inconnue",
+                )
+            if len(decode_base64url(envelope["wrapped_key"])) != expected_size:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="La taille de l'enveloppe ne correspond pas à la clé RSA",
                 )
             covered_members.add(member_id)
 
@@ -143,6 +152,10 @@ async def create_room(
         member_ids=list(members),
         key_envelopes=envelopes,
         channel_name=payload.channel_name,
+    )
+    await _manager(request).broadcast_to_users(
+        members,
+        {"type": "room.created", "room": room},
     )
     return {
         "room": room,
@@ -202,7 +215,18 @@ async def add_room_member(
         expected_version=room["key_version"],
         require_every_member=True,
     )
-    await store.add_room_member(room_id, invited["id"], envelopes)
+    try:
+        await store.add_room_member(
+            room_id,
+            invited["id"],
+            envelopes,
+            expected_version=room["key_version"],
+        )
+    except ConcurrentRoomUpdateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La version du salon a changé pendant l'invitation",
+        ) from exc
     member_ids = await store.all_room_member_ids(room_id)
     await _manager(request).broadcast_to_users(
         member_ids,
@@ -232,7 +256,17 @@ async def share_room_keys(
         expected_version=room["key_version"],
         require_every_member=False,
     )
-    await store.add_room_keys(room_id, envelopes)
+    try:
+        await store.add_room_keys(
+            room_id,
+            envelopes,
+            expected_version=room["key_version"],
+        )
+    except ConcurrentRoomUpdateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La version du salon a changé pendant le partage",
+        ) from exc
     await _manager(request).broadcast_to_users(
         member_ids,
         {"type": "room.keys_shared", "room_id": room_id},
@@ -261,7 +295,17 @@ async def rotate_room_keys(
         expected_version=room["key_version"],
         require_every_member=True,
     )
-    new_version = await store.rotate_room_keys(room_id, envelopes)
+    try:
+        new_version = await store.rotate_room_keys(
+            room_id,
+            envelopes,
+            expected_version=room["key_version"],
+        )
+    except ConcurrentRoomUpdateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La version du salon a changé pendant la rotation",
+        ) from exc
     await _manager(request).broadcast_to_users(
         member_ids,
         {

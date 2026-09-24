@@ -64,6 +64,36 @@ def test_login_failures_are_generic(app, client):
     assert wrong_password.json()["error"]["message"] == unknown_user.json()["error"]["message"]
 
 
+def test_identity_key_limit_is_enforced(client):
+    register_user(client, "alice")
+    for index in range(9):
+        response = client.post(
+            "/api/identity/keys",
+            headers=csrf_headers(client),
+            json=identity_payload(f"Device {index}"),
+        )
+        assert response.status_code == 201
+    response = client.post(
+        "/api/identity/keys",
+        headers=csrf_headers(client),
+        json=identity_payload("Device trop nombreux"),
+    )
+    assert response.status_code == 409
+    assert "10 appareils" in response.json()["error"]["message"]
+
+
+def test_user_search_uses_and_migrates_sorted_index(client, redis_client):
+    register_user(client, "alice")
+    client.portal.call(redis_client.delete, "talk:usernames:v2")
+    client.portal.call(redis_client.sadd, "talk:usernames", "alice")
+
+    response = client.get("/api/users", params={"query": "ali"})
+    assert response.status_code == 200
+    assert [user["username"] for user in response.json()["users"]] == ["alice"]
+    index_type = client.portal.call(redis_client.type, "talk:usernames:v2")
+    assert index_type == "zset"
+
+
 def test_login_rotates_and_revokes_previous_session(client):
     register_user(client, "alice", "Mot de passe très sûr 2026!")
     old_session = client.cookies.get("talk_session")

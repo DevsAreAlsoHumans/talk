@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,7 +19,13 @@ class Settings(BaseSettings):
 
     app_name: str = "Talk"
     environment: str = "development"
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: Optional[str] = None
+    redis_host: str = "localhost"
+    redis_port: int = Field(default=6379, ge=1, le=65535)
+    redis_db: int = Field(default=0, ge=0, le=15)
+    redis_username: Optional[str] = None
+    redis_password: Optional[str] = None
+    redis_ssl: bool = False
     session_cookie_name: str = "talk_session"
     csrf_cookie_name: str = "talk_csrf"
     session_ttl_seconds: int = Field(default=7 * 24 * 60 * 60, ge=300, le=31 * 24 * 60 * 60)

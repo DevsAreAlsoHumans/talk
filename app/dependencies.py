@@ -1,3 +1,4 @@
+import time
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
@@ -79,10 +80,15 @@ async def require_csrf(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Jeton CSRF absent ou invalide",
         )
-    if session_context is not None and not constant_time_equal(
-        session_context[1]["csrf_token"], cookie_token
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Jeton CSRF non lié à la session",
-        )
+    if session_context is not None:
+        session = session_context[1]
+        if not constant_time_equal(session["csrf_token"], cookie_token):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Jeton CSRF non lié à la session",
+            )
+        if int(session.get("csrf_expires_at", 0)) <= int(time.time()):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Jeton CSRF expiré",
+            )

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.dependencies import get_current_user, get_store, require_csrf
 from app.schemas import IdentityKeyInput, normalize_username
-from app.storage import IdentityKeyConflictError, RedisStore
+from app.storage import IdentityKeyConflictError, IdentityKeyLimitError, RedisStore
 
 router = APIRouter(prefix="/api", tags=["utilisateurs"])
 
@@ -26,6 +26,11 @@ async def add_identity_key(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cet identifiant de clé correspond déjà à une autre clé",
+        ) from exc
+    except IdentityKeyLimitError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La limite de 10 appareils par compte est atteinte",
         ) from exc
 
 

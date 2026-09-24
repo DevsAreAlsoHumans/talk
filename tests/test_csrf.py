@@ -1,5 +1,7 @@
 from conftest import TEST_ORIGIN, register_user
 
+from app.security import hash_token
+
 
 def test_mutation_requires_csrf_header(client):
     response = client.post(
@@ -14,6 +16,7 @@ def test_mutation_requires_csrf_header(client):
                 "public_key": {
                     "kty": "RSA",
                     "alg": "RSA-OAEP-256",
+                    "use": "enc",
                     "n": "A" * 384,
                     "e": "AQAB",
                     "ext": True,
@@ -39,6 +42,27 @@ def test_csrf_token_is_bound_to_current_session(client):
     )
     assert forged.status_code == 403
     assert "session" in forged.json()["error"]["message"].lower()
+
+
+def test_expired_csrf_is_rejected_even_when_session_is_active(client, redis_client):
+    registered = register_user(client, "alice")
+    session_hash = hash_token(client.cookies.get("talk_session"))
+    client.portal.call(
+        redis_client.hset,
+        f"talk:session:{session_hash}",
+        "csrf_expires_at",
+        0,
+    )
+    response = client.post(
+        "/api/identity/keys",
+        headers={
+            "X-CSRF-Token": registered["csrf_token"],
+            "Origin": TEST_ORIGIN,
+        },
+        json=registered["user"]["identity_keys"][0],
+    )
+    assert response.status_code == 403
+    assert "expir" in response.json()["error"]["message"].lower()
 
 
 def test_foreign_origin_is_rejected(client):

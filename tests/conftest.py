@@ -50,6 +50,7 @@ def valid_public_jwk():
     return {
         "kty": "RSA",
         "alg": "RSA-OAEP-256",
+        "use": "enc",
         "n": modulus,
         "e": exponent,
         "ext": True,
@@ -101,7 +102,7 @@ def key_envelope(user_result, key_version=1):
         "recipient_id": user_result["user"]["id"],
         "key_id": key["key_id"],
         "algorithm": "RSA-OAEP-256",
-        "wrapped_key": "A" * 43,
+        "wrapped_key": "A" * 512,
         "key_version": key_version,
     }
 

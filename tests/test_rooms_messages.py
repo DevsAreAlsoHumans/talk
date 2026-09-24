@@ -1,6 +1,12 @@
 from uuid import uuid4
 
-from conftest import TEST_ORIGIN, create_room, encrypted_message, register_user
+from conftest import (
+    TEST_ORIGIN,
+    create_room,
+    encrypted_message,
+    key_envelope,
+    register_user,
+)
 from fastapi.testclient import TestClient
 
 
@@ -104,6 +110,37 @@ def test_room_and_channel_authorization(app, client):
     assert alice["user"]["username"] == "alice"
 
 
+def test_owner_can_rotate_once_and_stale_rotation_is_rejected(client):
+    register_user(client, "alice")
+    room_data = create_room(client)
+    room = room_data["room"]
+    user_keys = client.get("/api/users/alice/keys").json()
+    envelope = key_envelope(user_keys)
+
+    rotated = client.post(
+        f"/api/rooms/{room['id']}/keys/rotate",
+        headers={
+            "X-CSRF-Token": room_data["csrf_token"],
+            "Origin": TEST_ORIGIN,
+        },
+        json={"key_envelopes": [envelope]},
+    )
+    assert rotated.status_code == 200, rotated.text
+    assert rotated.json()["key_version"] == 2
+
+    stale = client.post(
+        f"/api/rooms/{room['id']}/keys/rotate",
+        headers={
+            "X-CSRF-Token": room_data["csrf_token"],
+            "Origin": TEST_ORIGIN,
+        },
+        json={"key_envelopes": [envelope]},
+    )
+    assert stale.status_code == 409
+    stored = client.get(f"/api/rooms/{room['id']}/keys").json()["key_envelopes"]
+    assert any(item["key_version"] == 2 for item in stored)
+
+
 def test_only_owner_can_rotate_keys(app, client):
     register_user(client, "alice")
     room_data = create_room(client)
@@ -118,7 +155,7 @@ def test_only_owner_can_rotate_keys(app, client):
                 "recipient_id": result["user"]["id"],
                 "key_id": result["identity_keys"][0]["key_id"],
                 "algorithm": "RSA-OAEP-256",
-                "wrapped_key": "A" * 43,
+                "wrapped_key": "A" * 512,
                 "key_version": 1,
             }
             envelopes.append(envelope)

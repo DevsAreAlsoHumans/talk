@@ -40,21 +40,28 @@ def validate_password(value: str) -> str:
 class PublicJWK(APIModel):
     kty: Literal["RSA"]
     alg: Literal["RSA-OAEP-256"]
+    use: Literal["enc"]
     n: str = Field(min_length=300, max_length=1024)
     e: str = Field(min_length=2, max_length=16)
     ext: Literal[True]
-    key_ops: list[Literal["encrypt"]] = Field(default_factory=lambda: ["encrypt"], max_length=1)
+    key_ops: list[Literal["encrypt"]] = Field(min_length=1, max_length=1)
     kid: Optional[UUID] = None
 
     @model_validator(mode="after")
     def validate_encoding(self) -> "PublicJWK":
         try:
-            modulus = decode_base64url(self.n)
-            exponent = decode_base64url(self.e)
+            modulus_bytes = decode_base64url(self.n)
+            exponent_bytes = decode_base64url(self.e)
         except InvalidBase64Error as exc:
             raise ValueError("La clé publique RSA contient des données invalides") from exc
-        if len(modulus) < 256 or len(exponent) > 8:
-            raise ValueError("La clé publique RSA est trop petite ou invalide")
+
+        modulus = int.from_bytes(modulus_bytes, "big")
+        exponent = int.from_bytes(exponent_bytes, "big")
+        modulus_bits = modulus.bit_length()
+        if modulus_bytes[0] == 0 or not 2048 <= modulus_bits <= 4096 or modulus % 2 == 0:
+            raise ValueError("Le module RSA doit être impair et faire entre 2048 et 4096 bits")
+        if exponent != 65537:
+            raise ValueError("L'exposant public RSA doit être 65537")
         return self
 
 
@@ -62,6 +69,14 @@ class IdentityKeyInput(APIModel):
     key_id: UUID
     device_name: str = Field(min_length=1, max_length=64)
     public_key: PublicJWK
+
+    @model_validator(mode="after")
+    def bind_key_id(self) -> "IdentityKeyInput":
+        if self.public_key.kid is None:
+            self.public_key.kid = self.key_id
+        elif self.public_key.kid != self.key_id:
+            raise ValueError("Le kid de la clé publique doit correspondre à key_id")
+        return self
 
     @field_validator("device_name")
     @classmethod
@@ -108,16 +123,18 @@ class KeyEnvelopeInput(APIModel):
     recipient_id: UUID
     key_id: UUID
     algorithm: Literal["RSA-OAEP-256"]
-    wrapped_key: str = Field(min_length=40, max_length=600)
+    wrapped_key: str = Field(min_length=300, max_length=800)
     key_version: int = Field(ge=1, le=1_000_000)
 
     @field_validator("wrapped_key")
     @classmethod
     def validate_wrapped_key(cls, value: str) -> str:
         try:
-            decode_base64url(value, expected_bytes=32)
+            decoded = decode_base64url(value)
         except InvalidBase64Error as exc:
-            raise ValueError("La clé de salon enveloppée doit faire 32 octets") from exc
+            raise ValueError("La clé de salon enveloppée n'est pas valide") from exc
+        if not 256 <= len(decoded) <= 512:
+            raise ValueError("La clé de salon enveloppée a une taille RSA invalide")
         return value
 
 

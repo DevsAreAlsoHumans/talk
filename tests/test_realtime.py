@@ -51,6 +51,26 @@ def test_authenticated_websocket_receives_encrypted_event(client):
         assert "plaintext" not in event["message"]
 
 
+def test_websocket_is_closed_when_session_is_revoked(client):
+    registered = register_user(client, "alice")
+    with client.websocket_connect("/api/ws", headers={"Origin": TEST_ORIGIN}) as socket:
+        assert socket.receive_json()["type"] == "connection.ready"
+        logout = client.post(
+            "/api/auth/logout",
+            headers={
+                "X-CSRF-Token": registered["csrf_token"],
+                "Origin": TEST_ORIGIN,
+            },
+        )
+        assert logout.status_code == 200
+        try:
+            socket.receive_json()
+        except WebSocketDisconnect as exc:
+            assert exc.code == 4401
+        else:
+            raise AssertionError("La révocation aurait dû fermer le WebSocket")
+
+
 def test_websocket_rejects_oversized_frames(client):
     register_user(client, "alice")
     with client.websocket_connect("/api/ws", headers={"Origin": TEST_ORIGIN}) as socket:

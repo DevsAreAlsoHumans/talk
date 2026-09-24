@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -17,12 +18,12 @@ from app.config import Settings, get_settings
 from app.realtime import ConnectionManager
 from app.storage import RedisStore
 
-CSP = (
+CSP_TEMPLATE = (
     "default-src 'self'; "
     "script-src 'self'; "
     "style-src 'self'; "
     "img-src 'self' data:; "
-    "connect-src 'self' ws: wss:; "
+    "connect-src {connect_sources}; "
     "font-src 'self'; "
     "object-src 'none'; "
     "base-uri 'none'; "
@@ -31,23 +32,50 @@ CSP = (
 )
 
 
+def build_csp(allowed_origins: list[str]) -> str:
+    connect_sources = {"'self'"}
+    for origin in allowed_origins:
+        parsed = urlsplit(origin)
+        if parsed.scheme == "https" and parsed.netloc:
+            connect_sources.add(f"wss://{parsed.netloc}")
+        elif parsed.scheme == "http" and parsed.netloc:
+            connect_sources.add(f"ws://{parsed.netloc}")
+    return CSP_TEMPLATE.format(connect_sources=" ".join(sorted(connect_sources)))
+
+
 def create_app(
     settings: Optional[Settings] = None,
     redis_client: Optional[Redis] = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
+    content_security_policy = build_csp(app_settings.origin_list)
     owns_redis = redis_client is None
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        application.state.redis = redis_client or Redis.from_url(
-            app_settings.redis_url,
-            encoding="utf-8",
-            decode_responses=True,
-            health_check_interval=30,
-        )
+        if redis_client is not None:
+            application.state.redis = redis_client
+        elif app_settings.redis_url:
+            application.state.redis = Redis.from_url(
+                app_settings.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                health_check_interval=30,
+            )
+        else:
+            application.state.redis = Redis(
+                host=app_settings.redis_host,
+                port=app_settings.redis_port,
+                db=app_settings.redis_db,
+                username=app_settings.redis_username,
+                password=app_settings.redis_password,
+                ssl=app_settings.redis_ssl,
+                encoding="utf-8",
+                decode_responses=True,
+                health_check_interval=30,
+            )
         application.state.store = RedisStore(application.state.redis)
-        application.state.manager = ConnectionManager()
+        application.state.manager = ConnectionManager(application.state.store)
         yield
         if owns_redis:
             await application.state.redis.aclose()
@@ -67,6 +95,7 @@ def create_app(
     )
     application.state.settings = app_settings
     application.state.manager = ConnectionManager()
+    trusted_hosts = list(dict.fromkeys([*app_settings.host_list, "localhost", "127.0.0.1"]))
 
     application.add_middleware(
         CORSMiddleware,
@@ -78,13 +107,13 @@ def create_app(
     )
     application.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=app_settings.host_list,
+        allowed_hosts=trusted_hosts,
     )
 
     @application.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = CSP
+        response.headers["Content-Security-Policy"] = content_security_policy
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"

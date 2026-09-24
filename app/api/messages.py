@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from app.dependencies import get_current_user, get_store, require_csrf
 from app.realtime import ConnectionManager
 from app.schemas import MessageCreateRequest
-from app.storage import RedisStore
+from app.storage import MessageRejectedError, RedisStore
 
 router = APIRouter(prefix="/api/channels", tags=["messages"])
 
@@ -71,7 +71,16 @@ async def create_message(
         "channel_id": channel["id"],
         "created_at": int(time.time() * 1000),
     }
-    created, _ = await store.save_message(message)
+    try:
+        created, _ = await store.save_message(
+            message,
+            expected_version=room["key_version"],
+        )
+    except MessageRejectedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="L'accès au salon ou sa version de clé a changé",
+        ) from exc
     if not created:
         existing = await store.get_message(str(payload.client_id))
         if (

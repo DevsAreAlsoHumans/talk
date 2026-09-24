@@ -5,6 +5,7 @@ from typing import Any, Optional, Union
 from uuid import uuid4
 
 from redis.asyncio import Redis
+from redis.exceptions import WatchError
 
 
 class UsernameAlreadyExistsError(Exception):
@@ -12,6 +13,10 @@ class UsernameAlreadyExistsError(Exception):
 
 
 class IdentityKeyConflictError(Exception):
+    pass
+
+
+class IdentityKeyLimitError(Exception):
     pass
 
 
@@ -23,8 +28,30 @@ class DuplicateMessageError(Exception):
     pass
 
 
+class ConcurrentRoomUpdateError(Exception):
+    pass
+
+
+class MessageRejectedError(Exception):
+    pass
+
+
 class RedisStore:
     """Couche d'accès Redis. Les identifiants sont générés par l'API."""
+
+    _MIGRATE_USERNAME_INDEX_SCRIPT = """
+    if redis.call('EXISTS', KEYS[1]) == 1 then
+        local names = redis.call('SMEMBERS', KEYS[1])
+        for _, name in ipairs(names) do
+            local user_id = redis.call('GET', 'talk:username:' .. name)
+            if user_id then
+                redis.call('ZADD', KEYS[2], 0, name)
+            end
+        end
+        redis.call('DEL', KEYS[1])
+    end
+    return 1
+    """
 
     _REGISTER_USER_SCRIPT = """
     if redis.call('GET', KEYS[1]) then
@@ -38,7 +65,7 @@ class RedisStore:
         'password_hash', ARGV[5],
         'created_at', ARGV[6])
     redis.call('HSET', KEYS[3], ARGV[7], ARGV[8])
-    redis.call('SADD', KEYS[4], ARGV[3])
+    redis.call('ZADD', KEYS[4], 0, ARGV[3])
     redis.call('SET', KEYS[1], ARGV[1])
     return 1
     """
@@ -47,6 +74,9 @@ class RedisStore:
     local current = redis.call('HGET', KEYS[1], ARGV[1])
     if current and current ~= ARGV[2] then
         return 0
+    end
+    if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[3]) then
+        return -1
     end
     redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
     return 1
@@ -61,23 +91,40 @@ class RedisStore:
     return {current, ttl}
     """
 
+    _CREATE_SESSION_SCRIPT = """
+    redis.call('HSET', KEYS[1],
+        'user_id', ARGV[1],
+        'csrf_token', ARGV[2],
+        'csrf_expires_at', ARGV[3],
+        'expires_at', ARGV[4])
+    redis.call('EXPIRE', KEYS[1], ARGV[5])
+    return 1
+    """
+
     _SAVE_MESSAGE_SCRIPT = """
-    if redis.call('EXISTS', KEYS[1]) == 1 then
+    local version = redis.call('HGET', KEYS[1], 'key_version')
+    if not version or tonumber(version) ~= tonumber(ARGV[2]) then
+        return {-1, 0}
+    end
+    if redis.call('SISMEMBER', KEYS[2], ARGV[1]) ~= 1 then
+        return {-1, 0}
+    end
+    if redis.call('EXISTS', KEYS[3]) == 1 then
         return {0, 0}
     end
-    local sequence = redis.call('INCR', KEYS[2])
-    redis.call('HSET', KEYS[1],
-        'client_id', ARGV[1],
-        'sender_id', ARGV[2],
-        'room_id', ARGV[3],
-        'channel_id', ARGV[4],
-        'algorithm', ARGV[5],
-        'key_version', ARGV[6],
-        'ciphertext', ARGV[7],
-        'nonce', ARGV[8],
-        'created_at', ARGV[9],
+    local sequence = redis.call('INCR', KEYS[4])
+    redis.call('HSET', KEYS[3],
+        'client_id', ARGV[3],
+        'sender_id', ARGV[1],
+        'room_id', ARGV[4],
+        'channel_id', ARGV[5],
+        'algorithm', ARGV[6],
+        'key_version', ARGV[7],
+        'ciphertext', ARGV[8],
+        'nonce', ARGV[9],
+        'created_at', ARGV[10],
         'sequence', sequence)
-    redis.call('ZADD', KEYS[3], sequence, ARGV[1])
+    redis.call('ZADD', KEYS[5], sequence, ARGV[3])
     return {1, sequence}
     """
 
@@ -216,13 +263,19 @@ class RedisStore:
             separators=(",", ":"),
             sort_keys=True,
         )
+        await self.redis.eval(
+            self._MIGRATE_USERNAME_INDEX_SCRIPT,
+            2,
+            "talk:usernames",
+            "talk:usernames:v2",
+        )
         result = await self.redis.eval(
             self._REGISTER_USER_SCRIPT,
             4,
             self._username_key(username),
             self._user_key(user_id),
             self._identity_keys_key(user_id),
-            "talk:usernames",
+            "talk:usernames:v2",
             user_id,
             username,
             username,
@@ -280,7 +333,16 @@ class RedisStore:
             separators=(",", ":"),
             sort_keys=True,
         )
-        result = await self.redis.eval(self._ADD_IDENTITY_KEY_SCRIPT, 1, keys_key, key_id, payload)
+        result = await self.redis.eval(
+            self._ADD_IDENTITY_KEY_SCRIPT,
+            1,
+            keys_key,
+            key_id,
+            payload,
+            10,
+        )
+        if int(result) == -1:
+            raise IdentityKeyLimitError
         if int(result) != 1:
             raise IdentityKeyConflictError
         record = await self.redis.hget(keys_key, key_id)
@@ -294,22 +356,33 @@ class RedisStore:
         token_hash: str,
         user_id: str,
         csrf_token: str,
+        csrf_expires_at: int,
         expires_at: int,
     ) -> None:
-        key = self._session_key(token_hash)
         ttl_seconds = max(1, expires_at - int(time.time()))
-        await self.redis.hset(
-            key,
-            mapping={
-                "user_id": user_id,
-                "csrf_token": csrf_token,
-                "expires_at": expires_at,
-            },
+        await self.redis.eval(
+            self._CREATE_SESSION_SCRIPT,
+            1,
+            self._session_key(token_hash),
+            user_id,
+            csrf_token,
+            csrf_expires_at,
+            expires_at,
+            ttl_seconds,
         )
-        await self.redis.expire(key, ttl_seconds)
 
-    async def update_session_csrf(self, token_hash: str, csrf_token: str) -> bool:
-        return bool(await self.redis.hset(self._session_key(token_hash), "csrf_token", csrf_token))
+    async def update_session_csrf(
+        self, token_hash: str, csrf_token: str, csrf_expires_at: int
+    ) -> bool:
+        return bool(
+            await self.redis.hset(
+                self._session_key(token_hash),
+                mapping={
+                    "csrf_token": csrf_token,
+                    "csrf_expires_at": csrf_expires_at,
+                },
+            )
+        )
 
     async def get_session(self, token_hash: str) -> Optional[dict[str, Any]]:
         record = await self.redis.hgetall(self._session_key(token_hash))
@@ -321,6 +394,7 @@ class RedisStore:
         return {
             "user_id": record["user_id"],
             "csrf_token": record["csrf_token"],
+            "csrf_expires_at": int(record.get("csrf_expires_at", "0")),
             "expires_at": int(record["expires_at"]),
         }
 
@@ -430,58 +504,100 @@ class RedisStore:
         return sorted(members, key=lambda user: (user["display_name"].casefold(), user["id"]))
 
     async def add_room_member(
-        self, room_id: str, user_id: str, key_envelopes: Sequence[dict[str, Any]]
+        self,
+        room_id: str,
+        user_id: str,
+        key_envelopes: Sequence[dict[str, Any]],
+        *,
+        expected_version: int,
     ) -> bool:
-        if await self.is_room_member(room_id, user_id):
-            return False
-        async with self.redis.pipeline(transaction=True) as pipeline:
-            pipeline.sadd(self._room_members_key(room_id), user_id)
-            pipeline.sadd(self._user_rooms_key(user_id), room_id)
-            for envelope in key_envelopes:
-                pipeline.hset(
-                    self._room_keys_key(room_id),
-                    self._envelope_field(envelope),
-                    json.dumps(envelope, separators=(",", ":"), sort_keys=True),
-                )
-            results = await pipeline.execute()
-        return bool(results[0])
+        room_key = self._room_key(room_id)
+        members_key = self._room_members_key(room_id)
+        try:
+            async with self.redis.pipeline(transaction=True) as pipeline:
+                await pipeline.watch(room_key, members_key)
+                current_version = await pipeline.hget(room_key, "key_version")
+                if current_version != str(expected_version):
+                    await pipeline.unwatch()
+                    raise ConcurrentRoomUpdateError
+                if await pipeline.sismember(members_key, user_id):
+                    await pipeline.unwatch()
+                    return False
+                pipeline.multi()
+                pipeline.sadd(members_key, user_id)
+                pipeline.sadd(self._user_rooms_key(user_id), room_id)
+                for envelope in key_envelopes:
+                    pipeline.hset(
+                        self._room_keys_key(room_id),
+                        self._envelope_field(envelope),
+                        json.dumps(envelope, separators=(",", ":"), sort_keys=True),
+                    )
+                results = await pipeline.execute()
+            return bool(results[0])
+        except WatchError as exc:
+            raise ConcurrentRoomUpdateError from exc
 
-    async def add_room_keys(self, room_id: str, key_envelopes: Sequence[dict[str, Any]]) -> None:
+    async def add_room_keys(
+        self,
+        room_id: str,
+        key_envelopes: Sequence[dict[str, Any]],
+        *,
+        expected_version: int,
+    ) -> None:
         if not key_envelopes:
             return
-        async with self.redis.pipeline(transaction=True) as pipeline:
-            for envelope in key_envelopes:
-                pipeline.hset(
-                    self._room_keys_key(room_id),
-                    self._envelope_field(envelope),
-                    json.dumps(envelope, separators=(",", ":"), sort_keys=True),
-                )
-            await pipeline.execute()
-
-    async def rotate_room_keys(self, room_id: str, key_envelopes: Sequence[dict[str, Any]]) -> int:
         room_key = self._room_key(room_id)
-        async with self.redis.pipeline(transaction=True) as pipeline:
-            await pipeline.watch(room_key)
-            current_raw = await pipeline.hget(room_key, "key_version")
-            if current_raw is None:
-                await pipeline.unwatch()
-                raise RuntimeError("Salon introuvable")
-            new_version = int(current_raw) + 1
-            prepared = []
-            for envelope in key_envelopes:
-                updated = dict(envelope)
-                updated["key_version"] = new_version
-                prepared.append(updated)
-            pipeline.multi()
-            pipeline.hset(room_key, "key_version", new_version)
-            for envelope in prepared:
-                pipeline.hset(
-                    self._room_keys_key(room_id),
-                    self._envelope_field(envelope),
-                    json.dumps(envelope, separators=(",", ":"), sort_keys=True),
-                )
-            await pipeline.execute()
-        return new_version
+        try:
+            async with self.redis.pipeline(transaction=True) as pipeline:
+                await pipeline.watch(room_key)
+                current_version = await pipeline.hget(room_key, "key_version")
+                if current_version != str(expected_version):
+                    await pipeline.unwatch()
+                    raise ConcurrentRoomUpdateError
+                pipeline.multi()
+                for envelope in key_envelopes:
+                    pipeline.hset(
+                        self._room_keys_key(room_id),
+                        self._envelope_field(envelope),
+                        json.dumps(envelope, separators=(",", ":"), sort_keys=True),
+                    )
+                await pipeline.execute()
+        except WatchError as exc:
+            raise ConcurrentRoomUpdateError from exc
+
+    async def rotate_room_keys(
+        self,
+        room_id: str,
+        key_envelopes: Sequence[dict[str, Any]],
+        *,
+        expected_version: int,
+    ) -> int:
+        room_key = self._room_key(room_id)
+        try:
+            async with self.redis.pipeline(transaction=True) as pipeline:
+                await pipeline.watch(room_key)
+                current_raw = await pipeline.hget(room_key, "key_version")
+                if current_raw != str(expected_version):
+                    await pipeline.unwatch()
+                    raise ConcurrentRoomUpdateError
+                new_version = expected_version + 1
+                prepared = []
+                for envelope in key_envelopes:
+                    updated = dict(envelope)
+                    updated["key_version"] = new_version
+                    prepared.append(updated)
+                pipeline.multi()
+                pipeline.hset(room_key, "key_version", new_version)
+                for envelope in prepared:
+                    pipeline.hset(
+                        self._room_keys_key(room_id),
+                        self._envelope_field(envelope),
+                        json.dumps(envelope, separators=(",", ":"), sort_keys=True),
+                    )
+                await pipeline.execute()
+            return new_version
+        except WatchError as exc:
+            raise ConcurrentRoomUpdateError from exc
 
     async def get_room_keys(self, room_id: str) -> list[dict[str, Any]]:
         records = await self.redis.hgetall(self._room_keys_key(room_id))
@@ -539,16 +655,21 @@ class RedisStore:
         channels = [self._serialize_channel(record) for record in records if record]
         return sorted(channels, key=lambda channel: (channel["created_at"], channel["id"]))
 
-    async def save_message(self, message: dict[str, Any]) -> tuple[bool, int]:
+    async def save_message(
+        self, message: dict[str, Any], *, expected_version: int
+    ) -> tuple[bool, int]:
         client_id = str(message["client_id"])
         result = await self.redis.eval(
             self._SAVE_MESSAGE_SCRIPT,
-            3,
+            5,
+            self._room_key(str(message["room_id"])),
+            self._room_members_key(str(message["room_id"])),
             self._message_key(client_id),
             self._channel_sequence_key(str(message["channel_id"])),
             self._channel_messages_key(str(message["channel_id"])),
-            client_id,
             str(message["sender_id"]),
+            expected_version,
+            client_id,
             str(message["room_id"]),
             str(message["channel_id"]),
             str(message["algorithm"]),
@@ -557,7 +678,10 @@ class RedisStore:
             str(message["nonce"]),
             int(message["created_at"]),
         )
-        return int(result[0]) == 1, int(result[1])
+        status = int(result[0])
+        if status == -1:
+            raise MessageRejectedError
+        return status == 1, int(result[1])
 
     async def get_message(self, client_id: str) -> Optional[dict[str, Any]]:
         record = await self.redis.hgetall(self._message_key(client_id))
@@ -589,9 +713,21 @@ class RedisStore:
     async def search_users(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         minimum = f"[{query}"
         maximum = f"[{query}\xff"
-        user_ids = await self.redis.zrangebylex(
-            "talk:usernames", minimum, maximum, start=0, num=limit
+        await self.redis.eval(
+            self._MIGRATE_USERNAME_INDEX_SCRIPT,
+            2,
+            "talk:usernames",
+            "talk:usernames:v2",
         )
+        usernames = await self.redis.zrangebylex(
+            "talk:usernames:v2", minimum, maximum, start=0, num=limit
+        )
+        if not usernames:
+            return []
+        async with self.redis.pipeline(transaction=False) as pipeline:
+            for username in usernames:
+                pipeline.get(self._username_key(username))
+            user_ids = [user_id for user_id in await pipeline.execute() if user_id]
         if not user_ids:
             return []
         async with self.redis.pipeline(transaction=False) as pipeline:

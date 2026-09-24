@@ -19,9 +19,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         return
 
     token = websocket.cookies.get(settings.session_cookie_name)
+    session_hash = hash_token(token) if token else ""
     session = None
     if token:
-        session = await websocket.app.state.store.get_session(hash_token(token))
+        session = await websocket.app.state.store.get_session(session_hash)
     if session is None:
         await websocket.close(code=4401, reason="Authentification requise")
         return
@@ -31,7 +32,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         return
 
     manager: ConnectionManager = websocket.app.state.manager
-    await manager.connect(user["id"], websocket)
+    await manager.connect(user["id"], websocket, session_hash)
     await websocket.send_json(
         {
             "type": "connection.ready",
@@ -41,6 +42,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     try:
         while True:
             raw_message = await websocket.receive_text()
+            current_session = await websocket.app.state.store.get_session(session_hash)
+            if current_session is None or current_session["user_id"] != user["id"]:
+                await websocket.close(code=4401, reason="Session expirée")
+                return
             if len(raw_message) > 2048:
                 await websocket.send_json({"type": "error", "code": "payload_too_large"})
                 await websocket.close(code=1009)

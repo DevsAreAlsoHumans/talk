@@ -15,7 +15,7 @@ async function createIdentity() {
   const keyPair = await crypto.subtle.generateKey(
     {
       ...RSA_ALGORITHM,
-      modulusLength: 2048,
+      modulusLength: 3072,
       publicExponent: new Uint8Array([1, 0, 1]),
     },
     false,
@@ -53,6 +53,7 @@ test("une clé de salon peut être enveloppée puis ouverte", async () => {
   const wrapped = await wrapRoomKey(rawRoomKey, identity.publicJwk);
   const opened = await unwrapRoomKey(wrapped, identity);
 
+  assert.equal(fromBase64url(wrapped).byteLength, 384);
   assert.equal(opened.rawRoomKey.byteLength, 32);
   assert.deepEqual(new Uint8Array(opened.rawRoomKey), rawRoomKey);
   assert.equal(identity.privateKey.extractable, false);

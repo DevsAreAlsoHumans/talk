@@ -44,7 +44,9 @@ jobs:
       - name: Test backend
         run: pytest -q
         env:
-          REDIS_URL: redis://localhost:6379/15
+          REDIS_TEST_HOST: localhost
+          REDIS_TEST_PORT: 6379
+          REDIS_TEST_DB: 15
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -53,6 +55,12 @@ jobs:
 
       - name: Test frontend
         run: npm --prefix frontend test
+
+      - name: Build runtime image
+        run: docker build --target runtime --tag talk-ci-runtime .
+
+      - name: Build test image
+        run: docker build --target test --tag talk-ci-test .
 
       - name: Validate Docker Compose
         run: docker compose config --quiet
