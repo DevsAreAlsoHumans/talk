@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>talk — Chat</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="chat-body">
+  <div class="chat-layout">
+    <aside class="sidebar">
+      <header class="sidebar-header">
+        <h1 class="sidebar-title">talk</h1>
+        <button id="logout-btn" type="button" class="btn btn-link">Déconnexion</button>
+      </header>
+
+      <div class="new-conversation">
+        <div class="field">
+          <label for="search-input">Nouvelle conversation</label>
+          <input type="text" id="search-input" placeholder="Identifiant d'un utilisateur">
+          <button id="search-btn" type="button" class="btn btn-primary">Rechercher</button>
+          <div id="search-results" class="search-results"></div>
+        </div>
+      </div>
+
+      <nav id="conversation-list" class="conversation-list" aria-label="Conversations"></nav>
+    </aside>
+
+    <main class="chat-main">
+      <header class="chat-header">
+        <h2 id="chat-title" class="chat-title">Sélectionne une conversation</h2>
+        <span id="chat-status" class="chat-status"></span>
+      </header>
+
+      <section id="message-list" class="message-list" aria-live="polite"></section>
+
+      <footer class="chat-composer">
+        <input
+          id="message-input"
+          type="text"
+          placeholder="Votre message…"
+          autocomplete="off"
+          maxlength="4000"
+          disabled
+        >
+        <button id="send-btn" type="button" class="btn btn-primary" disabled>Envoyer</button>
+      </footer>
+    </main>
+  </div>
+
+  <script src="crypto.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>

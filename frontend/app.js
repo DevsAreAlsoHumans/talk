@@ -50,6 +50,19 @@
     return Object.fromEntries(new FormData(form).entries());
   }
 
+  function csrfToken() {
+    const match = document.cookie.match(/(?:^|; )talk_csrf_token=([^;]*)/);
+    return match ? decodeURIComponent(match[1]) : "";
+  }
+
+  async function loadCsrf() {
+    try {
+      await fetch("/api/auth/csrf");
+    } catch (_err) {
+      /* le navigateur relancera à la prochaine soumission */
+    }
+  }
+
   async function submitForm(form, endpoint, kind) {
     hideMessage();
     setSending(form, true);
@@ -60,7 +73,10 @@
       }
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken(),
+        },
         body: JSON.stringify(payload),
       });
       const data = await response.json().catch(() => ({}));
@@ -89,5 +105,6 @@
     submitForm(el.registerForm, "/api/auth/register", "register");
   });
 
+  loadCsrf();
   setVisible();
 })();
