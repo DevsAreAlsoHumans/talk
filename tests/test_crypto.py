@@ -22,7 +22,7 @@ def test_channel_key_wrap_roundtrip():
 
 def test_message_encrypt_decrypt_roundtrip():
     aes_key = os.urandom(32)
-    secret = "salut, ceci est un message secret".encode()
+    secret = b"salut, ceci est un message secret"
     payload = encrypt_message(secret, aes_key)
     assert payload["ciphertext"] != secret.decode()
     assert secret.decode() not in payload["ciphertext"]

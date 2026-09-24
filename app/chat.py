@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import re
 from datetime import UTC, datetime
+from typing import Annotated
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,7 +19,8 @@ USERS_COLLECTION = "Users"
 CONVERSATIONS_COLLECTION = "Conversations"
 MESSAGES_COLLECTION = "Messages"
 
-CurrentUser = dict
+CurrentUser = Annotated[dict, Depends(authenticated_user)]
+Csrf = Annotated[None, Depends(require_csrf)]
 
 
 def _to_obj(value: str) -> ObjectId:
@@ -41,8 +43,14 @@ class PublicKeyRequest(BaseModel):
 
 
 class ConversationRequest(BaseModel):
-    user_id: str = Field(min_length=24, max_length=24)
+    user_id: str | None = Field(default=None, min_length=24, max_length=24)
+    member_ids: list[str] | None = Field(default=None, min_length=2, max_length=50)
+    name: str | None = Field(default=None, min_length=1, max_length=60)
     key_wraps: dict[str, str]
+
+
+class RenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
 
 
 class MessageRequest(BaseModel):
@@ -56,20 +64,20 @@ def _valid_b64(value: str) -> bool:
     try:
         base64.b64decode(value, validate=True)
         return True
-    except Exception:
+    except ValueError:
         return False
 
 
 @router.get("/me")
-async def me(user: dict = Depends(authenticated_user)) -> dict:
+async def me(user: CurrentUser) -> dict:
     return _user_summary(user)
 
 
 @router.put("/me/public-key")
 async def set_public_key(
     payload: PublicKeyRequest,
-    user: dict = Depends(authenticated_user),
-    _csrf=Depends(require_csrf),
+    user: CurrentUser,
+    _csrf: Csrf,
 ) -> dict:
     key = payload.public_key
     if key.get("kty") != "RSA" or not key.get("n") or not key.get("e"):
@@ -82,8 +90,8 @@ async def set_public_key(
 
 @router.get("/users/search")
 async def search_users(
-    q: str = Query(min_length=1, max_length=30),
-    user: dict = Depends(authenticated_user),
+    q: Annotated[str, Query(min_length=1, max_length=30)],
+    user: CurrentUser,
 ) -> list[dict]:
     pattern = re.escape(q)
     cursor = mongo.db[USERS_COLLECTION].find(
@@ -99,7 +107,7 @@ async def search_users(
 @router.get("/users/{user_id}/public-key")
 async def get_public_key(
     user_id: str,
-    _user: dict = Depends(authenticated_user),
+    _user: CurrentUser,
 ) -> dict:
     target = _to_obj(user_id)
     doc = await mongo.db[USERS_COLLECTION].find_one(
@@ -121,64 +129,107 @@ async def _existing_conversation(members: list[ObjectId]) -> dict | None:
 @router.post("/conversations", status_code=201)
 async def create_conversation(
     payload: ConversationRequest,
-    user: dict = Depends(authenticated_user),
-    _csrf=Depends(require_csrf),
+    user: CurrentUser,
+    _csrf: Csrf,
 ) -> dict:
-    other_id = _to_obj(payload.user_id)
-    if other_id == user["_id"]:
+    if payload.user_id is not None and payload.member_ids is not None:
         raise HTTPException(
-            status_code=422, detail="Impossible de discuter avec soi-même."
+            status_code=422, detail="Demande de création invalide."
         )
 
-    other = await mongo.db[USERS_COLLECTION].find_one({"_id": other_id})
-    if other is None:
-        raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+    is_group = payload.member_ids is not None
 
-    own_id_str = str(user["_id"])
-    other_id_str = str(other_id)
-    invalid = set(payload.key_wraps) - {own_id_str, other_id_str}
-    if invalid:
-        raise HTTPException(status_code=422, detail="Clés de salle invalides.")
-    if len(payload.key_wraps) != 2:
+    if is_group:
+        other_ids = [_to_obj(uid) for uid in payload.member_ids]
+        if len({str(oid) for oid in other_ids}) != len(other_ids):
+            raise HTTPException(
+                status_code=422, detail="Membres en double."
+            )
+        if any(oid == user["_id"] for oid in other_ids):
+            raise HTTPException(
+                status_code=422, detail="Impossible de s'ajouter soi-même."
+            )
+        for oid in other_ids:
+            target = await mongo.db[USERS_COLLECTION].find_one(
+                {"_id": oid}, projection={"_id": 1}
+            )
+            if target is None:
+                raise HTTPException(
+                    status_code=404, detail="Utilisateur introuvable."
+                )
+        all_members = {user["_id"], *other_ids}
+    else:
+        other_id = _to_obj(payload.user_id)
+        if other_id == user["_id"]:
+            raise HTTPException(
+                status_code=422, detail="Impossible de discuter avec soi-même."
+            )
+        other = await mongo.db[USERS_COLLECTION].find_one({"_id": other_id})
+        if other is None:
+            raise HTTPException(status_code=404, detail="Utilisateur introuvable.")
+        all_members = {user["_id"], other_id}
+
+    member_strs = {str(m) for m in all_members}
+    if set(payload.key_wraps) != member_strs:
         raise HTTPException(status_code=422, detail="Clés de salle invalides.")
     for value in payload.key_wraps.values():
         if not _valid_b64(value) or len(value) > 512:
             raise HTTPException(status_code=422, detail="Clé de salle invalide.")
 
-    members = sorted([user["_id"], other_id], key=str)
-    existing = await _existing_conversation(members)
-    if existing is not None:
-        return {"id": str(existing["_id"]), "created": False}
+    members = sorted(all_members, key=str)
+    if not is_group:
+        existing = await _existing_conversation(members)
+        if existing is not None:
+            return {"id": str(existing["_id"]), "created": False}
 
     conversation = {
+        "type": "group" if is_group else "direct",
         "members": members,
         "key_wraps": payload.key_wraps,
         "created_at": datetime.now(UTC),
         "last_message_at": None,
     }
+    if is_group:
+        conversation["name"] = (
+            (payload.name or "").strip() or "Conversation de groupe"
+        )
     result = await mongo.db[CONVERSATIONS_COLLECTION].insert_one(conversation)
     return {"id": str(result.inserted_id), "created": True}
 
 
 @router.get("/conversations")
-async def list_conversations(user: dict = Depends(authenticated_user)) -> list[dict]:
+async def list_conversations(user: CurrentUser) -> list[dict]:
     cursor = mongo.db[CONVERSATIONS_COLLECTION].find(
         {"members": user["_id"]}
     ).sort("last_message_at", -1)
     conversations = []
     async for conversation in cursor:
-        other_id = next(
-            (m for m in conversation["members"] if m != user["_id"]), None
-        )
-        other_name = None
-        if other_id is not None:
+        is_group = conversation.get("type") == "group"
+        other_ids = [
+            m for m in conversation["members"] if m != user["_id"]
+        ]
+        members = []
+        for oid in other_ids:
             other = await mongo.db[USERS_COLLECTION].find_one(
-                {"_id": other_id}, projection={"username": 1}
+                {"_id": oid}, projection={"username": 1}
             )
-            other_name = other["username"] if other else None
+            members.append(
+                {
+                    "id": str(oid),
+                    "username": other["username"] if other else "inconnu",
+                }
+            )
+        other_id = other_ids[0] if other_ids else None
+        other_name = next(
+            (m["username"] for m in members if m["id"] == str(other_id)), None
+        )
         conversations.append(
             {
                 "id": str(conversation["_id"]),
+                "type": "group" if is_group else "direct",
+                "name": conversation.get("name"),
+                "members": members,
+                "member_count": len(conversation["members"]),
                 "created_at": conversation["created_at"],
                 "last_message_at": conversation.get("last_message_at"),
                 "other_user": (
@@ -206,7 +257,7 @@ async def _get_conversation_for_user(
 @router.get("/conversations/{conversation_id}/keys")
 async def get_conversation_keys(
     conversation_id: str,
-    user: dict = Depends(authenticated_user),
+    user: CurrentUser,
 ) -> dict:
     conversation = await _get_conversation_for_user(
         _to_obj(conversation_id), user
@@ -220,7 +271,7 @@ async def get_conversation_keys(
 @router.get("/conversations/{conversation_id}/messages")
 async def list_messages(
     conversation_id: str,
-    user: dict = Depends(authenticated_user),
+    user: CurrentUser,
 ) -> list[dict]:
     conversation = await _get_conversation_for_user(
         _to_obj(conversation_id), user
@@ -250,8 +301,8 @@ async def list_messages(
 async def send_message(
     conversation_id: str,
     payload: MessageRequest,
-    user: dict = Depends(authenticated_user),
-    _csrf=Depends(require_csrf),
+    user: CurrentUser,
+    _csrf: Csrf,
 ) -> dict:
     if not _valid_b64(payload.iv) or len(payload.iv) > 32:
         raise HTTPException(status_code=422, detail="IV invalide.")
@@ -275,3 +326,88 @@ async def send_message(
         {"$set": {"last_message_at": now}},
     )
     return {"id": str(result.inserted_id)}
+
+
+async def _delete_conversation(conversation_id: ObjectId) -> None:
+    await mongo.db[CONVERSATIONS_COLLECTION].delete_one({"_id": conversation_id})
+    await mongo.db[MESSAGES_COLLECTION].delete_many(
+        {"conversation_id": conversation_id}
+    )
+
+
+@router.patch("/conversations/{conversation_id}")
+async def rename_conversation(
+    conversation_id: str,
+    payload: RenameRequest,
+    user: CurrentUser,
+    _csrf: Csrf,
+) -> dict:
+    conversation = await _get_conversation_for_user(
+        _to_obj(conversation_id), user
+    )
+    if conversation.get("type") != "group":
+        raise HTTPException(
+            status_code=422,
+            detail="Seules les conversations de groupe sont renommables.",
+        )
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Nom invalide.")
+    await mongo.db[CONVERSATIONS_COLLECTION].update_one(
+        {"_id": conversation["_id"]}, {"$set": {"name": name}}
+    )
+    return {"ok": True, "name": name}
+
+
+@router.post("/conversations/{conversation_id}/members/{user_id}/remove")
+async def remove_member(
+    conversation_id: str,
+    user_id: str,
+    user: CurrentUser,
+    _csrf: Csrf,
+) -> dict:
+    conversation = await _get_conversation_for_user(
+        _to_obj(conversation_id), user
+    )
+    target = _to_obj(user_id)
+    if target == user["_id"]:
+        raise HTTPException(
+            status_code=422, detail="Utilisez le bouton quitter."
+        )
+    if target not in conversation["members"]:
+        raise HTTPException(
+            status_code=404, detail="Cet utilisateur n'est pas dans la conversation."
+        )
+    await mongo.db[CONVERSATIONS_COLLECTION].update_one(
+        {"_id": conversation["_id"]},
+        {
+            "$pull": {"members": target},
+            "$unset": {f"key_wraps.{target!s}": ""},
+        },
+    )
+    if len(conversation["members"]) - 1 < 2:
+        await _delete_conversation(conversation["_id"])
+        return {"deleted": True}
+    return {"deleted": False, "member_count": len(conversation["members"]) - 1}
+
+
+@router.post("/conversations/{conversation_id}/leave")
+async def leave_conversation(
+    conversation_id: str,
+    user: CurrentUser,
+    _csrf: Csrf,
+) -> dict:
+    conversation = await _get_conversation_for_user(
+        _to_obj(conversation_id), user
+    )
+    if len(conversation["members"]) <= 2:
+        await _delete_conversation(conversation["_id"])
+        return {"deleted": True}
+    await mongo.db[CONVERSATIONS_COLLECTION].update_one(
+        {"_id": conversation["_id"]},
+        {
+            "$pull": {"members": user["_id"]},
+            "$unset": {f"key_wraps.{user['_id']!s}": ""},
+        },
+    )
+    return {"deleted": False, "member_count": len(conversation["members"]) - 1}

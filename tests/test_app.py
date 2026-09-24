@@ -1,3 +1,4 @@
+import os
 import uuid
 
 from tests.conftest import auth_headers, csrf
@@ -5,10 +6,9 @@ from tests.crypto_helpers import (
     encrypt_message,
     new_keypair,
     public_key_jwk,
+    unwrap_channel_key,
     wrap_channel_key,
 )
-
-import os
 
 
 async def register_user(client, prefix):
@@ -215,3 +215,271 @@ class TestChatFlow:
         assert second.status_code == 201
         assert second.json()["created"] is False
         assert second.json()["id"] == first.json()["id"]
+
+
+class TestGroupConversation:
+    async def _make_group(self, make_client, name="Projet SDV"):
+        alice = make_client()
+        bob = make_client()
+        carol = make_client()
+        alice_info = await register_user(alice, "alice")
+        bob_info = await register_user(bob, "bob")
+        carol_info = await register_user(carol, "carol")
+        alice_priv, pa = new_keypair()
+        bob_priv, pb = new_keypair()
+        carol_priv, pc = new_keypair()
+        await set_public_key(alice, pa)
+        await set_public_key(bob, pb)
+        await set_public_key(carol, pc)
+        aes_key = os.urandom(32)
+        ids = [alice_info["id"], bob_info["id"], carol_info["id"]]
+        publics = []
+        for user_id, pub in zip(ids, (pa, pb, pc)):
+            publics.append(wrap_channel_key(aes_key, pub))
+        wraps = dict(zip(ids, publics))
+        response = await alice.post(
+            "/api/conversations",
+            headers=auth_headers(await csrf(alice)),
+            json={
+                "member_ids": [bob_info["id"], carol_info["id"]],
+                "name": name,
+                "key_wraps": wraps,
+            },
+        )
+        assert response.status_code == 201, response.text
+        return {
+            "alice": alice,
+            "bob": bob,
+            "carol": carol,
+            "aes_key": aes_key,
+            "infos": {
+                "alice": alice_info,
+                "bob": bob_info,
+                "carol": carol_info,
+            },
+            "pubs": {"alice": pa, "bob": pb, "carol": pc},
+            "privs": {"alice": alice_priv, "bob": bob_priv, "carol": carol_priv},
+            "conversation_id": response.json()["id"],
+        }
+
+    async def test_create_group_flow(self, make_client):
+        group = await self._make_group(make_client)
+        conversation_id = group["conversation_id"]
+
+        listing = await group["alice"].get("/api/conversations")
+        convo = next(c for c in listing.json() if c["id"] == conversation_id)
+        assert convo["type"] == "group"
+        assert convo["name"] == "Projet SDV"
+        assert convo["member_count"] == 3
+        member_ids = {m["id"] for m in convo["members"]}
+        assert member_ids == {group["infos"]["bob"]["id"], group["infos"]["carol"]["id"]}
+
+        bob_listing = await group["bob"].get("/api/conversations")
+        assert any(
+            c["id"] == conversation_id and c["name"] == "Projet SDV"
+            for c in bob_listing.json()
+        )
+
+        keys = await group["bob"].get(
+            "/api/conversations/" + conversation_id + "/keys"
+        )
+        assert keys.status_code == 200
+        unwrapped = unwrap_channel_key(keys.json()["wrapped"], group["privs"]["bob"])
+        assert unwrapped == group["aes_key"]
+
+        secret = "message de groupe chiffre"
+        encrypted = encrypt_message(secret.encode(), group["aes_key"])
+        sent = await group["alice"].post(
+            "/api/conversations/" + conversation_id + "/messages",
+            headers=auth_headers(await csrf(group["alice"])),
+            json=encrypted,
+        )
+        assert sent.status_code == 201
+        history = await group["carol"].get(
+            "/api/conversations/" + conversation_id + "/messages"
+        )
+        assert history.status_code == 200
+        stored = history.json()
+        assert stored[0]["ciphertext"] != secret
+        assert stored[0]["sender_username"] == group["infos"]["alice"]["username"]
+
+        intruder = make_client()
+        await register_user(intruder, "intrus")
+        hidden = await intruder.get(
+            "/api/conversations/" + conversation_id + "/messages"
+        )
+        assert hidden.status_code == 404
+
+    async def test_group_requires_key_for_every_member(self, make_client):
+        alice = make_client()
+        bob = make_client()
+        carol = make_client()
+        alice_info = await register_user(alice, "alice")
+        bob_info = await register_user(bob, "bob")
+        carol_info = await register_user(carol, "carol")
+        _, pa = new_keypair()
+        _, pb = new_keypair()
+        _, pc = new_keypair()
+        await set_public_key(alice, pa)
+        await set_public_key(bob, pb)
+        await set_public_key(carol, pc)
+        aes_key = os.urandom(32)
+        response = await alice.post(
+            "/api/conversations",
+            headers=auth_headers(await csrf(alice)),
+            json={
+                "member_ids": [bob_info["id"], carol_info["id"]],
+                "name": "Groupe",
+                "key_wraps": {
+                    alice_info["id"]: wrap_channel_key(aes_key, pa),
+                    bob_info["id"]: wrap_channel_key(aes_key, pb),
+                },
+            },
+        )
+        assert response.status_code == 422
+
+    async def test_group_rejects_self_and_duplicates(self, make_client):
+        alice = make_client()
+        bob = make_client()
+        alice_info = await register_user(alice, "alice")
+        bob_info = await register_user(bob, "bob")
+        _, pa = new_keypair()
+        _, pb = new_keypair()
+        await set_public_key(alice, pa)
+        await set_public_key(bob, pb)
+        aes_key = os.urandom(32)
+        wraps = {
+            alice_info["id"]: wrap_channel_key(aes_key, pa),
+            bob_info["id"]: wrap_channel_key(aes_key, pb),
+        }
+        self_dup = await alice.post(
+            "/api/conversations",
+            headers=auth_headers(await csrf(alice)),
+            json={
+                "member_ids": [alice_info["id"], bob_info["id"]],
+                "key_wraps": wraps,
+            },
+        )
+        assert self_dup.status_code == 422
+        dup = await alice.post(
+            "/api/conversations",
+            headers=auth_headers(await csrf(alice)),
+            json={
+                "member_ids": [bob_info["id"], bob_info["id"]],
+                "key_wraps": wraps,
+            },
+        )
+        assert dup.status_code == 422
+
+    async def test_rename_group(self, make_client):
+        group = await self._make_group(make_client, name="Avant")
+        conversation_id = group["conversation_id"]
+
+        renamed = await group["alice"].patch(
+            "/api/conversations/" + conversation_id,
+            headers=auth_headers(await csrf(group["alice"])),
+            json={"name": "  Après renommage  "},
+        )
+        assert renamed.status_code == 200, renamed.text
+        assert renamed.json()["name"] == "Après renommage"
+
+        bob_listing = await group["bob"].get("/api/conversations")
+        convo = next(c for c in bob_listing.json() if c["id"] == conversation_id)
+        assert convo["name"] == "Après renommage"
+
+    async def test_direct_cannot_be_renamed(self, make_client):
+        alice = make_client()
+        bob = make_client()
+        alice_info = await register_user(alice, "alice")
+        bob_info = await register_user(bob, "bob")
+        _, pa = new_keypair()
+        _, pb = new_keypair()
+        await set_public_key(alice, pa)
+        await set_public_key(bob, pb)
+        aes_key = os.urandom(32)
+        direct = await alice.post(
+            "/api/conversations",
+            headers=auth_headers(await csrf(alice)),
+            json={
+                "user_id": bob_info["id"],
+                "key_wraps": {
+                    alice_info["id"]: wrap_channel_key(aes_key, pa),
+                    bob_info["id"]: wrap_channel_key(aes_key, pb),
+                },
+            },
+        )
+        assert direct.status_code == 201
+        renamed = await alice.patch(
+            "/api/conversations/" + direct.json()["id"],
+            headers=auth_headers(await csrf(alice)),
+            json={"name": "Groupe"},
+        )
+        assert renamed.status_code == 422
+
+    async def test_remove_member_revokes_access(self, make_client):
+        group = await self._make_group(make_client)
+        conversation_id = group["conversation_id"]
+        carol_id = group["infos"]["carol"]["id"]
+
+        removed = await group["alice"].post(
+            "/api/conversations/" + conversation_id + "/members/" + carol_id + "/remove",
+            headers=auth_headers(await csrf(group["alice"])),
+        )
+        assert removed.status_code == 200
+        assert removed.json()["deleted"] is False
+        assert removed.json()["member_count"] == 2
+
+        carol_listing = await group["carol"].get("/api/conversations")
+        assert not any(c["id"] == conversation_id for c in carol_listing.json())
+
+        hidden = await group["carol"].get(
+            "/api/conversations/" + conversation_id + "/messages"
+        )
+        assert hidden.status_code == 404
+
+        keys = await group["carol"].get(
+            "/api/conversations/" + conversation_id + "/keys"
+        )
+        assert keys.status_code == 404
+
+    async def test_leave_group(self, make_client):
+        group = await self._make_group(make_client)
+        conversation_id = group["conversation_id"]
+
+        left = await group["bob"].post(
+            "/api/conversations/" + conversation_id + "/leave",
+            headers=auth_headers(await csrf(group["bob"])),
+        )
+        assert left.status_code == 200
+        assert left.json()["deleted"] is False
+        assert left.json()["member_count"] == 2
+
+        bob_listing = await group["bob"].get("/api/conversations")
+        assert not any(c["id"] == conversation_id for c in bob_listing.json())
+
+        alice_listing = await group["alice"].get("/api/conversations")
+        convo = next(c for c in alice_listing.json() if c["id"] == conversation_id)
+        assert convo["member_count"] == 2
+
+    async def test_leave_deletes_when_less_than_two_remain(self, make_client):
+        group = await self._make_group(make_client)
+        conversation_id = group["conversation_id"]
+        carol_id = group["infos"]["carol"]["id"]
+
+        await group["alice"].post(
+            "/api/conversations/"
+            + conversation_id
+            + "/members/"
+            + carol_id
+            + "/remove",
+            headers=auth_headers(await csrf(group["alice"])),
+        )
+        left = await group["bob"].post(
+            "/api/conversations/" + conversation_id + "/leave",
+            headers=auth_headers(await csrf(group["bob"])),
+        )
+        assert left.status_code == 200
+        assert left.json()["deleted"] is True
+
+        alice_listing = await group["alice"].get("/api/conversations")
+        assert not any(c["id"] == conversation_id for c in alice_listing.json())

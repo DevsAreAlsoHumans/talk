@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Annotated
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
@@ -20,11 +21,13 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 hasher = PasswordHasher()
 
-CurrentUser = dict
-
 
 async def authenticated_user(request: Request) -> dict:
     return await get_current_user(request)
+
+
+CurrentUser = Annotated[dict, Depends(authenticated_user)]
+Csrf = Annotated[None, Depends(require_csrf)]
 
 
 class RegisterRequest(BaseModel):
@@ -49,7 +52,7 @@ async def csrf_bootstrap(response: Response) -> dict:
 async def register(
     payload: RegisterRequest,
     response: Response,
-    _csrf=Depends(require_csrf),
+    _csrf: Csrf,
 ) -> dict:
     if payload.password != payload.password_confirm:
         raise HTTPException(
@@ -101,7 +104,7 @@ async def register(
 async def login(
     payload: LoginRequest,
     response: Response,
-    _csrf=Depends(require_csrf),
+    _csrf: Csrf,
 ) -> dict:
     users = mongo.db[USERS_COLLECTION]
     user = await users.find_one({"username": payload.username})
@@ -145,8 +148,8 @@ async def login(
 async def logout(
     request: Request,
     response: Response,
-    user: dict = Depends(authenticated_user),
-    _csrf=Depends(require_csrf),
+    user: CurrentUser,
+    _csrf: Csrf,
 ) -> dict:
     session_id = request.cookies.get("talk_session")
     await mongo.db[SESSIONS_COLLECTION].delete_one({"session_id": session_id})

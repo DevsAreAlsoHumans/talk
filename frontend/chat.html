@@ -15,12 +15,14 @@
       </header>
 
       <div class="new-conversation">
+        <p id="current-user" class="current-user"></p>
         <div class="field">
           <label for="search-input">Nouvelle conversation</label>
           <input type="text" id="search-input" placeholder="Identifiant d'un utilisateur">
           <button id="search-btn" type="button" class="btn btn-primary">Rechercher</button>
           <div id="search-results" class="search-results"></div>
         </div>
+        <button id="group-btn" type="button" class="btn btn-secondary group-btn">Conversation de groupe</button>
       </div>
 
       <nav id="conversation-list" class="conversation-list" aria-label="Conversations"></nav>
@@ -28,8 +30,11 @@
 
     <main class="chat-main">
       <header class="chat-header">
-        <h2 id="chat-title" class="chat-title">Sélectionne une conversation</h2>
-        <span id="chat-status" class="chat-status"></span>
+        <div class="chat-title-group">
+          <h2 id="chat-title" class="chat-title">Sélectionne une conversation</h2>
+          <span id="chat-status" class="chat-status"></span>
+        </div>
+        <button id="modify-btn" type="button" class="btn btn-secondary" hidden>Modifier la conversation</button>
       </header>
 
       <section id="message-list" class="message-list" aria-live="polite"></section>
@@ -46,6 +51,52 @@
         <button id="send-btn" type="button" class="btn btn-primary" disabled>Envoyer</button>
       </footer>
     </main>
+  </div>
+
+  <div id="group-modal" class="modal" hidden>
+    <div class="modal-card">
+      <h3 class="modal-title">Créer une conversation de groupe</h3>
+      <div class="field">
+        <label for="group-name">Nom de conversation</label>
+        <input type="text" id="group-name" placeholder="Ex : Projet SDV" maxlength="60" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="group-search-input">Utilisateurs</label>
+        <input type="text" id="group-search-input" placeholder="Rechercher un utilisateur…" autocomplete="off">
+        <div id="group-search-results" class="search-results"></div>
+      </div>
+      <div id="group-selected" class="chips" aria-label="Utilisateurs sélectionnés"></div>
+      <p id="group-error" class="modal-error" hidden></p>
+      <div class="modal-actions">
+        <button id="group-cancel-btn" type="button" class="btn">Annuler</button>
+        <button id="group-create-btn" type="button" class="btn btn-primary">Créer la conversation</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modify-modal" class="modal" hidden>
+    <div class="modal-card">
+      <h3 class="modal-title">Modifier la conversation</h3>
+      <section class="modal-section">
+        <h4>Renommer</h4>
+        <div class="field">
+          <input type="text" id="rename-input" placeholder="Nouveau nom de la conversation" maxlength="60" autocomplete="off">
+          <button id="rename-btn" type="button" class="btn btn-primary">Renommer</button>
+        </div>
+      </section>
+      <section class="modal-section">
+        <h4>Renvoyer quelqu'un de la conversation</h4>
+        <div id="modify-members" class="member-list"></div>
+      </section>
+      <section class="modal-section">
+        <h4>Quitter la conversation</h4>
+        <button id="leave-btn" type="button" class="btn btn-danger">Quitter la conversation</button>
+      </section>
+      <p id="modify-error" class="modal-error" hidden></p>
+      <div class="modal-actions">
+        <button id="modify-close-btn" type="button" class="btn">Fermer</button>
+      </div>
+    </div>
   </div>
 
   <script src="crypto.js"></script>

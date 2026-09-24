@@ -4,9 +4,9 @@ os.environ["MONGODB_DBNAME"] = "Talk_test"
 
 import httpx
 import pytest_asyncio
-from app.main import app
 
 from app.db import mongo
+from app.main import app
 
 BASE_URL = "http://127.0.0.1:8000"
 
