@@ -64,11 +64,20 @@ docker compose down -v
 docker compose run --rm test
 ```
 
-La commande exécute le linter, le contrôle de format et les tests backend. Les tests
-frontend sont aussi exécutés par la CI :
+La commande exécute le linter, le contrôle de format, les tests backend et un test des
+scripts Lua sur un vrai Redis. Les tests frontend sont aussi exécutés par la CI :
 
 ```bash
 npm --prefix frontend test
+```
+
+Le parcours navigateur complet peut être reproduit localement :
+
+```bash
+pip install -r requirements-e2e.txt
+playwright install chromium
+docker compose up -d app
+E2E_BASE_URL=http://127.0.0.1:8000 python tests/e2e_browser.py
 ```
 
 ## Développement local
@@ -84,11 +93,14 @@ pip install -r requirements-dev.txt
 Lancer Redis localement, puis démarrer FastAPI :
 
 ```bash
-export REDIS_URL=redis://localhost:6379/0
+export REDIS_HOST=localhost
+export REDIS_PORT=6379
+export REDIS_DB=0
 uvicorn app.main:app --reload
 ```
 
-Les tests backend utilisent `fakeredis` et ne modifient pas une base Redis existante :
+Les tests backend utilisent `fakeredis` par défaut. Le test d’intégration Redis est activé
+uniquement lorsque `REDIS_TEST_HOST` est défini :
 
 ```bash
 pytest -q
@@ -106,8 +118,13 @@ La configuration est lue depuis les variables d’environnement et le fichier `.
 | Variable | Défaut | Description |
 |----------|--------|-------------|
 | `ENVIRONMENT` | `development` | Utiliser `production` avec HTTPS pour désactiver la documentation et activer HSTS. |
-| `REDIS_URL` | `redis://localhost:6379/0` | URL Redis utilisée hors Compose. |
-| `REDIS_PASSWORD` | `talk-dev-password` | Mot de passe Redis local ; le changer impérativement hors développement. |
+| `REDIS_HOST` | `localhost` | Hôte Redis ; `redis` dans Compose. |
+| `REDIS_PORT` | `6379` | Port Redis. |
+| `REDIS_DB` | `0` | Base Redis sélectionnée. |
+| `REDIS_USERNAME` | vide | Utilisateur Redis facultatif. |
+| `REDIS_PASSWORD` | vide | Mot de passe Redis ; Compose fournit un mot de passe local par défaut. |
+| `REDIS_SSL` | `false` | Activer TLS pour une Redis distante. |
+| `REDIS_URL` | vide | URL Redis optionnelle, prioritaire sur les champs séparés. |
 | `COOKIE_SECURE` | `false` | À passer à `true` en production lorsque le site utilise HTTPS. |
 | `ALLOWED_ORIGINS` | origines locales | Origines HTTP et WebSocket autorisées, séparées par des virgules. |
 | `ALLOWED_HOSTS` | hôtes locaux | En-têtes `Host` acceptés, séparés par des virgules. |
@@ -124,9 +141,9 @@ ALLOWED_HOSTS=talk.example.fr
 REDIS_PASSWORD=un-mot-de-passe-long-et-aleatoire
 ```
 
-Ne jamais exposer Redis publiquement. Si son mot de passe contient des caractères
-spéciaux, encoder la valeur dans l’URL Redis ou utiliser une URL fournie par le
-fournisseur.
+Ne jamais exposer Redis publiquement. La configuration par champs séparés accepte un mot de
+passe contenant des caractères spéciaux ; si `REDIS_URL` est utilisé, son encodage doit être
+fourni par le fournisseur.
 
 ## Fonctionnement du chiffrement
 
