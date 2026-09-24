@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import Depends, HTTPException, Request, status
 from redis.asyncio import Redis
 
@@ -24,26 +26,34 @@ def request_store(redis: Redis) -> RedisStore:
     return RedisStore(redis)
 
 
-async def get_current_user(
+async def get_optional_session(
     request: Request,
     settings: Settings = Depends(get_settings),
     store: RedisStore = Depends(get_store),
-) -> dict:
+) -> Optional[tuple[str, dict]]:
     token = request.cookies.get(settings.session_cookie_name)
     if not token:
+        return None
+    token_hash = hash_token(token)
+    session = await store.get_session(token_hash)
+    if session is None:
+        return None
+    return token_hash, session
+
+
+async def get_current_user(
+    session_context: Optional[tuple[str, dict]] = Depends(get_optional_session),
+    store: RedisStore = Depends(get_store),
+) -> dict:
+    if session_context is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentification requise",
         )
-    session = await store.get_session(hash_token(token))
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expirée ou invalide",
-        )
+    token_hash, session = session_context
     user = await store.get_user(session["user_id"])
     if user is None:
-        await store.delete_session(hash_token(token))
+        await store.delete_session(token_hash)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session invalide",
@@ -54,11 +64,25 @@ async def get_current_user(
 async def require_csrf(
     request: Request,
     settings: Settings = Depends(get_settings),
+    session_context: Optional[tuple[str, dict]] = Depends(get_optional_session),
 ) -> None:
+    origin = request.headers.get("origin")
+    if origin and origin not in settings.origin_list:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Origine de requête non autorisée",
+        )
     cookie_token = request.cookies.get(settings.csrf_cookie_name)
     header_token = request.headers.get(CSRF_HEADER)
     if not cookie_token or not header_token or not constant_time_equal(cookie_token, header_token):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Jeton CSRF absent ou invalide",
+        )
+    if session_context is not None and not constant_time_equal(
+        session_context[1]["csrf_token"], cookie_token
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Jeton CSRF non lié à la session",
         )

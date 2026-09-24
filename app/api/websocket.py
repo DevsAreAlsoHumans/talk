@@ -14,7 +14,7 @@ router = APIRouter(tags=["temps réel"])
 async def websocket_endpoint(websocket: WebSocket) -> None:
     settings = websocket.app.state.settings
     origin = websocket.headers.get("origin")
-    if origin and origin not in settings.origin_list:
+    if origin not in settings.origin_list:
         await websocket.close(code=1008, reason="Origine non autorisée")
         return
 

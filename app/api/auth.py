@@ -69,10 +69,18 @@ async def _start_session(
 
 @router.get("/csrf", summary="Obtenir un jeton CSRF")
 async def csrf_token(
+    request: Request,
     response: Response,
     settings: Settings = Depends(get_settings),
+    store: RedisStore = Depends(get_store),
 ) -> dict[str, str]:
     token = generate_token(32)
+    session_token = request.cookies.get(settings.session_cookie_name)
+    if session_token:
+        token_hash = hash_token(session_token)
+        session = await store.get_session(token_hash)
+        if session is not None:
+            await store.update_session_csrf(token_hash, token)
     response.set_cookie(
         key=settings.csrf_cookie_name,
         value=token,

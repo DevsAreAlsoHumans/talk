@@ -321,6 +321,9 @@ class RedisStore:
         )
         await self.redis.expire(key, ttl_seconds)
 
+    async def update_session_csrf(self, token_hash: str, csrf_token: str) -> bool:
+        return bool(await self.redis.hset(self._session_key(token_hash), "csrf_token", csrf_token))
+
     async def get_session(self, token_hash: str) -> Optional[dict[str, Any]]:
         record = await self.redis.hgetall(self._session_key(token_hash))
         if not record:
