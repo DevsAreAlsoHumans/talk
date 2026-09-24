@@ -258,10 +258,28 @@ class RedisStore:
     async def add_identity_key(
         self, user_id: str, identity_key: Dict[str, Any]
     ) -> Dict[str, Any]:
+        keys_key = self._identity_keys_key(user_id)
+        key_id = str(identity_key["key_id"])
+        existing_payload = await self.redis.hget(keys_key, key_id)
+        if existing_payload:
+            existing = self._serialize_identity(
+                {
+                    "key_id": key_id,
+                    "device_name": json.loads(existing_payload)["device_name"],
+                    "public_key": json.loads(existing_payload)["public_key"],
+                    "created_at": json.loads(existing_payload)["created_at"],
+                }
+            )
+            if (
+                existing["device_name"] == identity_key["device_name"]
+                and existing["public_key"] == identity_key["public_key"]
+            ):
+                return existing
+
         created_at = int(time.time() * 1000)
         payload = json.dumps(
             {
-                "key_id": str(identity_key["key_id"]),
+                "key_id": key_id,
                 "device_name": identity_key["device_name"],
                 "public_key": identity_key["public_key"],
                 "created_at": created_at,
@@ -269,18 +287,22 @@ class RedisStore:
             separators=(",", ":"),
             sort_keys=True,
         )
-        key_id = str(identity_key["key_id"])
         result = await self.redis.eval(
-            self._ADD_IDENTITY_KEY_SCRIPT,
-            1,
-            self._identity_keys_key(user_id),
-            key_id,
-            payload,
+            self._ADD_IDENTITY_KEY_SCRIPT, 1, keys_key, key_id, payload
         )
         if int(result) != 1:
             raise IdentityKeyConflictError
-        records = await self.redis.hgetall(self._identity_keys_key(user_id))
-        return self._serialize_identity(records[key_id])
+        record = await self.redis.hget(keys_key, key_id)
+        if not record:
+            raise RuntimeError("Clé d'identité introuvable après création")
+        return self._serialize_identity(
+            {
+                "key_id": key_id,
+                "device_name": json.loads(record)["device_name"],
+                "public_key": json.loads(record)["public_key"],
+                "created_at": json.loads(record)["created_at"],
+            }
+        )
 
     async def create_session(
         self,
