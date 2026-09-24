@@ -1,7 +1,7 @@
 import json
 import time
 from collections.abc import Iterable, Sequence
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from uuid import uuid4
 
 from redis.asyncio import Redis
@@ -62,7 +62,7 @@ class RedisStore:
     """
 
     _SAVE_MESSAGE_SCRIPT = """
-    if redis.call('EXISTS', KEYS[1]) then
+    if redis.call('EXISTS', KEYS[1]) == 1 then
         return {0, 0}
     end
     local sequence = redis.call('INCR', KEYS[2])
@@ -150,12 +150,13 @@ class RedisStore:
         }
 
     @staticmethod
-    def _serialize_identity(record: dict[str, str]) -> dict[str, Any]:
+    def _serialize_identity(record: Union[str, dict[str, Any]]) -> dict[str, Any]:
+        payload = json.loads(record) if isinstance(record, str) else record
         return {
-            "key_id": record["key_id"],
-            "device_name": record["device_name"],
-            "public_key": json.loads(record["public_key"]),
-            "created_at": int(record["created_at"]),
+            "key_id": payload["key_id"],
+            "device_name": payload["device_name"],
+            "public_key": payload["public_key"],
+            "created_at": int(payload["created_at"]),
         }
 
     @staticmethod
@@ -261,14 +262,7 @@ class RedisStore:
         key_id = str(identity_key["key_id"])
         existing_payload = await self.redis.hget(keys_key, key_id)
         if existing_payload:
-            existing = self._serialize_identity(
-                {
-                    "key_id": key_id,
-                    "device_name": json.loads(existing_payload)["device_name"],
-                    "public_key": json.loads(existing_payload)["public_key"],
-                    "created_at": json.loads(existing_payload)["created_at"],
-                }
-            )
+            existing = self._serialize_identity(existing_payload)
             if (
                 existing["device_name"] == identity_key["device_name"]
                 and existing["public_key"] == identity_key["public_key"]
@@ -292,14 +286,7 @@ class RedisStore:
         record = await self.redis.hget(keys_key, key_id)
         if not record:
             raise RuntimeError("Clé d'identité introuvable après création")
-        return self._serialize_identity(
-            {
-                "key_id": key_id,
-                "device_name": json.loads(record)["device_name"],
-                "public_key": json.loads(record)["public_key"],
-                "created_at": json.loads(record)["created_at"],
-            }
-        )
+        return self._serialize_identity(record)
 
     async def create_session(
         self,
@@ -579,7 +566,7 @@ class RedisStore:
     async def list_messages(
         self, channel_id: str, *, before: Optional[int], limit: int
     ) -> tuple[list[dict[str, Any]], Optional[int]]:
-        maximum = f"({before - 1}" if before is not None else "+inf"
+        maximum = before - 1 if before is not None else 0
         entries: Iterable[tuple[str, float]] = await self.redis.zrevrange(
             self._channel_messages_key(channel_id),
             maximum,
