@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Talk, une messagerie de salons chiffrée de bout en bout dans le navigateur."
+    />
+    <title>Talk — messagerie chiffrée</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/js/app.js"></script>
+  </head>
+  <body>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+
+    <main id="auth-view" class="auth-view">
+      <section class="auth-story" aria-labelledby="brand-title">
+        <div class="brand brand-large">
+          <span class="brand-mark" aria-hidden="true">T</span>
+          <span>Talk</span>
+        </div>
+        <p class="eyebrow">Messagerie privée, simplement.</p>
+        <h1 id="brand-title">Vos conversations.<br />Vos clés.</h1>
+        <p class="auth-lead">
+          Le chiffrement s’exécute dans votre navigateur. Talk ne reçoit jamais vos messages
+          en clair, ni vos clés privées.
+        </p>
+        <ul class="security-points">
+          <li><span aria-hidden="true">01</span> AES-GCM pour chaque message</li>
+          <li><span aria-hidden="true">02</span> Clés privées non exportables</li>
+          <li><span aria-hidden="true">03</span> Sessions et requêtes protégées</li>
+        </ul>
+      </section>
+
+      <section class="auth-card" aria-label="Authentification">
+        <div class="auth-tabs" role="tablist" aria-label="Connexion ou inscription">
+          <button
+            id="login-tab"
+            class="auth-tab is-active"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="login-form"
+          >
+            Connexion
+          </button>
+          <button
+            id="register-tab"
+            class="auth-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="register-form"
+          >
+            Inscription
+          </button>
+        </div>
+
+        <form id="login-form" class="auth-form" novalidate>
+          <div class="form-heading">
+            <h2>Heureux de vous revoir</h2>
+            <p>Retrouvez vos salons et vos clés sur cet appareil.</p>
+          </div>
+          <label class="field">
+            <span>Nom d’utilisateur</span>
+            <input
+              name="username"
+              type="text"
+              autocomplete="username"
+              minlength="3"
+              maxlength="32"
+              pattern="[a-zA-Z0-9._-]+"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>Mot de passe</span>
+            <span class="password-field">
+              <input
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                maxlength="128"
+                required
+              />
+              <button class="password-toggle" type="button" aria-label="Afficher le mot de passe">
+                Afficher
+              </button>
+            </span>
+          </label>
+          <p class="form-error" role="alert"></p>
+          <button class="primary-button" type="submit">Ouvrir ma session</button>
+        </form>
+
+        <form id="register-form" class="auth-form" novalidate hidden>
+          <div class="form-heading">
+            <h2>Créer votre espace</h2>
+            <p>Une clé d’identité sera créée et conservée uniquement sur cet appareil.</p>
+          </div>
+          <label class="field">
+            <span>Nom d’utilisateur</span>
+            <input
+              name="username"
+              type="text"
+              autocomplete="username"
+              minlength="3"
+              maxlength="32"
+              pattern="[a-zA-Z0-9._-]+"
+              required
+            />
+            <small>3 à 32 caractères : lettres, chiffres, point, tiret et underscore.</small>
+          </label>
+          <label class="field">
+            <span>Nom affiché</span>
+            <input
+              name="display_name"
+              type="text"
+              autocomplete="name"
+              minlength="1"
+              maxlength="32"
+              required
+            />
+          </label>
+          <label class="field">
+            <span>Mot de passe</span>
+            <span class="password-field">
+              <input
+                name="password"
+                type="password"
+                autocomplete="new-password"
+                minlength="12"
+                maxlength="128"
+                required
+              />
+              <button class="password-toggle" type="button" aria-label="Afficher le mot de passe">
+                Afficher
+              </button>
+            </span>
+            <small>12 caractères minimum. Une phrase de passe est recommandée.</small>
+          </label>
+          <p class="form-error" role="alert"></p>
+          <button class="primary-button" type="submit">Créer mon compte</button>
+        </form>
+      </section>
+    </main>
+
+    <main id="app-view" class="app-shell" hidden>
+      <aside class="workspace-sidebar">
+        <div class="brand brand-compact">
+          <span class="brand-mark" aria-hidden="true">T</span>
+          <span>Talk</span>
+        </div>
+        <div class="profile-card">
+          <span id="user-avatar" class="avatar" aria-hidden="true"></span>
+          <span class="profile-copy">
+            <strong id="user-display-name"></strong>
+            <small id="user-username"></small>
+          </span>
+          <button id="logout-button" class="icon-button" type="button" title="Se déconnecter">
+            ↪
+          </button>
+        </div>
+        <div class="sidebar-heading">
+          <span>Salons</span>
+          <button id="new-room-button" class="icon-button" type="button" title="Créer un salon">
+            +
+          </button>
+        </div>
+        <nav id="room-list" class="room-list" aria-label="Mes salons"></nav>
+        <div class="sidebar-footer">
+          <span class="security-badge"><i aria-hidden="true"></i> Chiffrement actif</span>
+          <button id="security-info-button" class="text-button" type="button">
+            Comment ça marche ?
+          </button>
+        </div>
+      </aside>
+
+      <nav class="channel-sidebar" aria-label="Salons et canaux">
+        <div id="channel-heading" class="channel-heading">
+          <p class="eyebrow">Salon sélectionné</p>
+          <h2 id="active-room-name">Aucun salon</h2>
+        </div>
+        <div class="channel-heading-row">
+          <span>Canaux</span>
+          <button
+            id="new-channel-button"
+            class="icon-button"
+            type="button"
+            title="Créer un canal"
+            disabled
+          >
+            +
+          </button>
+        </div>
+        <nav id="channel-list" class="channel-list"></nav>
+        <div id="room-actions" class="room-actions" hidden>
+          <button id="invite-button" class="secondary-button" type="button">Inviter</button>
+          <button id="share-keys-button" class="secondary-button" type="button">
+            Partager la clé
+          </button>
+          <button id="rotate-keys-button" class="secondary-button" type="button">
+            Renouveler la clé
+          </button>
+        </div>
+      </nav>
+
+      <section class="chat-panel" aria-label="Conversation">
+        <header class="chat-header">
+          <div>
+            <p id="active-channel-label" class="eyebrow">Canal</p>
+            <h1 id="active-channel-name">Bienvenue sur Talk</h1>
+          </div>
+          <div class="connection-state" id="connection-state">
+            <i aria-hidden="true"></i>
+            <span>Connexion…</span>
+          </div>
+        </header>
+
+        <div id="empty-chat" class="empty-chat">
+          <span class="empty-icon" aria-hidden="true">#</span>
+          <h2>Choisissez une conversation</h2>
+          <p>Créez un salon ou sélectionnez un canal pour commencer.</p>
+        </div>
+
+        <div id="conversation" class="conversation" hidden>
+          <div id="crypto-warning" class="crypto-warning" hidden>
+            La clé de ce salon n’est pas disponible sur cet appareil. Les nouveaux messages ne
+            peuvent pas être lus.
+          </div>
+          <ol id="message-list" class="message-list" aria-live="polite"></ol>
+          <button id="load-more-button" class="load-more" type="button" hidden>
+            Charger les messages précédents
+          </button>
+          <form id="message-form" class="composer">
+            <label class="sr-only" for="message-input">Votre message</label>
+            <textarea
+              id="message-input"
+              name="message"
+              rows="1"
+              maxlength="4000"
+              placeholder="Écrivez votre message…"
+              required
+              disabled
+            ></textarea>
+            <button id="send-button" class="send-button" type="submit" disabled>
+              Envoyer
+            </button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="room-dialog" class="modal">
+      <form id="room-form" class="modal-form">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">Nouveau salon</p>
+            <h2>Créer un espace privé</h2>
+          </div>
+          <button class="dialog-close" type="button" aria-label="Fermer">×</button>
+        </div>
+        <label class="field">
+          <span>Nom du salon</span>
+          <input name="name" type="text" minlength="1" maxlength="48" required />
+        </label>
+        <label class="field">
+          <span>Premier canal</span>
+          <input name="channel_name" type="text" value="général" minlength="1" maxlength="32" required />
+        </label>
+        <label class="field">
+          <span>Inviter des utilisateurs</span>
+          <input name="invites" type="text" placeholder="alice, bob" autocomplete="off" />
+          <small>Sépare les noms d’utilisateur par des virgules. Tu peux aussi le faire plus tard.</small>
+        </label>
+        <p class="form-error" role="alert"></p>
+        <button class="primary-button" type="submit">Créer et chiffrer</button>
+      </form>
+    </dialog>
+
+    <dialog id="channel-dialog" class="modal">
+      <form id="channel-form" class="modal-form">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">Nouveau canal</p>
+            <h2>Ouvrir un autre sujet</h2>
+          </div>
+          <button class="dialog-close" type="button" aria-label="Fermer">×</button>
+        </div>
+        <label class="field">
+          <span>Nom du canal</span>
+          <input name="name" type="text" minlength="1" maxlength="32" required />
+        </label>
+        <p class="form-error" role="alert"></p>
+        <button class="primary-button" type="submit">Créer le canal</button>
+      </form>
+    </dialog>
+
+    <dialog id="member-dialog" class="modal">
+      <form id="member-form" class="modal-form">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">Membre</p>
+            <h2>Partager la clé du salon</h2>
+          </div>
+          <button class="dialog-close" type="button" aria-label="Fermer">×</button>
+        </div>
+        <label class="field">
+          <span>Nom d’utilisateur</span>
+          <input name="username" type="text" minlength="3" maxlength="32" required />
+        </label>
+        <p class="form-error" role="alert"></p>
+        <button class="primary-button" type="submit">Inviter avec la clé</button>
+      </form>
+    </dialog>
+
+    <dialog id="security-dialog" class="modal">
+      <section class="modal-form security-modal">
+        <div class="modal-heading">
+          <div>
+            <p class="eyebrow">Transparence</p>
+            <h2>Ce que le serveur peut voir</h2>
+          </div>
+          <button class="dialog-close" type="button" aria-label="Fermer">×</button>
+        </div>
+        <dl class="security-list">
+          <div>
+            <dt>Visible</dt>
+            <dd>Comptes, salons, canaux, participants, horodatages et enveloppes chiffrées.</dd>
+          </div>
+          <div>
+            <dt>Jamais visible en clair</dt>
+            <dd>Messages, clés de salon et clés privées RSA.</dd>
+          </div>
+          <div>
+            <dt>Dans ton navigateur</dt>
+            <dd>La clé privée RSA est non exportable et reste dans IndexedDB.</dd>
+          </div>
+        </dl>
+        <p class="security-note">
+          Effacer les données du navigateur ou utiliser un nouvel appareil nécessite de partager à
+          nouveau la clé du salon depuis un appareil autorisé.
+        </p>
+        <button class="primary-button dialog-done" type="button">J’ai compris</button>
+      </section>
+    </dialog>
+  </body>
+</html>

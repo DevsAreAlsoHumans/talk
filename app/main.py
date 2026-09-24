@@ -166,14 +166,23 @@ def create_app(
 
     frontend_directory = Path(app_settings.frontend_directory)
     assets_directory = frontend_directory / "assets"
+    scripts_directory = frontend_directory / "js"
     if assets_directory.is_dir():
         application.mount(
             "/assets", StaticFiles(directory=str(assets_directory)), name="assets"
+        )
+    if scripts_directory.is_dir():
+        application.mount(
+            "/js", StaticFiles(directory=str(scripts_directory)), name="scripts"
         )
 
     @application.get("/", include_in_schema=False)
     async def frontend() -> FileResponse:
         return FileResponse(str(frontend_directory / "index.html"))
+
+    @application.get("/styles.css", include_in_schema=False)
+    async def stylesheet() -> FileResponse:
+        return FileResponse(str(frontend_directory / "assets" / "styles.css"))
 
     return application
 
