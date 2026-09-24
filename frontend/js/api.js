@@ -85,6 +85,10 @@ export async function apiFetch(path, options = {}, retryCsrf = true) {
     return payload;
   }
 
+  if (response.status === 401 && path !== "/api/auth/login") {
+    globalThis.dispatchEvent(new CustomEvent("talk:unauthorized"));
+  }
+
   if (mutating && retryCsrf && response.status === 403) {
     csrfToken = null;
     await refreshCsrf();

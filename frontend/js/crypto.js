@@ -2,6 +2,7 @@ const DATABASE_NAME = "talk-e2ee";
 const DATABASE_VERSION = 1;
 const IDENTITY_STORE = "identity";
 const RSA_ALGORITHM = { name: "RSA-OAEP", hash: "SHA-256" };
+const identityPromises = new Map();
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -35,8 +36,12 @@ function openDatabase() {
         database.createObjectStore(IDENTITY_STORE, { keyPath: "id" });
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error || new Error("IndexedDB indisponible"));
+    request.onblocked = () => reject(new Error("IndexedDB est bloquée par un autre onglet"));
   });
 }
 
@@ -44,19 +49,35 @@ function runStoreRequest(mode, operation) {
   return openDatabase().then(
     (database) =>
       new Promise((resolve, reject) => {
-        const transaction = database.transaction(IDENTITY_STORE, mode);
-        const store = transaction.objectStore(IDENTITY_STORE);
-        const request = operation(store);
-        let result;
-        request.onsuccess = () => {
-          result = request.result;
-        };
-        request.onerror = () => reject(request.error || new Error("Échec IndexedDB"));
-        transaction.oncomplete = () => {
+        let transaction;
+        try {
+          transaction = database.transaction(IDENTITY_STORE, mode);
+          const store = transaction.objectStore(IDENTITY_STORE);
+          const request = operation(store);
+          let result;
+          request.onsuccess = () => {
+            result = request.result;
+          };
+          request.onerror = () => {
+            database.close();
+            reject(request.error || new Error("Échec IndexedDB"));
+          };
+          transaction.oncomplete = () => {
+            database.close();
+            resolve(result);
+          };
+          transaction.onabort = () => {
+            database.close();
+            reject(transaction.error || new Error("Transaction IndexedDB annulée"));
+          };
+          transaction.onerror = () => {
+            database.close();
+            reject(transaction.error || new Error("Échec IndexedDB"));
+          };
+        } catch (error) {
           database.close();
-          resolve(result);
-        };
-        transaction.onerror = () => reject(transaction.error || new Error("Échec IndexedDB"));
+          reject(error);
+        }
       }),
   );
 }
@@ -79,28 +100,49 @@ async function generateIdentityKeyPair() {
   return { keyPair, publicJwk };
 }
 
-export async function loadOrCreateIdentity(accountId, deviceName) {
+async function getOrCreateIdentityRecord(accountId, deviceName) {
   const recordId = `account:${accountId}`;
   let record = await runStoreRequest("readonly", (store) => store.get(recordId));
-  if (!record) {
-    const generated = await generateIdentityKeyPair();
-    const keyId = crypto.randomUUID();
-    const publicJwk = { ...generated.publicJwk, kid: keyId };
-    record = {
-      id: recordId,
-      keyId,
-      keyPair: generated.keyPair,
-      publicJwk,
-      deviceName,
-    };
-    await runStoreRequest("readwrite", (store) => store.put(record));
+  if (record) {
+    return record;
   }
-  return {
-    keyId: record.keyId,
-    privateKey: record.keyPair.privateKey,
-    publicJwk: record.publicJwk,
-    deviceName: record.deviceName || deviceName,
+
+  const generated = await generateIdentityKeyPair();
+  const keyId = crypto.randomUUID();
+  record = {
+    id: recordId,
+    keyId,
+    keyPair: generated.keyPair,
+    publicJwk: { ...generated.publicJwk, kid: keyId },
+    deviceName,
   };
+  try {
+    await runStoreRequest("readwrite", (store) => store.add(record));
+  } catch (error) {
+    if (error?.name !== "ConstraintError") {
+      throw error;
+    }
+    record = await runStoreRequest("readonly", (store) => store.get(recordId));
+  }
+  return record;
+}
+
+export function loadOrCreateIdentity(accountId, deviceName) {
+  if (identityPromises.has(accountId)) {
+    return identityPromises.get(accountId);
+  }
+  const promise = getOrCreateIdentityRecord(accountId, deviceName)
+    .then((record) => ({
+      keyId: record.keyId,
+      privateKey: record.keyPair.privateKey,
+      publicJwk: record.publicJwk,
+      deviceName: record.deviceName || deviceName,
+    }))
+    .finally(() => {
+      identityPromises.delete(accountId);
+    });
+  identityPromises.set(accountId, promise);
+  return promise;
 }
 
 export function identityPayload(identity) {
