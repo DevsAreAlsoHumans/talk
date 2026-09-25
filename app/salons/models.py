@@ -8,6 +8,18 @@ class SalonCreate(BaseModel):
     encrypted_salon_key: str = Field(..., min_length=1, max_length=4096)
 
 
+class DirectCreate(BaseModel):
+    """Conversation privée à deux.
+
+    Le créateur chiffre la même clé AES deux fois : une fois avec sa propre
+    clé publique, une fois avec celle du destinataire.
+    """
+
+    username: str = Field(..., min_length=3, max_length=30)
+    encrypted_salon_key_self: str = Field(..., min_length=1, max_length=4096)
+    encrypted_salon_key_other: str = Field(..., min_length=1, max_length=4096)
+
+
 class MemberAdd(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=64)
     encrypted_salon_key: str = Field(..., min_length=1, max_length=4096)
@@ -42,6 +54,8 @@ class MemberResponse(BaseModel):
     user_id: str
     username: str
     encrypted_salon_key: str
+    # Empreinte de la clé publique du membre, à comparer de vive voix.
+    fingerprint: str | None = None
 
 
 class SalonResponse(BaseModel):
@@ -51,4 +65,5 @@ class SalonResponse(BaseModel):
     members: list[MemberResponse]
     channels: list[ChannelResponse]
     key_version: int = 1
+    is_direct: bool = False
     created_at: datetime

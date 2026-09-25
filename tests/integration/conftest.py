@@ -85,7 +85,8 @@ async def second_user(csrf_client):
         "username": "bob",
         "email": "bob@example.com",
         "password": "StrongP@ss1",
-        "public_key": "bob_key",
+        # PEM valide : sans quoi l'empreinte ne peut pas être calculée.
+        "public_key": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ9A\n-----END PUBLIC KEY-----",
     }
     await csrf_client.post("/auth/signup", json=payload)
     response = await csrf_client.post(

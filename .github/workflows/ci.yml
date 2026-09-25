@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - run: python -m pytest tests/ -v --tb=short
+      - run: python -m pytest tests/ -v --tb=short --cov=app --cov-report=term --cov-report=xml
         env:
           MONGODB_URL: mongodb://localhost:27017
           MONGODB_DB: ronyme_test

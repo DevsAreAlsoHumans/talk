@@ -12,6 +12,7 @@ from app.auth.service import (
     verify_password,
 )
 from app.config import settings
+from app.crypto.service import key_fingerprint
 from app.db import get_db
 from app.ratelimit import enforce
 
@@ -61,6 +62,7 @@ async def signup(data: UserCreate, request: Request):
         username=user_doc["username"],
         email=user_doc["email"],
         public_key=user_doc["public_key"],
+        fingerprint=key_fingerprint(user_doc["public_key"]),
         created_at=user_doc["created_at"],
     )
 
@@ -115,6 +117,7 @@ async def me(user: dict = Depends(get_current_user)):
         username=user["username"],
         email=user["email"],
         public_key=user["public_key"],
+        fingerprint=key_fingerprint(user["public_key"]),
         created_at=user["created_at"],
     )
 
@@ -125,7 +128,12 @@ async def get_public_key(username: str, _user: dict = Depends(get_current_user))
     target = await db.users.find_one({"username": username}, {"public_key": 1, "username": 1})
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return {"id": str(target["_id"]), "username": target["username"], "public_key": target["public_key"]}
+    return {
+        "id": str(target["_id"]),
+        "username": target["username"],
+        "public_key": target["public_key"],
+        "fingerprint": key_fingerprint(target["public_key"]),
+    }
 
 
 @router.delete("/me", status_code=status.HTTP_200_OK)

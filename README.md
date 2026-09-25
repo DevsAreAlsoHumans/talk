@@ -16,6 +16,7 @@ Projet d'examen `SDV DEV 2026` — branche `etudiant/Liuaga-Avazeri`
 ## Sommaire
 
 - [Le principe](#le-principe)
+- [Fonctionnalités](#fonctionnalités)
 - [Stack technique](#stack-technique)
 - [Démarrage](#démarrage)
 - [Architecture](#architecture)
@@ -58,6 +59,24 @@ message clair
 
 ---
 
+## Fonctionnalités
+
+| | |
+|---|---|
+| **Salons et canaux** | Groupes multi-utilisateurs avec canaux thématiques, à la Discord |
+| **Conversations privées** | Fil à deux, chiffré de la même façon ; réouvrir n'en crée pas un second |
+| **Temps réel** | WebSocket typé : messages, présence, frappe en cours, reconnexion automatique |
+| **Présence** | Nombre de personnes connectées ; deux onglets ne comptent qu'une fois |
+| **Frappe en cours** | « Alice est en train d'écrire… », signalée au plus une fois toutes les 2 s |
+| **Édition** | Modifier son message : le client rechiffre, le serveur remplace l'enveloppe |
+| **Suppression** | Le texte chiffré est **réellement effacé** de la base, pas seulement masqué |
+| **Numéros de sécurité** | Empreinte de clé à comparer de vive voix, contre l'attaque de l'intercepteur |
+| **Export de clé** | Sauvegarde chiffrée de la clé privée, pour se connecter depuis un autre appareil |
+| **Historique paginé** | Curseur sur `_id` : performant quel que soit le volume |
+| **Droit à l'effacement** | Suppression du compte et de toutes les données associées |
+
+---
+
 ## Stack technique
 
 | Couche | Technologie | Pourquoi |
@@ -68,7 +87,7 @@ message clair
 | Chiffrement | WebCrypto API (RSA-2048 + AES-256-GCM) | Implémentation native du navigateur, auditée |
 | Temps réel | WebSocket natif FastAPI | Diffusion instantanée, reconnexion automatique |
 | Authentification | JWT + Argon2id | Argon2id recommandé par l'ANSSI |
-| Tests | pytest + pytest-asyncio | 153 tests unitaires et d'intégration |
+| Tests | pytest + pytest-asyncio + pytest-cov | 226 tests, couverture 93 % (seuil bloquant à 90 %) |
 | Linter | ruff | Lint + format en un seul outil |
 | CI | GitHub Actions | Lint, tests et build Docker à chaque push |
 | Conteneurisation | Docker + docker-compose | `docker compose up` et c'est parti |
@@ -115,7 +134,7 @@ app/                      Backend FastAPI
 ├── auth/                 Inscription, connexion, JWT, suppression de compte
 ├── salons/               Salons, membres, canaux, rotation des clés
 ├── messages/             Messages chiffrés, pagination, WebSocket
-└── crypto/               Validation des clés publiques
+└── crypto/               Validation des clés publiques et empreintes
 
 frontend/                 Interface web, sans framework ni dépendance
 ├── index.html            Page d'accueil publique (un seul CTA)
@@ -161,6 +180,29 @@ tests/
 5. **Retrait d'un membre** — la clé du salon est régénérée et redistribuée aux
    membres restants ; le compteur `key_version` est incrémenté. L'ancien membre
    ne peut plus déchiffrer les messages postés après son départ.
+
+### Ce que le chiffrement de bout en bout ne protège pas
+
+Le chiffrement seul ne suffit pas, et il faut le dire clairement : **c'est le
+serveur qui distribue les clés publiques.** Un serveur malveillant pourrait
+remettre la sienne à la place de celle de votre correspondant, déchiffrer vos
+messages, les rechiffrer et les transmettre sans que rien ne paraisse. C'est
+l'attaque de l'intercepteur, et aucune quantité de chiffrement ne la détecte.
+
+La parade ne peut pas être purement technique, puisqu'il faudrait faire
+confiance à la partie dont on se méfie. Ronyme reprend donc le procédé des
+« numéros de sécurité » de Signal : chaque clé publique produit une empreinte
+de 12 groupes de 5 chiffres, dérivée de son SHA-256.
+
+```
+56487 63172 50218 11262 18478 46346 09250 59195 09962 64734 20115 00041
+```
+
+Deux personnes comparent leur empreinte **par un canal indépendant** — de vive
+voix, au téléphone, en personne. Si elles correspondent, aucune clé n'a été
+substituée. L'empreinte est recalculée dans le navigateur à partir de la clé
+réellement utilisée : s'en remettre à celle annoncée par le serveur n'aurait
+aucun sens.
 
 ### Protection CSRF : deux défenses indépendantes
 
@@ -307,6 +349,7 @@ sont vérifiés :
 | Méthode | Endpoint | Description |
 |---------|----------|-------------|
 | `POST` | `/salons` | Créer un salon (canal `général` créé automatiquement) |
+| `POST` | `/salons/direct` | Ouvrir une conversation privée (idempotent) |
 | `GET` | `/salons` | Lister mes salons |
 | `GET` | `/salons/{id}` | Détail d'un salon |
 | `POST` | `/salons/{id}/members` | Ajouter un membre |
@@ -320,7 +363,9 @@ sont vérifiés :
 |---------|----------|-------------|
 | `GET` | `/salons/{id}/messages` | Historique paginé (`limit`, `before`, `channel_id`) |
 | `POST` | `/salons/{id}/messages` | Envoyer un message (limité à 30/min) |
-| `WS` | `/ws/{salon_id}?token=JWT` | Flux temps réel |
+| `PATCH` | `/salons/{id}/messages/{msg_id}` | Modifier son message (rechiffré) |
+| `DELETE` | `/salons/{id}/messages/{msg_id}` | Supprimer son message (chiffré effacé) |
+| `WS` | `/ws/{salon_id}?token=JWT` | Flux temps réel typé |
 
 La pagination fonctionne par curseur sur l'`_id` MongoDB, ce qui reste performant
 quel que soit le volume — contrairement à un `skip` classique :
@@ -373,6 +418,9 @@ Toutes les valeurs se règlent par variables d'environnement.
 # Suite complète
 python -m pytest tests/ -v
 
+# Avec rapport de couverture (échoue sous 90 %)
+python -m pytest tests/ --cov=app --cov-report=term
+
 # Tests unitaires seuls (aucune base requise)
 python -m pytest tests/unit -v
 
@@ -381,7 +429,7 @@ ruff check app/ tests/
 ruff format --check app/ tests/
 ```
 
-**153 tests** répartis ainsi :
+**226 tests** répartis ainsi :
 
 | Fichier | Couvre |
 |---------|--------|
@@ -397,6 +445,10 @@ ruff format --check app/ tests/
 | `integration/test_antispam.py` | Champ-piège, plafonds de débit |
 | `integration/test_analytics.py` | Anonymat, respect de DNT et GPC |
 | `integration/test_security.py` | CSRF, vérification d'origine, injections, jetons expirés |
+| `integration/test_message_edit_flow.py` | Édition, suppression, effacement réel du chiffré |
+| `integration/test_direct_flow.py` | Conversations privées, idempotence, empreintes |
+| `integration/test_websocket_flow.py` | Handshake, présence, frappe, refus d'accès |
+| `unit/test_ws_manager.py` | Diffusion, dédoublonnage des onglets, sockets mortes |
 | `integration/test_pages.py` | Pages statiques, liens, 404, en-têtes, absence d'inline |
 
 ---
@@ -406,7 +458,8 @@ ruff format --check app/ tests/
 Le pipeline GitHub Actions exécute trois tâches à chaque `push` et chaque *pull request* :
 
 1. **lint** — `ruff check` et `ruff format --check` ;
-2. **test** — la suite complète, avec un service MongoDB 7 ;
+2. **test** — la suite complète avec un service MongoDB 7, et le rapport de
+   couverture ; le pipeline échoue si elle passe sous 90 % ;
 3. **docker** — construction de l'image.
 
 ---
@@ -415,11 +468,15 @@ Le pipeline GitHub Actions exécute trois tâches à chaque `push` et chaque *pu
 
 Ce projet est pédagogique ; ces limites sont assumées et documentées.
 
-- **La clé privée ne suit pas l'utilisateur.** Elle vit dans le `localStorage`
-  d'un navigateur. Se connecter depuis un autre appareil suppose de la transporter
-  manuellement. Une vraie application proposerait un export chiffré.
+- **La clé privée reste liée au navigateur.** Elle vit dans le `localStorage`.
+  L'export chiffré permet de la transporter d'un appareil à l'autre, mais il
+  reste manuel : il n'y a pas de synchronisation automatique.
 - **Pas de confidentialité persistante par message.** La clé de salon tourne au
   départ d'un membre, mais pas à chaque message comme le ferait le protocole Signal.
+  Quelqu'un qui obtiendrait la clé d'un salon pourrait relire tout son historique.
+- **La vérification d'empreinte repose sur l'utilisateur.** Le dispositif
+  n'a d'effet que si les correspondants la comparent réellement ; rien ne les y
+  oblige, et rien ne signale automatiquement un changement de clé.
 - **Les métadonnées restent visibles.** Le serveur ignore le contenu, mais sait qui
   écrit, quand, et dans quel salon.
 - **La limitation de débit est en mémoire.** Elle suffit pour une instance unique ;

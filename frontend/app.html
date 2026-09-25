@@ -200,6 +200,18 @@
             </div>
             <ul class="salon-list" id="salon-list"></ul>
 
+            <div class="sidebar-section">
+                <h2 class="sidebar-title">
+                    Messages privés
+                    <button type="button" class="btn btn-ghost btn-icon" id="create-direct-btn" aria-label="Nouvelle conversation privée">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                            <path d="M12 5v14M5 12h14"/>
+                        </svg>
+                    </button>
+                </h2>
+            </div>
+            <ul class="salon-list direct-list" id="direct-list"></ul>
+
             <div class="sidebar-section is-hidden" id="channel-section">
                 <h2 class="sidebar-title">
                     Canaux
@@ -215,6 +227,12 @@
             <div class="sidebar-footer">
                 <span class="avatar" id="user-avatar" aria-hidden="true"></span>
                 <span class="user-name" id="current-user"></span>
+                <button type="button" class="btn btn-ghost btn-icon" id="security-btn" aria-label="Sécurité et clés">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                        <path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4Z"/>
+                        <path d="m9 12 2 2 4-4"/>
+                    </svg>
+                </button>
                 <button type="button" class="btn btn-ghost btn-icon" id="logout-btn" aria-label="Se déconnecter">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
@@ -234,6 +252,8 @@
 
                 <h1 id="chat-title">Aucun salon sélectionné</h1>
 
+                <span class="presence is-hidden" id="presence" title="Membres connectés"></span>
+
                 <span class="ws-status" id="ws-status" data-state="offline">Hors ligne</span>
 
                 <button type="button" class="btn btn-secondary is-hidden" id="members-btn">
@@ -251,6 +271,15 @@
                 </div>
             </div>
 
+            <p class="typing-indicator" id="typing-indicator" aria-live="polite"></p>
+
+            <div class="edit-banner is-hidden" id="edit-banner">
+                <span>Modification du message</span>
+                <button type="button" class="btn btn-ghost" id="cancel-edit-btn">
+                    <span class="btn-label">Annuler</span>
+                </button>
+            </div>
+
             <form class="composer is-hidden" id="composer">
                 <label class="visually-hidden" for="message-input">Votre message</label>
                 <input type="text" id="message-input" placeholder="Écrivez un message chiffré…"
@@ -260,6 +289,21 @@
                 </button>
             </form>
         </main>
+    </div>
+
+    <!-- ===================== Panneau lateral ===================== -->
+    <div class="modal-overlay is-hidden" id="panel-overlay">
+        <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="panel-title">
+            <div class="panel-head">
+                <h2 id="panel-title"></h2>
+                <button type="button" class="btn btn-ghost btn-icon" id="panel-close" aria-label="Fermer">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                        <path d="m6 6 12 12M18 6 6 18"/>
+                    </svg>
+                </button>
+            </div>
+            <div id="panel-body"></div>
+        </div>
     </div>
 
     <!-- ===================== Boîte de dialogue ===================== -->

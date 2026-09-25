@@ -31,6 +31,9 @@ class UserResponse(BaseModel):
     username: str
     email: str
     public_key: str
+    # Empreinte calculée par le serveur : commodité d'affichage seulement.
+    # Le client recalcule la sienne, puisque c'est du serveur qu'on se méfie.
+    fingerprint: str | None = None
     created_at: datetime
 
 

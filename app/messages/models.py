@@ -12,6 +12,17 @@ class MessageCreate(BaseModel):
     channel_id: str | None = Field(default=None, max_length=64)
 
 
+class MessageEdit(BaseModel):
+    """Édition : le client rechiffre le nouveau texte avec un IV neuf.
+
+    Le serveur ne peut pas « modifier » un message puisqu'il ne le lit pas ;
+    il remplace simplement l'enveloppe chiffrée.
+    """
+
+    ciphertext: str = Field(..., min_length=1, max_length=MAX_CIPHERTEXT)
+    iv: str = Field(..., min_length=1, max_length=64)
+
+
 class MessageResponse(BaseModel):
     id: str
     salon_id: str
@@ -21,6 +32,8 @@ class MessageResponse(BaseModel):
     ciphertext: str
     iv: str
     created_at: datetime
+    edited_at: datetime | None = None
+    deleted: bool = False
 
 
 class MessagePage(BaseModel):

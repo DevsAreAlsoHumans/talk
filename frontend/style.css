@@ -1074,3 +1074,212 @@ svg { max-width: 100%; height: auto; display: block; }
         --border-strong: #94a3b8;
     }
 }
+
+/* ==========================================================================
+   Présence, frappe en cours, actions sur les messages, empreintes
+   ========================================================================== */
+
+/* Nombre de membres connectés — texte + icône, jamais la couleur seule */
+.presence {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-1);
+    padding: var(--s-1) var(--s-3);
+    background: var(--surface-2);
+    border-radius: var(--r-full);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.presence::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    border-radius: 50%;
+    background: var(--success);
+}
+
+.typing-indicator {
+    margin: 0;
+    padding: 0 var(--s-4) var(--s-2);
+    min-height: 1.3em;
+    color: var(--text-subtle);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
+.typing-indicator:empty { padding-bottom: 0; min-height: 0; }
+
+/* Bandeau d'édition au-dessus du composeur */
+.edit-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-3);
+    padding: var(--s-2) var(--s-4);
+    background: rgba(37, 99, 235, 0.14);
+    border-top: 1px solid var(--border);
+    color: var(--primary-text);
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+/* ---------- Actions sur un message ---------- */
+
+.message { position: relative; }
+
+.message-actions {
+    position: absolute;
+    top: -10px;
+    right: 0;
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--surface-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-sm);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur) var(--ease);
+}
+
+/* Révélées au survol, mais aussi au focus clavier : une action accessible
+   uniquement à la souris n'est pas accessible. */
+.message:hover .message-actions,
+.message:focus-within .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.message-actions button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: var(--r-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.message-actions button:hover { background: var(--surface-2); color: var(--text); }
+.message-actions button[data-action="delete"]:hover { color: var(--danger); }
+.message-actions svg { width: 16px; height: 16px; }
+
+.edited-mark {
+    margin-left: var(--s-1);
+    color: var(--text-subtle);
+    font-size: 0.72rem;
+    font-style: italic;
+}
+
+.message[data-deleted="true"] .message-body {
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--text-subtle);
+    font-style: italic;
+}
+
+/* ---------- Conversations privées ---------- */
+
+.direct-list button::before {
+    content: "@";
+    color: var(--text-subtle);
+    font-weight: 700;
+}
+
+/* ---------- Panneau (sécurité, membres) ---------- */
+
+.modal-wide { max-width: 560px; }
+
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-3);
+    margin-bottom: var(--s-4);
+}
+
+.panel-head h2 { margin: 0; font-size: 1.15rem; }
+
+.panel-section { margin-bottom: var(--s-6); }
+.panel-section:last-child { margin-bottom: 0; }
+
+.panel-section h3 {
+    font-size: 0.95rem;
+    margin-bottom: var(--s-2);
+}
+
+.panel-section p {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-bottom: var(--s-3);
+}
+
+/* Empreinte : chiffres en chasse fixe, groupés pour la lecture à voix haute */
+.fingerprint {
+    display: block;
+    padding: var(--s-3) var(--s-4);
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    line-height: 1.8;
+    letter-spacing: 0.08em;
+    word-spacing: 0.5em;
+    overflow-wrap: break-word;
+    user-select: all;
+}
+
+.fingerprint[data-mismatch="true"] {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.member-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--s-3);
+    padding: var(--s-3) 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.member-row:last-child { border-bottom: 0; }
+.member-row .avatar { margin-top: 2px; }
+.member-info { flex: 1; min-width: 0; }
+.member-info strong { display: block; font-size: 0.95rem; }
+
+.member-info .fingerprint {
+    margin-top: var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    font-size: 0.8rem;
+    line-height: 1.6;
+}
+
+.badge-owner {
+    display: inline-block;
+    margin-left: var(--s-2);
+    padding: 1px var(--s-2);
+    background: var(--surface-3);
+    border-radius: var(--r-full);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.panel-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.panel-actions .btn { flex: 1 1 auto; min-width: 150px; }
+
+.file-input { display: none; }

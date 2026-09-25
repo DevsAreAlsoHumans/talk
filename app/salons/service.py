@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from bson import ObjectId
 
+from app.crypto.service import key_fingerprint
 from app.db import get_db
 
 DEFAULT_CHANNEL_NAME = "général"
@@ -26,10 +27,63 @@ async def create_salon(name: str, owner_id: str, encrypted_salon_key: str) -> di
                 "user_id": ObjectId(owner_id),
                 "username": owner["username"],
                 "encrypted_salon_key": encrypted_salon_key,
+                "fingerprint": key_fingerprint(owner.get("public_key")),
             }
         ],
         "channels": [_new_channel(DEFAULT_CHANNEL_NAME)],
         "key_version": 1,
+        "is_direct": False,
+        "created_at": datetime.now(timezone.utc),
+    }
+    result = await db.salons.insert_one(salon_doc)
+    salon_doc["_id"] = result.inserted_id
+    return salon_doc
+
+
+async def find_direct(user_a: str, user_b: str) -> dict | None:
+    """Conversation privée existante entre deux personnes, s'il y en a une."""
+    db = get_db()
+    return await db.salons.find_one(
+        {
+            "is_direct": True,
+            "members.user_id": {"$all": [ObjectId(user_a), ObjectId(user_b)]},
+        }
+    )
+
+
+async def create_direct(
+    creator: dict,
+    target: dict,
+    key_for_creator: str,
+    key_for_target: str,
+) -> dict:
+    """Crée une conversation à deux.
+
+    C'est un salon comme un autre, marqué `is_direct` : le modèle de
+    chiffrement et de diffusion reste donc strictement le même.
+    """
+    db = get_db()
+    salon_doc = {
+        # Le nom affiché est calculé côté client selon qui regarde.
+        "name": f"{creator['username']} ↔ {target['username']}",
+        "owner_id": creator["_id"],
+        "members": [
+            {
+                "user_id": creator["_id"],
+                "username": creator["username"],
+                "encrypted_salon_key": key_for_creator,
+                "fingerprint": key_fingerprint(creator.get("public_key")),
+            },
+            {
+                "user_id": target["_id"],
+                "username": target["username"],
+                "encrypted_salon_key": key_for_target,
+                "fingerprint": key_fingerprint(target.get("public_key")),
+            },
+        ],
+        "channels": [_new_channel(DEFAULT_CHANNEL_NAME)],
+        "key_version": 1,
+        "is_direct": True,
         "created_at": datetime.now(timezone.utc),
     }
     result = await db.salons.insert_one(salon_doc)
@@ -63,6 +117,7 @@ async def add_member(salon_id: str, user_id: str, encrypted_salon_key: str) -> b
                     "user_id": ObjectId(user_id),
                     "username": user["username"],
                     "encrypted_salon_key": encrypted_salon_key,
+                    "fingerprint": key_fingerprint(user.get("public_key")),
                 }
             }
         },

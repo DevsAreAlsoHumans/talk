@@ -21,11 +21,17 @@
         wsTimer: null,
         oldestCursor: null,
         hasMore: false,
-        csrf: null,
-        closedByUser: false
+        closedByUser: false,
+        // Ajouts : édition, présence, frappe en cours
+        editingId: null,
+        onlineUsers: [],
+        typingUsers: {},
+        typingSentAt: 0
     };
 
     var STORAGE_PREFIX = "ronyme_privkey_";
+    var TYPING_THROTTLE = 2000;
+    var TYPING_TIMEOUT = 4000;
 
     /* ===================== Utilitaires DOM ===================== */
 
@@ -39,6 +45,10 @@
 
     function hide(el) {
         if (el) el.classList.add("is-hidden");
+    }
+
+    function clear(el) {
+        while (el && el.firstChild) el.removeChild(el.firstChild);
     }
 
     function setLoading(button, loading) {
@@ -62,6 +72,25 @@
 
     function track(event) {
         if (window.RonymeAnalytics) window.RonymeAnalytics.track(event);
+    }
+
+    function icon(paths, label) {
+        var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("stroke-linecap", "round");
+        svg.setAttribute("stroke-linejoin", "round");
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("focusable", "false");
+        paths.forEach(function (d) {
+            var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", d);
+            svg.appendChild(path);
+        });
+        if (label) svg.setAttribute("aria-label", label);
+        return svg;
     }
 
     /* ===================== Chiffrement (WebCrypto) ===================== */
@@ -98,22 +127,44 @@
         return "-----BEGIN PUBLIC KEY-----\n" + b64.match(/.{1,64}/g).join("\n") + "\n-----END PUBLIC KEY-----";
     }
 
-    function importPublicKey(pem) {
-        var b64 = pem
+    function pemBody(pem) {
+        return pem
             .replace("-----BEGIN PUBLIC KEY-----", "")
             .replace("-----END PUBLIC KEY-----", "")
             .replace(/\s/g, "");
-        return crypto.subtle.importKey("spki", fromB64(b64), { name: "RSA-OAEP", hash: "SHA-256" }, false, [
+    }
+
+    function importPublicKey(pem) {
+        return crypto.subtle.importKey("spki", fromB64(pemBody(pem)), { name: "RSA-OAEP", hash: "SHA-256" }, false, [
             "encrypt"
         ]);
     }
 
+    /* Empreinte de clé publique — « numéro de sécurité ».
+       Le serveur distribue les clés publiques : s'il était malveillant, il
+       pourrait remettre la sienne à la place de celle du correspondant et lire
+       toute la conversation. Comparer cette empreinte de vive voix est la
+       seule parade. Elle est donc recalculée ici, à partir de la clé
+       réellement utilisée — jamais reprise telle quelle du serveur. */
+    async function keyFingerprint(pem) {
+        if (!pem) return null;
+        var der;
+        try {
+            der = fromB64(pemBody(pem));
+        } catch (e) {
+            return null;
+        }
+        var digest = new Uint8Array(await crypto.subtle.digest("SHA-256", der));
+        var groups = [];
+        for (var i = 0; i < 12; i++) {
+            var value = (digest[i * 2] << 8) | digest[i * 2 + 1];
+            groups.push(String(value % 100000).padStart(5, "0"));
+        }
+        return groups.join(" ");
+    }
+
     async function encryptWithPublicKey(publicKey, data) {
-        var encrypted = await crypto.subtle.encrypt(
-            { name: "RSA-OAEP" },
-            publicKey,
-            new TextEncoder().encode(data)
-        );
+        var encrypted = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, new TextEncoder().encode(data));
         return toB64(encrypted);
     }
 
@@ -185,9 +236,7 @@
             derived,
             fromB64(payload.data)
         );
-        return crypto.subtle.importKey("pkcs8", decrypted, { name: "RSA-OAEP", hash: "SHA-256" }, true, [
-            "decrypt"
-        ]);
+        return crypto.subtle.importKey("pkcs8", decrypted, { name: "RSA-OAEP", hash: "SHA-256" }, true, ["decrypt"]);
     }
 
     /* ===================== Accès réseau ===================== */
@@ -201,7 +250,6 @@
 
     async function ensureCsrf() {
         if (!readCsrfCookie()) await fetch("/health", { credentials: "same-origin" });
-        state.csrf = readCsrfCookie();
     }
 
     function ApiError(message, status) {
@@ -227,7 +275,6 @@
             throw new ApiError("Connexion au serveur impossible. Vérifiez votre réseau.", 0);
         }
 
-        // Jeton expiré : on tente un renouvellement transparent, une seule fois.
         if (response.status === 401 && state.refreshToken && !retry) {
             var renewed = await tryRefresh();
             if (renewed) return api(method, path, body, true);
@@ -242,9 +289,7 @@
             payload = null;
         }
 
-        if (!response.ok) {
-            throw new ApiError(humanError(response.status, payload), response.status);
-        }
+        if (!response.ok) throw new ApiError(humanError(response.status, payload), response.status);
         return payload;
     }
 
@@ -258,6 +303,7 @@
         if (status === 403) return detail || "Action non autorisée.";
         if (status === 404) return detail || "Ressource introuvable.";
         if (status === 409) return detail || "Ce nom est déjà pris.";
+        if (status === 410) return detail || "Ce message a déjà été supprimé.";
         if (status >= 500) return "Le serveur rencontre un problème. Réessayez dans un instant.";
         return detail || "Une erreur est survenue.";
     }
@@ -323,14 +369,12 @@
         else setFieldError("signup-username", "signup-username-error", "");
 
         if (!email) fail("signup-email", "signup-email-error", "L'adresse e-mail est obligatoire.");
-        else if (!EMAIL_RE.test(email))
-            fail("signup-email", "signup-email-error", "Format attendu : nom@exemple.fr");
+        else if (!EMAIL_RE.test(email)) fail("signup-email", "signup-email-error", "Format attendu : nom@exemple.fr");
         else setFieldError("signup-email", "signup-email-error", "");
 
         if (!password) fail("signup-password", "signup-password-error", "Le mot de passe est obligatoire.");
         else if (password.length < 8) fail("signup-password", "signup-password-error", "8 caractères minimum.");
-        else if (!/[A-Za-z]/.test(password))
-            fail("signup-password", "signup-password-error", "Ajoutez au moins une lettre.");
+        else if (!/[A-Za-z]/.test(password)) fail("signup-password", "signup-password-error", "Ajoutez au moins une lettre.");
         else if (!/\d/.test(password)) fail("signup-password", "signup-password-error", "Ajoutez au moins un chiffre.");
         else setFieldError("signup-password", "signup-password-error", "");
 
@@ -339,7 +383,6 @@
             fail("signup-password2", "signup-password2-error", "Les deux mots de passe sont différents.");
         else setFieldError("signup-password2", "signup-password2-error", "");
 
-        // Le focus part sur le premier champ en erreur (WCAG 3.3.1).
         if (firstInvalid) $(firstInvalid).focus();
         return ok ? { username: username, email: email, password: password } : null;
     }
@@ -366,7 +409,7 @@
         return ok ? { username: username, password: password } : null;
     }
 
-    /* ===================== Authentification ===================== */
+    /* ===================== Clés locales ===================== */
 
     function storeKey(username, payload) {
         try {
@@ -385,6 +428,67 @@
             return null;
         }
     }
+
+    /* Export : la clé privée part telle qu'elle est stockée, c'est-à-dire
+       déjà chiffrée par le mot de passe. Le fichier est donc inutilisable
+       sans celui-ci — on peut l'envoyer par un canal ordinaire. */
+    function exportKeyFile() {
+        var stored = loadKey(state.user.username);
+        if (!stored) {
+            toast("Aucune clé trouvée sur cet appareil.", "error");
+            return;
+        }
+        var payload = {
+            app: "ronyme",
+            version: 1,
+            username: state.user.username,
+            exported_at: new Date().toISOString(),
+            key: stored
+        };
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = "ronyme-cle-" + state.user.username + ".json";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        toast("Clé exportée. Conservez ce fichier en lieu sûr.", "success");
+    }
+
+    async function importKeyFile(file) {
+        var text;
+        try {
+            text = await file.text();
+        } catch (e) {
+            toast("Fichier illisible.", "error");
+            return;
+        }
+
+        var payload;
+        try {
+            payload = JSON.parse(text);
+        } catch (e) {
+            toast("Ce fichier n'est pas une clé Ronyme valide.", "error");
+            return;
+        }
+
+        var key = payload && payload.key;
+        var valid = payload && payload.app === "ronyme" && payload.username && key && key.data && key.salt && key.iv;
+        if (!valid) {
+            toast("Ce fichier n'est pas une clé Ronyme valide.", "error");
+            return;
+        }
+
+        if (!storeKey(payload.username, key)) {
+            toast("Le stockage local est bloqué par votre navigateur.", "error");
+            return;
+        }
+        toast("Clé importée pour « " + payload.username + " ». Connectez-vous.", "success");
+    }
+
+    /* ===================== Authentification ===================== */
 
     async function handleSignup(event) {
         event.preventDefault();
@@ -465,7 +569,7 @@
             if (!stored) {
                 setAlert(
                     "login-alert",
-                    "Aucune clé privée trouvée sur cet appareil. Le chiffrement de bout en bout empêche de la récupérer ailleurs : connectez-vous depuis l'appareil d'inscription.",
+                    "Aucune clé privée sur cet appareil. Importez votre fichier de clé, ou connectez-vous depuis l'appareil d'inscription.",
                     "error"
                 );
                 return;
@@ -509,6 +613,7 @@
         state.salonId = null;
         state.channelId = null;
         state.salons = [];
+        state.onlineUsers = [];
 
         hide($("chat-screen"));
         show($("auth-screen"));
@@ -517,7 +622,7 @@
         toast("Vous êtes déconnecté.", "success");
     }
 
-    /* ===================== Salons et canaux ===================== */
+    /* ===================== Salons, canaux, conversations privées ===================== */
 
     function enterChat() {
         hide($("auth-screen"));
@@ -525,6 +630,14 @@
         $("current-user").textContent = state.user.username;
         $("user-avatar").textContent = state.user.username.slice(0, 2);
         loadSalons();
+    }
+
+    function directLabel(salon) {
+        /* Une conversation privée s'affiche au nom de l'autre personne. */
+        var other = salon.members.find(function (m) {
+            return m.user_id !== state.user.id;
+        });
+        return other ? other.username : salon.name;
     }
 
     async function loadSalons() {
@@ -535,24 +648,27 @@
             return;
         }
 
-        var list = $("salon-list");
-        list.textContent = "";
+        var groups = $("salon-list");
+        var directs = $("direct-list");
+        clear(groups);
+        clear(directs);
 
         state.salons.forEach(function (salon) {
             var li = document.createElement("li");
             var button = document.createElement("button");
             button.type = "button";
-            button.textContent = salon.name;
+            button.textContent = salon.is_direct ? directLabel(salon) : salon.name;
             button.setAttribute("aria-current", salon.id === state.salonId ? "true" : "false");
             button.addEventListener("click", function () {
                 openSalon(salon.id);
                 closeSidebar();
             });
             li.appendChild(button);
-            list.appendChild(li);
+            (salon.is_direct ? directs : groups).appendChild(li);
         });
 
-        if (!state.salons.length) {
+        var hasAny = state.salons.length > 0;
+        if (!hasAny) {
             show($("empty-state"));
             hide($("composer"));
             hide($("channel-section"));
@@ -574,7 +690,9 @@
         if (!salon) return;
 
         state.salonId = salonId;
-        $("chat-title").textContent = salon.name;
+        state.editingId = null;
+        hide($("edit-banner"));
+        $("chat-title").textContent = salon.is_direct ? directLabel(salon) : salon.name;
 
         var me = salon.members.find(function (m) {
             return m.user_id === state.user.id;
@@ -592,8 +710,12 @@
             return;
         }
 
-        document.querySelectorAll("#salon-list button").forEach(function (b) {
-            b.setAttribute("aria-current", b.textContent === salon.name ? "true" : "false");
+        document.querySelectorAll("#salon-list button, #direct-list button").forEach(function (b) {
+            b.setAttribute("aria-current", "false");
+        });
+        var label = salon.is_direct ? directLabel(salon) : salon.name;
+        document.querySelectorAll("#salon-list button, #direct-list button").forEach(function (b) {
+            if (b.textContent === label) b.setAttribute("aria-current", "true");
         });
 
         renderChannels(salon);
@@ -609,13 +731,15 @@
 
     function renderChannels(salon) {
         var list = $("channel-list");
-        list.textContent = "";
+        clear(list);
 
-        if (!salon.channels || !salon.channels.length) {
+        // Une conversation à deux n'a pas besoin d'arborescence de canaux.
+        if (salon.is_direct || !salon.channels || salon.channels.length <= 1) {
             hide($("channel-section"));
-            return;
+            if (salon.is_direct) return;
+        } else {
+            show($("channel-section"));
         }
-        show($("channel-section"));
 
         salon.channels.forEach(function (channel) {
             var li = document.createElement("li");
@@ -639,7 +763,7 @@
     async function loadMessages(reset) {
         var container = $("messages");
         if (reset) {
-            container.textContent = "";
+            clear(container);
             state.oldestCursor = null;
             state.hasMore = false;
         }
@@ -672,7 +796,6 @@
         } else {
             container.insertBefore(fragment, container.firstChild);
             renderLoadMore();
-            // On conserve la position de lecture après insertion en tête.
             container.scrollTop = container.scrollHeight - previousHeight;
         }
     }
@@ -686,7 +809,6 @@
         var button = document.createElement("button");
         button.type = "button";
         button.className = "btn btn-secondary load-more";
-        button.innerHTML = "";
         var label = document.createElement("span");
         label.className = "btn-label";
         label.textContent = "Charger les messages précédents";
@@ -701,14 +823,20 @@
     async function buildMessage(message) {
         var wrapper = document.createElement("article");
         wrapper.className = "message";
+        wrapper.dataset.id = message.id;
         wrapper.dataset.own = message.sender_id === state.user.id ? "true" : "false";
 
         var plaintext;
-        try {
-            plaintext = await decryptMessage(state.salonKey, message.ciphertext, message.iv);
-        } catch (e) {
-            plaintext = "Message impossible à déchiffrer (clé de salon différente).";
-            wrapper.dataset.error = "true";
+        if (message.deleted) {
+            plaintext = "Message supprimé";
+            wrapper.dataset.deleted = "true";
+        } else {
+            try {
+                plaintext = await decryptMessage(state.salonKey, message.ciphertext, message.iv);
+            } catch (e) {
+                plaintext = "Message impossible à déchiffrer (clé de salon différente).";
+                wrapper.dataset.error = "true";
+            }
         }
 
         var meta = document.createElement("div");
@@ -720,12 +848,21 @@
 
         var time = document.createElement("time");
         time.className = "message-time";
-        var date = new Date(message.created_at);
         time.dateTime = message.created_at;
-        time.textContent = date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+        time.textContent = new Date(message.created_at).toLocaleTimeString("fr-FR", {
+            hour: "2-digit",
+            minute: "2-digit"
+        });
 
         meta.appendChild(sender);
         meta.appendChild(time);
+
+        if (message.edited_at) {
+            var edited = document.createElement("span");
+            edited.className = "edited-mark";
+            edited.textContent = "(modifié)";
+            meta.appendChild(edited);
+        }
 
         // textContent, jamais innerHTML : aucune injection possible depuis un message.
         var body = document.createElement("div");
@@ -734,7 +871,42 @@
 
         wrapper.appendChild(meta);
         wrapper.appendChild(body);
+
+        if (wrapper.dataset.own === "true" && !message.deleted && !wrapper.dataset.error) {
+            wrapper.appendChild(buildMessageActions(message.id, plaintext));
+        }
         return wrapper;
+    }
+
+    function buildMessageActions(messageId, plaintext) {
+        var actions = document.createElement("div");
+        actions.className = "message-actions";
+
+        var edit = document.createElement("button");
+        edit.type = "button";
+        edit.dataset.action = "edit";
+        edit.setAttribute("aria-label", "Modifier ce message");
+        edit.appendChild(icon(["M12 20h9", "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"]));
+        edit.addEventListener("click", function () {
+            startEditing(messageId, plaintext);
+        });
+
+        var remove = document.createElement("button");
+        remove.type = "button";
+        remove.dataset.action = "delete";
+        remove.setAttribute("aria-label", "Supprimer ce message");
+        remove.appendChild(icon(["M3 6h18", "M8 6V4h8v2", "M19 6l-1 14H6L5 6", "M10 11v6M14 11v6"]));
+        remove.addEventListener("click", function () {
+            deleteMessage(messageId);
+        });
+
+        actions.appendChild(edit);
+        actions.appendChild(remove);
+        return actions;
+    }
+
+    function findMessageNode(id) {
+        return document.querySelector('.message[data-id="' + id + '"]');
     }
 
     async function appendMessage(message) {
@@ -742,6 +914,55 @@
         var nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
         container.appendChild(await buildMessage(message));
         if (nearBottom) container.scrollTop = container.scrollHeight;
+    }
+
+    async function replaceMessage(message) {
+        var node = findMessageNode(message.id);
+        if (!node) return;
+        var fresh = await buildMessage(message);
+        node.replaceWith(fresh);
+    }
+
+    function markDeleted(messageId) {
+        var node = findMessageNode(messageId);
+        if (!node) return;
+        node.dataset.deleted = "true";
+        var body = node.querySelector(".message-body");
+        if (body) body.textContent = "Message supprimé";
+        var actions = node.querySelector(".message-actions");
+        if (actions) actions.remove();
+    }
+
+    /* ---------- Édition ---------- */
+
+    function startEditing(messageId, plaintext) {
+        state.editingId = messageId;
+        var input = $("message-input");
+        input.value = plaintext;
+        input.focus();
+        show($("edit-banner"));
+    }
+
+    function cancelEditing() {
+        state.editingId = null;
+        $("message-input").value = "";
+        hide($("edit-banner"));
+    }
+
+    async function deleteMessage(messageId) {
+        var confirmed = await confirmDialog(
+            "Supprimer ce message ?",
+            "Le texte chiffré sera effacé du serveur. Cette action est irréversible."
+        );
+        if (!confirmed) return;
+
+        try {
+            await api("DELETE", "/salons/" + state.salonId + "/messages/" + messageId);
+            markDeleted(messageId);
+            if (state.editingId === messageId) cancelEditing();
+        } catch (error) {
+            toast(error.message, "error");
+        }
     }
 
     async function handleSend(event) {
@@ -756,20 +977,40 @@
         }
 
         var encrypted = await encryptMessage(state.salonKey, text);
+        var button = $("send-btn");
+
+        // Édition : on remplace l'enveloppe chiffrée existante.
+        if (state.editingId) {
+            var editedId = state.editingId;
+            setLoading(button, true);
+            try {
+                var updated = await api("PATCH", "/salons/" + state.salonId + "/messages/" + editedId, {
+                    ciphertext: encrypted.ciphertext,
+                    iv: encrypted.iv
+                });
+                await replaceMessage(updated);
+                cancelEditing();
+            } catch (error) {
+                toast(error.message, "error");
+            } finally {
+                setLoading(button, false);
+            }
+            return;
+        }
+
         var payload = {
+            type: "message",
             ciphertext: encrypted.ciphertext,
             iv: encrypted.iv,
             channel_id: state.channelId
         };
 
-        // WebSocket si disponible, sinon repli HTTP : le message part quand même.
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
             state.ws.send(JSON.stringify(payload));
             input.value = "";
             return;
         }
 
-        var button = $("send-btn");
         setLoading(button, true);
         try {
             await api("POST", "/salons/" + state.salonId + "/messages", payload);
@@ -779,6 +1020,54 @@
         } finally {
             setLoading(button, false);
         }
+    }
+
+    /* ===================== Présence et frappe ===================== */
+
+    function renderPresence() {
+        var el = $("presence");
+        var count = state.onlineUsers.length;
+        if (!count) {
+            hide(el);
+            return;
+        }
+        show(el);
+        el.textContent = count + " en ligne";
+        el.title = state.onlineUsers
+            .map(function (u) {
+                return u.username;
+            })
+            .join(", ");
+    }
+
+    function renderTyping() {
+        var names = Object.keys(state.typingUsers);
+        var el = $("typing-indicator");
+        if (!names.length) {
+            el.textContent = "";
+            return;
+        }
+        if (names.length === 1) el.textContent = names[0] + " est en train d'écrire…";
+        else if (names.length === 2) el.textContent = names.join(" et ") + " sont en train d'écrire…";
+        else el.textContent = "Plusieurs personnes écrivent…";
+    }
+
+    function noteTyping(username) {
+        if (state.typingUsers[username]) window.clearTimeout(state.typingUsers[username]);
+        state.typingUsers[username] = window.setTimeout(function () {
+            delete state.typingUsers[username];
+            renderTyping();
+        }, TYPING_TIMEOUT);
+        renderTyping();
+    }
+
+    function signalTyping() {
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        // Au plus un signal toutes les 2 s : inutile d'inonder le serveur.
+        var now = Date.now();
+        if (now - state.typingSentAt < TYPING_THROTTLE) return;
+        state.typingSentAt = now;
+        state.ws.send(JSON.stringify({ type: "typing", channel_id: state.channelId }));
     }
 
     /* ===================== WebSocket ===================== */
@@ -799,6 +1088,10 @@
             state.ws.close();
             state.ws = null;
         }
+        state.onlineUsers = [];
+        state.typingUsers = {};
+        renderPresence();
+        renderTyping();
     }
 
     function connectSocket() {
@@ -823,17 +1116,13 @@
             } catch (e) {
                 return;
             }
-            if (data.error) {
-                toast(data.error, "error");
-                return;
-            }
-            // On n'affiche que les messages du canal courant.
-            var sameChannel = (data.channel_id || null) === (state.channelId || null);
-            if (sameChannel) appendMessage(data);
+            handleSocketEvent(data);
         };
 
         socket.onclose = function () {
             state.ws = null;
+            state.onlineUsers = [];
+            renderPresence();
             if (state.closedByUser || !state.accessToken) {
                 setWsStatus("offline", "Hors ligne");
                 return;
@@ -847,6 +1136,48 @@
         };
     }
 
+    function handleSocketEvent(data) {
+        var kind = data.type || "message";
+
+        if (kind === "error") {
+            toast(data.error, "error");
+            return;
+        }
+
+        if (kind === "presence") {
+            state.onlineUsers = data.users || [];
+            renderPresence();
+            return;
+        }
+
+        if (kind === "typing") {
+            if (data.username && data.username !== state.user.username) noteTyping(data.username);
+            return;
+        }
+
+        if (kind === "message_deleted") {
+            markDeleted(data.id);
+            return;
+        }
+
+        var sameChannel = (data.channel_id || null) === (state.channelId || null);
+        if (!sameChannel) return;
+
+        if (kind === "message_updated") {
+            replaceMessage(data);
+            return;
+        }
+        if (kind === "message") {
+            // L'auteur cesse d'« écrire » dès que son message arrive.
+            if (state.typingUsers[data.sender_username]) {
+                window.clearTimeout(state.typingUsers[data.sender_username]);
+                delete state.typingUsers[data.sender_username];
+                renderTyping();
+            }
+            appendMessage(data);
+        }
+    }
+
     function scheduleReconnect() {
         // Temporisation exponentielle plafonnée à 30 s pour ne pas marteler le serveur.
         var delay = Math.min(1000 * Math.pow(2, state.wsRetries), 30000);
@@ -854,7 +1185,7 @@
         state.wsTimer = window.setTimeout(connectSocket, delay);
     }
 
-    /* ===================== Boîte de dialogue ===================== */
+    /* ===================== Boîtes de dialogue ===================== */
 
     var modalResolve = null;
     var lastFocused = null;
@@ -865,14 +1196,26 @@
             lastFocused = document.activeElement;
 
             $("modal-title").textContent = options.title;
-            $("modal-label").textContent = options.label;
+            $("modal-label").textContent = options.label || "";
             $("modal-input").value = "";
             $("modal-input").maxLength = options.maxLength || 100;
             $("modal-error").textContent = "";
             $("modal-confirm").querySelector(".btn-label").textContent = options.confirm || "Confirmer";
 
+            var field = $("modal-input").closest(".field");
+            if (options.textOnly) hide(field);
+            else show(field);
+
             show($("modal-overlay"));
-            $("modal-input").focus();
+            if (options.textOnly) $("modal-confirm").focus();
+            else $("modal-input").focus();
+        });
+    }
+
+    function confirmDialog(title, message) {
+        $("modal-label").textContent = "";
+        return openModal({ title: title + " " + message, textOnly: true, confirm: "Supprimer" }).then(function (v) {
+            return v === true;
         });
     }
 
@@ -886,6 +1229,11 @@
     }
 
     function confirmModal() {
+        var field = $("modal-input").closest(".field");
+        if (field.classList.contains("is-hidden")) {
+            closeModal(true);
+            return;
+        }
         var value = $("modal-input").value.trim();
         if (!value) {
             $("modal-error").textContent = "Ce champ est obligatoire.";
@@ -895,14 +1243,151 @@
         closeModal(value);
     }
 
+    /* ---------- Panneau (sécurité, membres) ---------- */
+
+    var panelLastFocused = null;
+
+    function openPanel(title) {
+        panelLastFocused = document.activeElement;
+        $("panel-title").textContent = title;
+        clear($("panel-body"));
+        show($("panel-overlay"));
+        $("panel-close").focus();
+        return $("panel-body");
+    }
+
+    function closePanel() {
+        hide($("panel-overlay"));
+        if (panelLastFocused && panelLastFocused.focus) panelLastFocused.focus();
+    }
+
+    function panelSection(parent, title, description) {
+        var section = document.createElement("section");
+        section.className = "panel-section";
+        var h = document.createElement("h3");
+        h.textContent = title;
+        section.appendChild(h);
+        if (description) {
+            var p = document.createElement("p");
+            p.textContent = description;
+            section.appendChild(p);
+        }
+        parent.appendChild(section);
+        return section;
+    }
+
+    async function openSecurityPanel() {
+        var body = openPanel("Sécurité et clés");
+
+        var fpSection = panelSection(
+            body,
+            "Mon numéro de sécurité",
+            "Lisez-le à voix haute à votre correspondant. S'il correspond à celui qu'il voit pour vous, personne ne s'est intercalé entre vous."
+        );
+        var fp = document.createElement("code");
+        fp.className = "fingerprint";
+        fp.textContent = "Calcul…";
+        fpSection.appendChild(fp);
+        fp.textContent = (await keyFingerprint(state.user.public_key)) || "indisponible";
+
+        var keySection = panelSection(
+            body,
+            "Sauvegarde de la clé privée",
+            "Votre clé privée ne quitte jamais cet appareil. Exportez-la pour pouvoir vous connecter ailleurs : le fichier reste chiffré par votre mot de passe."
+        );
+        var actions = document.createElement("div");
+        actions.className = "panel-actions";
+
+        var exportBtn = document.createElement("button");
+        exportBtn.type = "button";
+        exportBtn.className = "btn btn-secondary";
+        exportBtn.appendChild(labelSpan("Exporter ma clé"));
+        exportBtn.addEventListener("click", exportKeyFile);
+
+        var importBtn = document.createElement("button");
+        importBtn.type = "button";
+        importBtn.className = "btn btn-secondary";
+        importBtn.appendChild(labelSpan("Importer une clé"));
+        importBtn.addEventListener("click", function () {
+            $("key-file-input").click();
+        });
+
+        actions.appendChild(exportBtn);
+        actions.appendChild(importBtn);
+        keySection.appendChild(actions);
+    }
+
+    function labelSpan(text) {
+        var span = document.createElement("span");
+        span.className = "btn-label";
+        span.textContent = text;
+        return span;
+    }
+
+    async function openMembersPanel() {
+        var salon = currentSalon();
+        if (!salon) return;
+
+        var body = openPanel(salon.is_direct ? "Conversation privée" : "Membres du salon");
+        var section = panelSection(
+            body,
+            "Numéros de sécurité",
+            "Comparez ces numéros avec vos correspondants par un autre canal. Un numéro qui change signale une clé remplacée."
+        );
+
+        for (var i = 0; i < salon.members.length; i++) {
+            var member = salon.members[i];
+            var row = document.createElement("div");
+            row.className = "member-row";
+
+            var avatar = document.createElement("span");
+            avatar.className = "avatar";
+            avatar.textContent = member.username.slice(0, 2);
+            avatar.setAttribute("aria-hidden", "true");
+
+            var info = document.createElement("div");
+            info.className = "member-info";
+            var name = document.createElement("strong");
+            name.textContent = member.username;
+            if (member.user_id === salon.owner_id) {
+                var badge = document.createElement("span");
+                badge.className = "badge-owner";
+                badge.textContent = "propriétaire";
+                name.appendChild(badge);
+            }
+            info.appendChild(name);
+
+            var code = document.createElement("code");
+            code.className = "fingerprint";
+            code.textContent = member.fingerprint || "indisponible";
+            info.appendChild(code);
+
+            row.appendChild(avatar);
+            row.appendChild(info);
+            section.appendChild(row);
+        }
+
+        if (!salon.is_direct && salon.owner_id === state.user.id) {
+            var addSection = panelSection(body, "Ajouter quelqu'un", null);
+            var addActions = document.createElement("div");
+            addActions.className = "panel-actions";
+            var addBtn = document.createElement("button");
+            addBtn.type = "button";
+            addBtn.className = "btn btn-primary";
+            addBtn.appendChild(labelSpan("Ajouter un membre"));
+            addBtn.addEventListener("click", function () {
+                closePanel();
+                addMember();
+            });
+            addActions.appendChild(addBtn);
+            addSection.appendChild(addActions);
+        }
+    }
+
     /* ===================== Actions salon ===================== */
 
     async function createSalon() {
-        var name = await openModal({
-            title: "Nouveau salon",
-            label: "Nom du salon",
-            confirm: "Créer le salon"
-        });
+        var name = await openModal({ title: "Nouveau salon", label: "Nom du salon", confirm: "Créer le salon" });
         if (!name) return;
 
         try {
@@ -916,6 +1401,38 @@
             await loadSalons();
             await openSalon(created.id);
             toast("Salon « " + name + " » créé.", "success");
+        } catch (error) {
+            toast(error.message, "error");
+        }
+    }
+
+    async function createDirect() {
+        var username = await openModal({
+            title: "Nouvelle conversation privée",
+            label: "Nom d'utilisateur",
+            confirm: "Ouvrir la conversation",
+            maxLength: 30
+        });
+        if (!username) return;
+
+        try {
+            var target = await api("GET", "/auth/users/" + encodeURIComponent(username) + "/public-key");
+
+            // La même clé AES est chiffrée deux fois : pour moi, et pour l'autre.
+            var salonKey = await generateSalonKey();
+            var salonKeyB64 = await exportSalonKey(salonKey);
+            var myKey = await importPublicKey(state.user.public_key);
+            var theirKey = await importPublicKey(target.public_key);
+
+            var created = await api("POST", "/salons/direct", {
+                username: username,
+                encrypted_salon_key_self: await encryptWithPublicKey(myKey, salonKeyB64),
+                encrypted_salon_key_other: await encryptWithPublicKey(theirKey, salonKeyB64)
+            });
+
+            state.salonId = created.id;
+            await loadSalons();
+            await openSalon(created.id);
         } catch (error) {
             toast(error.message, "error");
         }
@@ -1011,6 +1528,18 @@
 
         ensureCsrf();
 
+        // Champ de fichier pour l'import de clé, hors flux visuel.
+        var fileInput = document.createElement("input");
+        fileInput.type = "file";
+        fileInput.accept = "application/json,.json";
+        fileInput.id = "key-file-input";
+        fileInput.className = "file-input";
+        fileInput.addEventListener("change", function () {
+            if (fileInput.files && fileInput.files[0]) importKeyFile(fileInput.files[0]);
+            fileInput.value = "";
+        });
+        document.body.appendChild(fileInput);
+
         $("login-form").addEventListener("submit", handleLogin);
         $("signup-form").addEventListener("submit", handleSignup);
         $("composer").addEventListener("submit", handleSend);
@@ -1032,7 +1561,6 @@
             $("login-username").focus();
         });
 
-        // Affichage / masquage des mots de passe
         document.querySelectorAll(".password-toggle").forEach(function (button) {
             button.addEventListener("click", function () {
                 var input = $(button.dataset.toggle);
@@ -1043,29 +1571,36 @@
             });
         });
 
-        // Validation à la sortie du champ, pas à chaque frappe
         $("signup-email").addEventListener("blur", function () {
             var value = this.value.trim();
-            if (value && !EMAIL_RE.test(value)) {
-                setFieldError("signup-email", "signup-email-error", "Format attendu : nom@exemple.fr");
-            } else {
-                setFieldError("signup-email", "signup-email-error", "");
-            }
+            setFieldError(
+                "signup-email",
+                "signup-email-error",
+                value && !EMAIL_RE.test(value) ? "Format attendu : nom@exemple.fr" : ""
+            );
         });
 
         $("signup-password2").addEventListener("blur", function () {
             var value = this.value;
-            if (value && value !== $("signup-password").value) {
-                setFieldError("signup-password2", "signup-password2-error", "Les deux mots de passe sont différents.");
-            } else {
-                setFieldError("signup-password2", "signup-password2-error", "");
-            }
+            setFieldError(
+                "signup-password2",
+                "signup-password2-error",
+                value && value !== $("signup-password").value ? "Les deux mots de passe sont différents." : ""
+            );
         });
 
         $("create-salon-btn").addEventListener("click", createSalon);
         $("empty-create-btn").addEventListener("click", createSalon);
+        $("create-direct-btn").addEventListener("click", createDirect);
         $("create-channel-btn").addEventListener("click", createChannel);
-        $("members-btn").addEventListener("click", addMember);
+        $("members-btn").addEventListener("click", openMembersPanel);
+        $("security-btn").addEventListener("click", openSecurityPanel);
+        $("cancel-edit-btn").addEventListener("click", cancelEditing);
+
+        // Signal de frappe, limité en fréquence
+        $("message-input").addEventListener("input", function () {
+            if (!state.editingId) signalTyping();
+        });
 
         $("sidebar-open").addEventListener("click", openSidebar);
         $("sidebar-close").addEventListener("click", closeSidebar);
@@ -1084,14 +1619,20 @@
             if (e.target === $("modal-overlay")) closeModal(null);
         });
 
+        $("panel-close").addEventListener("click", closePanel);
+        $("panel-overlay").addEventListener("click", function (e) {
+            if (e.target === $("panel-overlay")) closePanel();
+        });
+
         // Échap ferme la couche ouverte la plus haute
         document.addEventListener("keydown", function (e) {
             if (e.key !== "Escape") return;
             if (!$("modal-overlay").classList.contains("is-hidden")) closeModal(null);
+            else if (!$("panel-overlay").classList.contains("is-hidden")) closePanel();
+            else if (state.editingId) cancelEditing();
             else closeSidebar();
         });
 
-        // Le réseau revient : on relance la connexion temps réel sans attendre.
         window.addEventListener("online", function () {
             if (state.accessToken && state.salonId) {
                 state.wsRetries = 0;
