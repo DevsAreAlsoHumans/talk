@@ -496,6 +496,8 @@ button.link:hover {
 }
 
 .composer textarea {
+  flex: 1 1 14rem;
+  min-width: 0;
   resize: none;
   max-height: 10rem;
   line-height: 1.4;
@@ -569,12 +571,18 @@ button.link:hover {
 
 .composer-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.6rem;
 }
 
+.composer-row > button {
+  flex: 0 0 auto;
+}
+
 .composer-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
 }
@@ -1080,7 +1088,8 @@ button.friend .member-id {
 /* ---------- Petits écrans : salons et membres deviennent des panneaux ---------- */
 
 @media (max-width: 960px) {
-  .app {
+  .app,
+  .app.thread-dm {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1115,6 +1124,12 @@ button.friend .member-id {
 
   .badge {
     display: none;
+  }
+}
+
+@media (max-width: 30rem) {
+  .composer-row > button {
+    flex: 1 1 100%;
   }
 }
 
