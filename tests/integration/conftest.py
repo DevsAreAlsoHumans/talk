@@ -14,6 +14,7 @@ async def setup_db():
     await db.refresh_tokens.delete_many({})
     await db.salons.delete_many({})
     await db.messages.delete_many({})
+    await db.attachments.delete_many({})
     await db.analytics.delete_many({})
     # Les compteurs sont en mémoire : sans remise à zéro, un test épuiserait
     # le quota des suivants.

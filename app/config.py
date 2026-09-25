@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     rate_limit_signup_window: int = 3600
     rate_limit_message: int = 30
     rate_limit_message_window: int = 60
+    rate_limit_attachment: int = 10
+    rate_limit_attachment_window: int = 300
 
     # Analytics interne (sans cookie, sans tiers)
     analytics_enabled: bool = True

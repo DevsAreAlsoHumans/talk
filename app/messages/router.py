@@ -4,6 +4,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import ValidationError
 
+from app.attachments.service import delete_for_message, get_attachment, link_attachment
 from app.auth.router import get_current_user
 from app.auth.service import decode_access_token
 from app.config import settings
@@ -34,6 +35,7 @@ def _to_response(doc: dict) -> MessageResponse:
         created_at=doc["created_at"],
         edited_at=doc.get("edited_at"),
         deleted=bool(doc.get("deleted", False)),
+        attachment=doc.get("attachment"),
     )
 
 
@@ -45,6 +47,32 @@ def _enforce_message_rate(user_id) -> None:
             detail="Trop de messages envoyés. Ralentissez.",
             headers={"Retry-After": str(retry_after)},
         )
+
+
+async def _resolve_attachment(salon_id: str, attachment_id: str | None, user: dict) -> dict | None:
+    """Vérifie la pièce jointe et renvoie les métadonnées à stocker dans le message."""
+    if not attachment_id:
+        return None
+    doc = await get_attachment(salon_id, attachment_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pièce jointe introuvable")
+    if str(doc["uploader_id"]) != str(user["_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cette pièce jointe appartient à quelqu'un d'autre",
+        )
+    if doc.get("message_id"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cette pièce jointe est déjà rattachée à un message",
+        )
+    return {
+        "id": str(doc["_id"]),
+        "kind": doc["kind"],
+        "duration_ms": doc["duration_ms"],
+        "mime": doc["mime"],
+        "size": doc["size"],
+    }
 
 
 async def _require_member(salon_id: str, user: dict) -> None:
@@ -117,6 +145,8 @@ async def send_message(salon_id: str, data: MessageCreate, user: dict = Depends(
     await _require_member(salon_id, user)
     _enforce_message_rate(user["_id"])
 
+    attachment = await _resolve_attachment(salon_id, data.attachment_id, user)
+
     channel_oid = None
     if data.channel_id:
         if not await channel_exists(salon_id, data.channel_id):
@@ -134,9 +164,12 @@ async def send_message(salon_id: str, data: MessageCreate, user: dict = Depends(
         "created_at": datetime.now(timezone.utc),
         "edited_at": None,
         "deleted": False,
+        "attachment": attachment,
     }
     result = await db.messages.insert_one(msg_doc)
     msg_doc["_id"] = result.inserted_id
+    if attachment:
+        await link_attachment(attachment["id"], msg_doc["_id"])
     response = _to_response(msg_doc)
     await manager.broadcast(salon_id, {"type": "message", **response.model_dump(mode="json")})
     return response
@@ -182,9 +215,12 @@ async def delete_message(salon_id: str, message_id: str, user: dict = Depends(ge
                 "iv": DELETED_PLACEHOLDER,
                 "deleted": True,
                 "deleted_at": datetime.now(timezone.utc),
+                "attachment": None,
             }
         },
     )
+    # Le contenu vocal disparaît avec le message, comme le texte chiffré.
+    await delete_for_message(doc["_id"])
     await manager.broadcast(salon_id, {"type": "message_deleted", "id": message_id, "salon_id": salon_id})
     return {"detail": "Message supprimé"}
 
@@ -230,6 +266,12 @@ async def websocket_endpoint(websocket: WebSocket, salon_id: str):
                 await websocket.send_json({"type": "error", "error": "Type de message inconnu"})
                 continue
 
+            # Les pièces jointes passent par HTTP : une socket n'est pas le
+            # bon canal pour plusieurs centaines de kilo-octets.
+            if isinstance(raw, dict) and raw.get("attachment_id"):
+                await websocket.send_json({"type": "error", "error": "Les pièces jointes s'envoient via HTTP"})
+                continue
+
             try:
                 data = MessageCreate(**{k: v for k, v in raw.items() if k != "type"})
             except (ValidationError, TypeError, AttributeError):
@@ -260,6 +302,7 @@ async def websocket_endpoint(websocket: WebSocket, salon_id: str):
                 "created_at": datetime.now(timezone.utc),
                 "edited_at": None,
                 "deleted": False,
+                "attachment": None,
             }
             result = await db.messages.insert_one(msg_doc)
             msg_doc["_id"] = result.inserted_id

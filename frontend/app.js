@@ -26,12 +26,20 @@
         editingId: null,
         onlineUsers: [],
         typingUsers: {},
-        typingSentAt: 0
+        typingSentAt: 0,
+        // Enregistrement vocal
+        recorder: null,
+        recordedChunks: [],
+        recordStart: 0,
+        recordTimer: null,
+        recordStream: null,
+        recordCancelled: false
     };
 
     var STORAGE_PREFIX = "ronyme_privkey_";
     var TYPING_THROTTLE = 2000;
     var TYPING_TIMEOUT = 4000;
+    var MAX_RECORDING_MS = 120000;
 
     /* ===================== Utilitaires DOM ===================== */
 
@@ -205,6 +213,19 @@
             fromB64(ciphertextB64)
         );
         return new TextDecoder().decode(decrypted);
+    }
+
+    /* Les pièces jointes suivent exactement le même chemin que le texte :
+       même clé de salon, même AES-256-GCM, IV neuf à chaque fois. Seule la
+       nature de l'entrée change — des octets au lieu d'une chaîne. */
+    async function encryptBytes(aesKey, arrayBuffer) {
+        var iv = crypto.getRandomValues(new Uint8Array(12));
+        var ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv }, aesKey, arrayBuffer);
+        return { ciphertext: toB64(ciphertext), iv: toB64(iv) };
+    }
+
+    async function decryptBytes(aesKey, ciphertextB64, ivB64) {
+        return crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(ivB64) }, aesKey, fromB64(ciphertextB64));
     }
 
     async function deriveKeyFromPassword(password, salt) {
@@ -599,6 +620,7 @@
 
     async function handleLogout() {
         state.closedByUser = true;
+        cancelRecordingSilently();
         try {
             await api("POST", "/auth/logout");
         } catch (e) {
@@ -620,6 +642,14 @@
         $("login-form").reset();
         $("login-username").focus();
         toast("Vous êtes déconnecté.", "success");
+    }
+
+    function cancelRecordingSilently() {
+        if (state.recorder && state.recorder.state === "recording") {
+            state.recordCancelled = true;
+            state.recorder.stop();
+        }
+        releaseMicrophone();
     }
 
     /* ===================== Salons, canaux, conversations privées ===================== */
@@ -830,6 +860,9 @@
         if (message.deleted) {
             plaintext = "Message supprimé";
             wrapper.dataset.deleted = "true";
+        } else if (!message.ciphertext) {
+            // Message vocal sans légende : rien à déchiffrer.
+            plaintext = "";
         } else {
             try {
                 plaintext = await decryptMessage(state.salonKey, message.ciphertext, message.iv);
@@ -864,23 +897,39 @@
             meta.appendChild(edited);
         }
 
-        // textContent, jamais innerHTML : aucune injection possible depuis un message.
-        var body = document.createElement("div");
-        body.className = "message-body";
-        body.textContent = plaintext;
-
         wrapper.appendChild(meta);
-        wrapper.appendChild(body);
+
+        if (message.attachment && message.attachment.kind === "audio" && !message.deleted) {
+            wrapper.appendChild(buildVoicePlayer(message.attachment));
+            if (plaintext) {
+                var caption = document.createElement("div");
+                caption.className = "message-body";
+                caption.textContent = plaintext;
+                wrapper.appendChild(caption);
+            }
+        } else {
+            // textContent, jamais innerHTML : aucune injection possible depuis un message.
+            var body = document.createElement("div");
+            body.className = "message-body";
+            body.textContent = plaintext;
+            wrapper.appendChild(body);
+        }
 
         if (wrapper.dataset.own === "true" && !message.deleted && !wrapper.dataset.error) {
-            wrapper.appendChild(buildMessageActions(message.id, plaintext));
+            wrapper.appendChild(buildMessageActions(message.id, plaintext, !!message.attachment));
         }
         return wrapper;
     }
 
-    function buildMessageActions(messageId, plaintext) {
+    function buildMessageActions(messageId, plaintext, isVoice) {
         var actions = document.createElement("div");
         actions.className = "message-actions";
+
+        // Un message vocal ne se réécrit pas : seule la suppression a un sens.
+        if (isVoice) {
+            actions.appendChild(buildDeleteButton(messageId));
+            return actions;
+        }
 
         var edit = document.createElement("button");
         edit.type = "button";
@@ -891,6 +940,12 @@
             startEditing(messageId, plaintext);
         });
 
+        actions.appendChild(edit);
+        actions.appendChild(buildDeleteButton(messageId));
+        return actions;
+    }
+
+    function buildDeleteButton(messageId) {
         var remove = document.createElement("button");
         remove.type = "button";
         remove.dataset.action = "delete";
@@ -899,10 +954,7 @@
         remove.addEventListener("click", function () {
             deleteMessage(messageId);
         });
-
-        actions.appendChild(edit);
-        actions.appendChild(remove);
-        return actions;
+        return remove;
     }
 
     function findMessageNode(id) {
@@ -1020,6 +1072,192 @@
         } finally {
             setLoading(button, false);
         }
+    }
+
+    /* ===================== Messages vocaux ===================== */
+
+    function formatDuration(ms) {
+        var total = Math.round(ms / 1000);
+        return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0");
+    }
+
+    function pickMimeType() {
+        // Chrome/Firefox produisent du WebM/Opus ; Safari ne sait faire que du MP4.
+        var candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+        for (var i = 0; i < candidates.length; i++) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported(candidates[i])) return candidates[i];
+        }
+        return "";
+    }
+
+    function recordingSupported() {
+        return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+    }
+
+    function updateRecorderTime() {
+        var elapsed = Date.now() - state.recordStart;
+        $("recorder-time").textContent = formatDuration(elapsed);
+        if (elapsed >= MAX_RECORDING_MS) {
+            toast("Durée maximale atteinte (2 minutes).", "info");
+            stopRecording();
+        }
+    }
+
+    function releaseMicrophone() {
+        // Le micro doit être relâché explicitement, sinon le navigateur
+        // garde l'indicateur d'enregistrement allumé.
+        if (state.recordStream) {
+            state.recordStream.getTracks().forEach(function (track) {
+                track.stop();
+            });
+            state.recordStream = null;
+        }
+        if (state.recordTimer) {
+            window.clearInterval(state.recordTimer);
+            state.recordTimer = null;
+        }
+    }
+
+    async function startRecording() {
+        if (!recordingSupported()) {
+            toast("Votre navigateur ne permet pas l'enregistrement audio.", "error");
+            return;
+        }
+        if (!state.salonKey) {
+            toast("Sélectionnez un salon avant d'enregistrer.", "error");
+            return;
+        }
+
+        var stream;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+            // Refus explicite, micro absent, ou page servie en HTTP simple.
+            toast("Micro inaccessible. Autorisez-le dans votre navigateur.", "error");
+            return;
+        }
+
+        var mimeType = pickMimeType();
+        try {
+            state.recorder = new MediaRecorder(stream, mimeType ? { mimeType: mimeType } : undefined);
+        } catch (e) {
+            stream.getTracks().forEach(function (track) {
+                track.stop();
+            });
+            toast("Enregistrement impossible sur ce navigateur.", "error");
+            return;
+        }
+
+        state.recordStream = stream;
+        state.recordedChunks = [];
+        state.recordCancelled = false;
+        state.recordStart = Date.now();
+
+        state.recorder.ondataavailable = function (event) {
+            if (event.data && event.data.size > 0) state.recordedChunks.push(event.data);
+        };
+        state.recorder.onstop = function () {
+            var duration = Date.now() - state.recordStart;
+            releaseMicrophone();
+            hide($("recorder"));
+            show($("composer"));
+            if (state.recordCancelled) return;
+            sendVoiceMessage(new Blob(state.recordedChunks, { type: mimeType || "audio/webm" }), duration);
+        };
+
+        state.recorder.start();
+        $("recorder-time").textContent = "0:00";
+        state.recordTimer = window.setInterval(updateRecorderTime, 250);
+        hide($("composer"));
+        show($("recorder"));
+        $("recorder-stop").focus();
+    }
+
+    function stopRecording() {
+        if (state.recorder && state.recorder.state !== "inactive") state.recorder.stop();
+    }
+
+    function cancelRecording() {
+        state.recordCancelled = true;
+        stopRecording();
+        toast("Enregistrement annulé.", "info");
+    }
+
+    async function sendVoiceMessage(blob, durationMs) {
+        if (!blob.size) {
+            toast("Enregistrement vide.", "error");
+            return;
+        }
+
+        var button = $("record-btn");
+        setLoading(button, true);
+        try {
+            // Chiffré ici, avant tout envoi : le serveur ne reçoit que des
+            // octets illisibles, exactement comme pour le texte.
+            var buffer = await blob.arrayBuffer();
+            var encrypted = await encryptBytes(state.salonKey, buffer);
+
+            var attachment = await api("POST", "/salons/" + state.salonId + "/attachments", {
+                kind: "audio",
+                ciphertext: encrypted.ciphertext,
+                iv: encrypted.iv,
+                duration_ms: Math.min(Math.round(durationMs), MAX_RECORDING_MS),
+                mime: blob.type || "audio/webm"
+            });
+
+            var message = await api("POST", "/salons/" + state.salonId + "/messages", {
+                attachment_id: attachment.id,
+                channel_id: state.channelId
+            });
+
+            // La diffusion WebSocket nous renverra ce message : on ne l'ajoute
+            // soi-même que si la socket est fermée, pour éviter un doublon.
+            if (!state.ws || state.ws.readyState !== WebSocket.OPEN) await appendMessage(message);
+        } catch (error) {
+            toast(error.message, "error");
+        } finally {
+            setLoading(button, false);
+        }
+    }
+
+    function buildVoicePlayer(attachment) {
+        var wrap = document.createElement("div");
+        wrap.className = "voice-message";
+
+        var loading = document.createElement("span");
+        loading.className = "voice-loading";
+        loading.textContent = "Déchiffrement…";
+        wrap.appendChild(loading);
+
+        var duration = document.createElement("span");
+        duration.className = "voice-duration";
+        duration.textContent = formatDuration(attachment.duration_ms);
+
+        (async function () {
+            try {
+                var payload = await api("GET", "/salons/" + state.salonId + "/attachments/" + attachment.id);
+                var raw = await decryptBytes(state.salonKey, payload.ciphertext, payload.iv);
+                var blob = new Blob([raw], { type: attachment.mime || "audio/webm" });
+                var url = URL.createObjectURL(blob);
+
+                var audio = document.createElement("audio");
+                audio.controls = true;
+                audio.preload = "metadata";
+                audio.src = url;
+                audio.setAttribute("aria-label", "Message vocal de " + formatDuration(attachment.duration_ms));
+                audio.addEventListener("emptied", function () {
+                    URL.revokeObjectURL(url);
+                });
+
+                loading.remove();
+                wrap.appendChild(audio);
+                wrap.appendChild(duration);
+            } catch (e) {
+                loading.textContent = "Message vocal indéchiffrable.";
+            }
+        })();
+
+        return wrap;
     }
 
     /* ===================== Présence et frappe ===================== */
@@ -1597,6 +1835,12 @@
         $("security-btn").addEventListener("click", openSecurityPanel);
         $("cancel-edit-btn").addEventListener("click", cancelEditing);
 
+        $("record-btn").addEventListener("click", startRecording);
+        $("recorder-stop").addEventListener("click", stopRecording);
+        $("recorder-cancel").addEventListener("click", cancelRecording);
+        // Le bouton micro n'a pas lieu d'être si le navigateur ne sait pas enregistrer.
+        if (!recordingSupported()) hide($("record-btn"));
+
         // Signal de frappe, limité en fréquence
         $("message-input").addEventListener("input", function () {
             if (!state.editingId) signalTyping();
@@ -1628,6 +1872,7 @@
         document.addEventListener("keydown", function (e) {
             if (e.key !== "Escape") return;
             if (!$("modal-overlay").classList.contains("is-hidden")) closeModal(null);
+            else if (state.recorder && state.recorder.state === "recording") cancelRecording();
             else if (!$("panel-overlay").classList.contains("is-hidden")) closePanel();
             else if (state.editingId) cancelEditing();
             else closeSidebar();

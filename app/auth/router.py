@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from app.attachments.service import delete_for_user
 from app.auth.models import TokenPair, UserCreate, UserLogin, UserResponse
 from app.auth.service import (
     create_access_token,
@@ -142,6 +143,7 @@ async def delete_account(user: dict = Depends(get_current_user)):
     db = get_db()
     await db.refresh_tokens.delete_many({"user_id": user["_id"]})
     await db.messages.delete_many({"sender_id": user["_id"]})
+    await delete_for_user(user["_id"])
     await db.salons.update_many({}, {"$pull": {"members": {"user_id": user["_id"]}}})
     await db.salons.delete_many({"owner_id": user["_id"]})
     await db.users.delete_one({"_id": user["_id"]})

@@ -280,10 +280,29 @@
                 </button>
             </div>
 
+            <div class="recorder is-hidden" id="recorder" role="status" aria-live="polite">
+                <span class="recorder-dot" aria-hidden="true"></span>
+                <span class="recorder-label">Enregistrement</span>
+                <time class="recorder-time" id="recorder-time">0:00</time>
+                <button type="button" class="btn btn-ghost" id="recorder-cancel">
+                    <span class="btn-label">Annuler</span>
+                </button>
+                <button type="button" class="btn btn-primary" id="recorder-stop">
+                    <span class="btn-label">Envoyer</span>
+                </button>
+            </div>
+
             <form class="composer is-hidden" id="composer">
                 <label class="visually-hidden" for="message-input">Votre message</label>
                 <input type="text" id="message-input" placeholder="Écrivez un message chiffré…"
-                       autocomplete="off" maxlength="4000" required>
+                       autocomplete="off" maxlength="4000">
+                <button type="button" class="btn btn-secondary btn-icon" id="record-btn"
+                        aria-label="Enregistrer un message vocal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                        <rect x="9" y="2" width="6" height="12" rx="3"/>
+                        <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8"/>
+                    </svg>
+                </button>
                 <button type="submit" class="btn btn-primary" id="send-btn">
                     <span class="btn-label">Envoyer</span>
                 </button>

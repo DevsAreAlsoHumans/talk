@@ -71,6 +71,7 @@ message clair
 | **Édition** | Modifier son message : le client rechiffre, le serveur remplace l'enveloppe |
 | **Suppression** | Le texte chiffré est **réellement effacé** de la base, pas seulement masqué |
 | **Numéros de sécurité** | Empreinte de clé à comparer de vive voix, contre l'attaque de l'intercepteur |
+| **Messages vocaux** | Enregistrement jusqu'à 2 min, chiffré avec la clé du salon comme le texte |
 | **Export de clé** | Sauvegarde chiffrée de la clé privée, pour se connecter depuis un autre appareil |
 | **Historique paginé** | Curseur sur `_id` : performant quel que soit le volume |
 | **Droit à l'effacement** | Suppression du compte et de toutes les données associées |
@@ -87,7 +88,7 @@ message clair
 | Chiffrement | WebCrypto API (RSA-2048 + AES-256-GCM) | Implémentation native du navigateur, auditée |
 | Temps réel | WebSocket natif FastAPI | Diffusion instantanée, reconnexion automatique |
 | Authentification | JWT + Argon2id | Argon2id recommandé par l'ANSSI |
-| Tests | pytest + pytest-asyncio + pytest-cov | 226 tests, couverture 93 % (seuil bloquant à 90 %) |
+| Tests | pytest + pytest-asyncio + pytest-cov | 248 tests, couverture 93 % (seuil bloquant à 90 %) |
 | Linter | ruff | Lint + format en un seul outil |
 | CI | GitHub Actions | Lint, tests et build Docker à chaque push |
 | Conteneurisation | Docker + docker-compose | `docker compose up` et c'est parti |
@@ -131,6 +132,7 @@ app/                      Backend FastAPI
 ├── security.py           Protection CSRF : origine + double-submit cookie
 ├── ratelimit.py          Limitation de débit en fenêtre glissante
 ├── analytics.py          Mesure d'audience anonyme, sans cookie ni tiers
+├── attachments/          Messages vocaux chiffrés (dépôt, accès, expiration)
 ├── auth/                 Inscription, connexion, JWT, suppression de compte
 ├── salons/               Salons, membres, canaux, rotation des clés
 ├── messages/             Messages chiffrés, pagination, WebSocket
@@ -180,6 +182,30 @@ tests/
 5. **Retrait d'un membre** — la clé du salon est régénérée et redistribuée aux
    membres restants ; le compteur `key_version` est incrémenté. L'ancien membre
    ne peut plus déchiffrer les messages postés après son départ.
+
+### Messages vocaux
+
+L'audio suit exactement le même chemin que le texte : `MediaRecorder` produit
+un conteneur WebM/Opus, chiffré en AES-256-GCM avec **la clé du salon** avant
+le moindre envoi. Le serveur reçoit des octets qu'il ne sait pas interpréter.
+
+Trois choix méritent d'être expliqués.
+
+**Le stockage est binaire, pas en base64.** Le contenu est déposé en `Binary`
+BSON : la base économise un tiers de place, et le document reste très loin de
+la limite MongoDB de 16 Mo.
+
+**Le dépôt est séparé du message.** Un vocal d'une minute pèse près de 100 Ko,
+soit six fois le plafond d'un message. Il est donc déposé d'abord par HTTP —
+jamais par le WebSocket, qui n'est pas fait pour ça — puis référencé par le
+message. Le dépôt est refusé si la pièce jointe appartient à quelqu'un d'autre
+ou si elle est déjà rattachée ailleurs.
+
+**Une pièce jointe orpheline s'efface seule.** Si le message n'est finalement
+jamais envoyé, le fichier resterait en base pour rien. Il naît donc avec une
+date d'expiration d'une heure, retirée seulement au moment où un message le
+référence ; un index TTL fait le ménage. Supprimer le message, ou le compte,
+efface l'audio pour de bon.
 
 ### Ce que le chiffrement de bout en bout ne protège pas
 
@@ -241,9 +267,12 @@ La politique de sécurité de contenu est volontairement stricte :
 
 ```
 default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;
-font-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none';
-base-uri 'self'; form-action 'self'
+media-src 'self' blob:; font-src 'self'; connect-src 'self' ws: wss:;
+frame-ancestors 'none'; base-uri 'self'; form-action 'self'
 ```
+
+`blob:` n'est autorisé que pour les médias : l'audio déchiffré est lu depuis un
+`Blob` local, jamais depuis une adresse distante.
 
 Aucun `unsafe-inline`, aucun `unsafe-eval`, aucun domaine tiers. Le site n'utilise
 donc ni police Google, ni CDN, ni balise `<style>` ou `<script>` en ligne.
@@ -367,6 +396,13 @@ sont vérifiés :
 | `DELETE` | `/salons/{id}/messages/{msg_id}` | Supprimer son message (chiffré effacé) |
 | `WS` | `/ws/{salon_id}?token=JWT` | Flux temps réel typé |
 
+### Messages vocaux
+
+| Méthode | Endpoint | Description |
+|---------|----------|-------------|
+| `POST` | `/salons/{id}/attachments` | Déposer un audio chiffré (10 / 5 min) |
+| `GET` | `/salons/{id}/attachments/{aid}` | Récupérer l'audio chiffré |
+
 La pagination fonctionne par curseur sur l'`_id` MongoDB, ce qui reste performant
 quel que soit le volume — contrairement à un `skip` classique :
 
@@ -406,6 +442,8 @@ Toutes les valeurs se règlent par variables d'environnement.
 | `RATE_LIMIT_SIGNUP_WINDOW` | `3600` | Fenêtre d'inscription, en secondes |
 | `RATE_LIMIT_MESSAGE` | `30` | Messages autorisés par fenêtre |
 | `RATE_LIMIT_MESSAGE_WINDOW` | `60` | Fenêtre des messages, en secondes |
+| `RATE_LIMIT_ATTACHMENT` | `10` | Messages vocaux autorisés par fenêtre |
+| `RATE_LIMIT_ATTACHMENT_WINDOW` | `300` | Fenêtre des messages vocaux, en secondes |
 
 > **En production**, `JWT_SECRET` et `ANALYTICS_SALT` doivent impérativement être
 > remplacés. Le fichier `.env` n'est pas versionné.
@@ -429,7 +467,7 @@ ruff check app/ tests/
 ruff format --check app/ tests/
 ```
 
-**226 tests** répartis ainsi :
+**248 tests** répartis ainsi :
 
 | Fichier | Couvre |
 |---------|--------|
@@ -448,6 +486,7 @@ ruff format --check app/ tests/
 | `integration/test_message_edit_flow.py` | Édition, suppression, effacement réel du chiffré |
 | `integration/test_direct_flow.py` | Conversations privées, idempotence, empreintes |
 | `integration/test_websocket_flow.py` | Handshake, présence, frappe, refus d'accès |
+| `integration/test_attachments_flow.py` | Messages vocaux : dépôt, accès, rattachement, effacement |
 | `unit/test_ws_manager.py` | Diffusion, dédoublonnage des onglets, sockets mortes |
 | `integration/test_pages.py` | Pages statiques, liens, 404, en-têtes, absence d'inline |
 
@@ -474,6 +513,8 @@ Ce projet est pédagogique ; ces limites sont assumées et documentées.
 - **Pas de confidentialité persistante par message.** La clé de salon tourne au
   départ d'un membre, mais pas à chaque message comme le ferait le protocole Signal.
   Quelqu'un qui obtiendrait la clé d'un salon pourrait relire tout son historique.
+- **Les métadonnées des vocaux restent lisibles.** Le serveur ignore le contenu
+  audio, mais connaît sa durée et sa taille — il l'affiche avant téléchargement.
 - **La vérification d'empreinte repose sur l'utilisateur.** Le dispositif
   n'a d'effet que si les correspondants la comparent réellement ; rien ne les y
   oblige, et rien ne signale automatiquement un changement de clé.

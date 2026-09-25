@@ -8,6 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.analytics import router as analytics_router
+from app.attachments.router import router as attachments_router
 from app.auth.router import router as auth_router
 from app.config import settings
 from app.db import close_db, connect_db
@@ -48,6 +49,9 @@ async def security_headers(request: Request, call_next):
         "script-src 'self'; "
         "style-src 'self'; "
         "img-src 'self' data:; "
+        # blob: uniquement pour les médias : l'audio déchiffré est lu depuis
+        # un Blob local, jamais depuis une URL distante.
+        "media-src 'self' blob:; "
         "font-src 'self'; "
         "connect-src 'self' ws: wss:; "
         "frame-ancestors 'none'; "
@@ -60,6 +64,7 @@ async def security_headers(request: Request, call_next):
 app.include_router(auth_router)
 app.include_router(salons_router)
 app.include_router(messages_router)
+app.include_router(attachments_router)
 app.include_router(analytics_router)
 
 

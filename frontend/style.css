@@ -1283,3 +1283,76 @@ svg { max-width: 100%; height: auto; display: block; }
 .panel-actions .btn { flex: 1 1 auto; min-width: 150px; }
 
 .file-input { display: none; }
+
+/* ==========================================================================
+   Messages vocaux
+   ========================================================================== */
+
+.recorder {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-3) var(--s-4);
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.recorder-dot {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 10px;
+    border-radius: 50%;
+    background: var(--danger);
+    animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+}
+
+.recorder-label { color: var(--text); font-weight: 600; font-size: 0.92rem; }
+
+.recorder-time {
+    flex: 1;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.92rem;
+}
+
+/* Lecteur audio dans un message */
+.voice-message {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+}
+
+.message[data-own="true"] .voice-message {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
+.voice-message audio { flex: 1; min-width: 0; height: 38px; }
+
+.voice-duration {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.message[data-own="true"] .voice-duration { color: rgba(255, 255, 255, 0.85); }
+
+.voice-loading {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    color: var(--text-muted);
+    font-size: 0.88rem;
+}

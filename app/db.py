@@ -22,6 +22,12 @@ async def connect_db():
     await db.messages.create_index([("salon_id", 1), ("channel_id", 1), ("_id", -1)])
     await db.messages.create_index("sender_id")
 
+    await db.attachments.create_index("salon_id")
+    await db.attachments.create_index("message_id")
+    await db.attachments.create_index("uploader_id")
+    # Une pièce jointe jamais rattachée à un message s'efface d'elle-même.
+    await db.attachments.create_index("expires_at", expireAfterSeconds=0)
+
     await db.refresh_tokens.create_index("token")
     await db.refresh_tokens.create_index("expires_at", expireAfterSeconds=0)
 
