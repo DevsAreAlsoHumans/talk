@@ -1,0 +1,44 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_DB_NAME=talk
+      - REDIS_URI=redis://redis:6379/0
+      - SECRET_KEY=dev-secret-change-me
+    depends_on:
+      - mongo
+      - redis
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "8025:8025"
+
+  test:
+    build: .
+    command: ["pytest", "-q"]
+    environment:
+      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_DB_NAME=talk_test
+      - REDIS_URI=redis://redis:6379/1
+      - SECRET_KEY=test-secret
+    volumes:
+      - ./tests:/app/tests
+      - ./pyproject.toml:/app/pyproject.toml
+    depends_on:
+      - mongo
+      - redis
+
+volumes:
+  mongo_data:

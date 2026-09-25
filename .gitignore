@@ -2,7 +2,26 @@
 RESUME_PRIVE.md
 .env
 .env.*
+CLAUDE.md
 
 # Artefacts
 .DS_Store
 *.log
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+
+# Node (si outillage frontend ajouté plus tard)
+node_modules/

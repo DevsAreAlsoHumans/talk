@@ -11,7 +11,7 @@ Sujet d'examen `SDV DEV 2026`.
 | Couche | Technologie |
 |--------|-------------|
 | Backend | Python + FastAPI |
-| Stockage | Redis ou MongoDB |
+| Stockage | MongoDB |
 | Frontend | HTML + CSS + JavaScript vanilla |
 | Temps réel | WebSocket / polling court |
 | CI | GitHub Actions |
@@ -19,11 +19,17 @@ Sujet d'examen `SDV DEV 2026`.
 
 ## Fonctionnalités
 
-- Authentification (inscription, connexion, sessions sécurisées, mots de passe hachés).
-- Salons et canaux de discussion multi-utilisateurs, proche d'un serveur Discord.
+- Authentification (inscription, connexion, sessions sécurisées, mots de passe hachés, 2fa, mot de passe oublié, mot de passe fort obligatoire).
+- Salons et canaux de discussion multi-utilisateurs et privé entre 2 utilisateur, proche d'un serveur Discord.
+- Système d'amis avec invitation, invitation unique, révocation, liste des amis (ajout par pseudo ou #ID comme sur Discord).
 - Messages chiffrés de bout en bout, **jamais stockés en clair**.
-- Mise à jour en temps réel ou quasi temps réel.
+- Mise à jour en temps réel ou quasi temps réel via WebSocket.
+- Notifications de nouveaux messages, d'invitation, d'amis, d'échange de salon.
 - Interface web légère et utilisable, style webapp.
+- Badge en ligne/hors ligne.
+- Système de role et permissions pour les salons.
+- Image de profil et avatar (utilise les "Characters" de https://www.dicebear.com/styles/ ou une image personnalisée importée).
+- Pouvoir envoyer des images, des gifs, des vidéos, des fichiers (chiffrés de bout en bout, **jamais stockés en clair**).
 
 ## Sécurité
 
@@ -31,6 +37,7 @@ Sujet d'examen `SDV DEV 2026`.
 - Prévention des injections SQL et NoSQL.
 - Chiffrement de bout en bout côté client (clés jamais transmises au serveur).
 - Validation stricte des entrées, anti-XSS, headers de sécurité, sessions sécurisées.
+- Protection contre **brute force** pour les connections avec désactivation du compte après trois tentatives + mail d'alerte.
 
 ## Démarrer avec Docker
 
@@ -43,7 +50,7 @@ La **CI GitHub Actions** exécute les tests et le linter à chaque push / pull r
 
 ## Mode de travail sur ce dépôt
 
-- Travail **individuel** : chaque étudiant développe son projet sur **sa propre branche** (`etudiant/<nom>-<prenom>`).
+- Travail **individuel** : chaque étudiant développe son projet sur **sa propre branche** (`etudiant/bellini-romain`).
 - **Ne jamais casser les branches des autres** (pas de force-push, reset, réécriture ni suppression des branches d'autrui).
 - La branche `main` sert de référence ; les projets sont rendus sur les branches étudiantes avec **CI verte**.
 
