@@ -1,0 +1,45 @@
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB=ronyme
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - ANALYTICS_SALT=${ANALYTICS_SALT:-change-me-analytics-salt}
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost:8000}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  test:
+    build: .
+    command: python -m pytest tests/ -v --tb=short
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB=ronyme_test
+      - JWT_SECRET=test-secret
+      - ANALYTICS_SALT=test-salt
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    profiles:
+      - test
+
+volumes:
+  mongo_data:

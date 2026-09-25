@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0a0c10">
+
+    <title>Ronyme — Messagerie chiffrée de bout en bout</title>
+    <meta name="description" content="Ronyme est une messagerie de groupe chiffrée de bout en bout. Vos salons, vos canaux, vos messages : le serveur ne peut jamais les lire. Sans installation, directement dans le navigateur.">
+    <link rel="canonical" href="https://ronyme.app/">
+
+    <!-- Icônes -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
+
+    <!-- Partage sur les réseaux sociaux -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Ronyme">
+    <meta property="og:locale" content="fr_FR">
+    <meta property="og:title" content="Ronyme — Messagerie chiffrée de bout en bout">
+    <meta property="og:description" content="Salons, canaux et messages chiffrés côté client. Le serveur ne voit jamais vos conversations en clair.">
+    <meta property="og:url" content="https://ronyme.app/">
+    <meta property="og:image" content="https://ronyme.app/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Ronyme — messagerie chiffrée de bout en bout">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Ronyme — Messagerie chiffrée de bout en bout">
+    <meta name="twitter:description" content="Salons, canaux et messages chiffrés côté client. Le serveur ne voit jamais vos conversations en clair.">
+    <meta name="twitter:image" content="https://ronyme.app/og-image.png">
+
+    <link rel="stylesheet" href="/style.css">
+    <script src="/site.js" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#main">Aller au contenu principal</a>
+
+    <header class="site-nav">
+        <nav class="container" aria-label="Navigation principale">
+            <a class="brand" href="/">
+                <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                    <rect x="2" y="2" width="28" height="28" rx="8" fill="#2563eb"/>
+                    <path d="M16 9a4 4 0 0 0-4 4v2h-.5A1.5 1.5 0 0 0 10 16.5v5A1.5 1.5 0 0 0 11.5 23h9a1.5 1.5 0 0 0 1.5-1.5v-5a1.5 1.5 0 0 0-1.5-1.5H20v-2a4 4 0 0 0-4-4Zm2 6h-4v-2a2 2 0 1 1 4 0v2Z" fill="#fff"/>
+                </svg>
+                Ronyme
+            </a>
+            <ul class="nav-links">
+                <li><a href="#fonctionnement">Fonctionnement</a></li>
+                <li><a href="#securite">Sécurité</a></li>
+                <li><a href="/rgpd.html">Confidentialité</a></li>
+                <li><a href="/app.html">Se connecter</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main id="main">
+        <section class="hero">
+            <div class="container">
+                <p class="badge">
+                    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" focusable="false">
+                        <path fill-rule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V8H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm2.5 7h-5V5.5a2.5 2.5 0 0 1 5 0V8Z" clip-rule="evenodd"/>
+                    </svg>
+                    Chiffrement de bout en bout par défaut
+                </p>
+
+                <h1>Vos conversations<br>n'appartiennent qu'à vous</h1>
+
+                <p class="hero-lead">
+                    Ronyme est une messagerie de groupe où le chiffrement se fait dans votre
+                    navigateur. Les clés ne quittent jamais votre appareil&nbsp;: même nous,
+                    nous ne pouvons pas lire vos messages.
+                </p>
+
+                <!-- Un seul appel à l'action sur toute la page -->
+                <p class="hero-cta">
+                    <a class="btn btn-primary btn-lg" href="/app.html" data-cta="signup">
+                        Créer mon compte chiffré
+                    </a>
+                </p>
+
+                <p class="hero-note">Gratuit, sans installation, sans numéro de téléphone.</p>
+            </div>
+        </section>
+
+        <section class="section" id="securite" aria-labelledby="securite-title">
+            <div class="container">
+                <div class="section-head">
+                    <h2 id="securite-title">Une confidentialité vérifiable</h2>
+                    <p>Pas de promesse marketing : voici exactement ce que fait le logiciel.</p>
+                </div>
+
+                <div class="grid grid-3">
+                    <article class="card">
+                        <span class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                <rect x="3" y="11" width="18" height="11" rx="2"/>
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </svg>
+                        </span>
+                        <h3>Clés générées chez vous</h3>
+                        <p>Une paire RSA-2048 est créée par votre navigateur à l'inscription. La clé privée est chiffrée avec votre mot de passe et ne quitte jamais l'appareil.</p>
+                    </article>
+
+                    <article class="card">
+                        <span class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                <path d="M12 2 4 6v6c0 5 3.4 9.4 8 10 4.6-.6 8-5 8-10V6l-8-4Z"/>
+                                <path d="m9 12 2 2 4-4"/>
+                            </svg>
+                        </span>
+                        <h3>Serveur aveugle</h3>
+                        <p>Chaque message est chiffré en AES-256-GCM avant l'envoi. La base de données ne contient que du texte chiffré et un vecteur d'initialisation.</p>
+                    </article>
+
+                    <article class="card">
+                        <span class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                                <path d="M21 3v5h-5"/>
+                                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                                <path d="M8 16H3v5"/>
+                            </svg>
+                        </span>
+                        <h3>Rotation des clés</h3>
+                        <p>Quand un membre quitte un salon, la clé est régénérée et redistribuée. Il ne peut plus déchiffrer les messages postés après son départ.</p>
+                    </article>
+
+                    <article class="card">
+                        <span class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                <path d="M4 4h16v12H5.5L4 18V4Z"/>
+                                <path d="M8 9h8M8 12h5"/>
+                            </svg>
+                        </span>
+                        <h3>Salons et canaux</h3>
+                        <p>Organisez vos groupes comme sur Discord : un salon par équipe, autant de canaux thématiques que nécessaire, tous chiffrés.</p>
+                    </article>
+
+                    <article class="card">
+                        <span class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/>
+                            </svg>
+                        </span>
+                        <h3>Temps réel</h3>
+                        <p>Une connexion WebSocket diffuse les messages instantanément, avec reconnexion automatique et indicateur d'état visible.</p>
+                    </article>
+
+                    <article class="card">
+                        <span class="card-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                <circle cx="12" cy="12" r="9"/>
+                                <path d="M12 8v4l3 2"/>
+                            </svg>
+                        </span>
+                        <h3>Aucun pistage</h3>
+                        <p>Pas de traceur tiers, pas de police web externe, pas de profilage. La mesure d'audience est anonyme, sans cookie et hébergée avec le service.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="fonctionnement" aria-labelledby="fonctionnement-title">
+            <div class="container">
+                <div class="section-head">
+                    <h2 id="fonctionnement-title">Comment ça marche</h2>
+                    <p>Trois étapes, aucune configuration.</p>
+                </div>
+
+                <ol class="steps">
+                    <li>
+                        <h3>Vous créez un compte</h3>
+                        <p>Le navigateur génère vos clés. Le serveur ne reçoit que la clé publique&nbsp;; votre mot de passe protège la clé privée localement.</p>
+                    </li>
+                    <li>
+                        <h3>Vous ouvrez un salon</h3>
+                        <p>Une clé AES-256 est tirée au hasard pour le salon, puis chiffrée avec la clé publique de chaque membre invité.</p>
+                    </li>
+                    <li>
+                        <h3>Vous discutez</h3>
+                        <p>Chaque message est chiffré avant de partir, déchiffré uniquement chez les destinataires. Le serveur ne fait que transporter.</p>
+                    </li>
+                </ol>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>© 2026 Ronyme — Projet d'examen SDV DEV 2026</p>
+            <nav class="footer-links" aria-label="Liens légaux">
+                <a href="/cgu.html">Conditions d'utilisation</a>
+                <a href="/rgpd.html">Confidentialité &amp; RGPD</a>
+                <a href="/app.html">Accéder à l'application</a>
+            </nav>
+        </div>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0a0c10">
+
+    <title>Confidentialité &amp; RGPD — Ronyme</title>
+    <meta name="description" content="Politique de confidentialité de Ronyme : quelles données sont collectées, pourquoi, combien de temps, et comment exercer vos droits RGPD. Aucun traceur tiers, aucun profilage.">
+    <link rel="canonical" href="https://ronyme.app/rgpd.html">
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Ronyme">
+    <meta property="og:locale" content="fr_FR">
+    <meta property="og:title" content="Confidentialité &amp; RGPD — Ronyme">
+    <meta property="og:description" content="Ce que Ronyme collecte, ce qu'il ne collecte pas, et comment exercer vos droits.">
+    <meta property="og:url" content="https://ronyme.app/rgpd.html">
+    <meta property="og:image" content="https://ronyme.app/og-image.png">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <link rel="stylesheet" href="/style.css">
+    <script src="/site.js" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#main">Aller au contenu principal</a>
+
+    <header class="site-nav">
+        <nav class="container" aria-label="Navigation principale">
+            <a class="brand" href="/">
+                <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                    <rect x="2" y="2" width="28" height="28" rx="8" fill="#2563eb"/>
+                    <path d="M16 9a4 4 0 0 0-4 4v2h-.5A1.5 1.5 0 0 0 10 16.5v5A1.5 1.5 0 0 0 11.5 23h9a1.5 1.5 0 0 0 1.5-1.5v-5a1.5 1.5 0 0 0-1.5-1.5H20v-2a4 4 0 0 0-4-4Zm2 6h-4v-2a2 2 0 1 1 4 0v2Z" fill="#fff"/>
+                </svg>
+                Ronyme
+            </a>
+            <ul class="nav-links">
+                <li><a href="/">Accueil</a></li>
+                <li><a href="/cgu.html">Conditions</a></li>
+                <li><a href="/rgpd.html">Confidentialité</a></li>
+                <li><a href="/app.html">Se connecter</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="prose" id="main">
+        <h1>Confidentialité &amp; RGPD</h1>
+        <p class="doc-meta">Version 1.0 — dernière mise à jour&nbsp;: 23 septembre 2026</p>
+
+        <div class="callout">
+            <p>
+                <strong>Le résumé&nbsp;:</strong> Ronyme ne peut pas lire vos messages, ne
+                pose qu'un seul cookie (technique), n'utilise aucun traceur tiers, ne charge
+                aucune police externe et ne revend rien. La mesure d'audience est anonyme et
+                hébergée avec le service.
+            </p>
+        </div>
+
+        <h2>1. Responsable du traitement</h2>
+        <p>
+            Ronyme est édité dans le cadre du projet d'examen SDV DEV 2026 par
+            <strong>Liuaga Avazeri</strong>. Pour toute question relative à vos données&nbsp;:
+            <a href="mailto:privacy@ronyme.app">privacy@ronyme.app</a>.
+        </p>
+
+        <h2>2. Données collectées</h2>
+        <table>
+            <caption class="visually-hidden">Données traitées par Ronyme, finalité, base légale et durée de conservation</caption>
+            <thead>
+                <tr>
+                    <th scope="col">Donnée</th>
+                    <th scope="col">Finalité</th>
+                    <th scope="col">Base légale</th>
+                    <th scope="col">Conservation</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Nom d'utilisateur</td>
+                    <td>Identification dans les salons</td>
+                    <td>Exécution du contrat</td>
+                    <td>Jusqu'à suppression du compte</td>
+                </tr>
+                <tr>
+                    <td>Adresse e-mail</td>
+                    <td>Récupération du compte, contact de sécurité</td>
+                    <td>Exécution du contrat</td>
+                    <td>Jusqu'à suppression du compte</td>
+                </tr>
+                <tr>
+                    <td>Empreinte du mot de passe (Argon2id)</td>
+                    <td>Authentification</td>
+                    <td>Exécution du contrat</td>
+                    <td>Jusqu'à suppression du compte</td>
+                </tr>
+                <tr>
+                    <td>Clé publique RSA</td>
+                    <td>Distribution des clés de salon</td>
+                    <td>Exécution du contrat</td>
+                    <td>Jusqu'à suppression du compte</td>
+                </tr>
+                <tr>
+                    <td>Messages chiffrés</td>
+                    <td>Transport et historique</td>
+                    <td>Exécution du contrat</td>
+                    <td>Jusqu'à suppression du compte ou du salon</td>
+                </tr>
+                <tr>
+                    <td>Jetons de session</td>
+                    <td>Maintien de la connexion</td>
+                    <td>Exécution du contrat</td>
+                    <td>7 jours maximum</td>
+                </tr>
+                <tr>
+                    <td>Mesure d'audience anonyme</td>
+                    <td>Statistiques de fréquentation</td>
+                    <td>Consentement</td>
+                    <td>13 mois maximum</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h2>3. Ce que nous ne collectons pas</h2>
+        <ul>
+            <li><strong>Le contenu de vos messages</strong>&nbsp;: il est chiffré dans votre navigateur avant l'envoi. Le serveur ne stocke que du texte chiffré et un vecteur d'initialisation.</li>
+            <li><strong>Votre clé privée</strong>&nbsp;: elle est générée localement, chiffrée avec votre mot de passe et ne transite jamais sur le réseau.</li>
+            <li><strong>Votre numéro de téléphone</strong>&nbsp;: il n'est jamais demandé.</li>
+            <li><strong>Votre carnet de contacts</strong>&nbsp;: aucun import, aucun accès.</li>
+            <li><strong>Votre adresse IP en clair</strong>&nbsp;: elle n'est jamais enregistrée en base.</li>
+        </ul>
+
+        <h2>4. Cookies et traceurs</h2>
+        <h3>Cookie strictement nécessaire</h3>
+        <p>
+            Ronyme dépose un unique cookie, <code>csrf_token</code>, qui protège les
+            formulaires contre les attaques de type CSRF. Il est indispensable au
+            fonctionnement du service&nbsp;: à ce titre, il ne nécessite pas de consentement
+            (article 82 de la loi Informatique et Libertés). Il est limité à ce site
+            (<code>SameSite=Strict</code>) et expire à la fin de la session.
+        </p>
+
+        <h3>Mesure d'audience</h3>
+        <p>
+            La mesure d'audience est développée et hébergée avec l'application&nbsp;: aucune
+            donnée ne part vers Google Analytics ou un service équivalent. Elle fonctionne
+            <strong>sans cookie</strong>.
+        </p>
+        <p>Pour distinguer les visites, un identifiant temporaire est calculé ainsi&nbsp;:</p>
+        <ul>
+            <li>empreinte SHA-256 de&nbsp;: adresse IP + navigateur + un secret serveur + la date du jour&nbsp;;</li>
+            <li>tronquée à 16 caractères&nbsp;;</li>
+            <li>renouvelée chaque jour, ce qui rend tout suivi dans la durée impossible&nbsp;;</li>
+            <li>l'adresse IP d'origine n'est à aucun moment enregistrée.</li>
+        </ul>
+        <p>
+            Les en-têtes <em>Do Not Track</em> et <em>Global Privacy Control</em> sont
+            respectés&nbsp;: s'ils sont activés, aucun événement n'est enregistré, même après
+            acceptation.
+        </p>
+        <p>
+            <a href="#" id="reset-consent">Modifier mon choix concernant la mesure d'audience</a>
+        </p>
+
+        <h3>Stockage local</h3>
+        <p>
+            Votre clé privée chiffrée et votre choix de consentement sont conservés dans le
+            <code>localStorage</code> de votre navigateur. Ces données restent sur votre
+            appareil et ne sont jamais transmises au serveur. Vider les données du site les
+            efface&nbsp;— et vous fait perdre l'accès à vos messages chiffrés.
+        </p>
+
+        <h2>5. Destinataires et sous-traitants</h2>
+        <p>
+            Aucune donnée n'est vendue, louée ou transmise à des fins publicitaires. Les seuls
+            destinataires sont l'hébergeur de l'infrastructure et l'éditeur, dans la limite de
+            l'administration technique. <strong>Aucun transfert hors de l'Union européenne</strong>
+            n'est réalisé.
+        </p>
+
+        <h2>6. Sécurité</h2>
+        <ul>
+            <li>Chiffrement de bout en bout&nbsp;: RSA-2048 pour les clés, AES-256-GCM pour les messages.</li>
+            <li>Mots de passe hachés avec Argon2id, algorithme recommandé par l'ANSSI.</li>
+            <li>Dérivation de la clé locale par PBKDF2, 210&nbsp;000 itérations.</li>
+            <li>Sessions courtes (15 minutes) avec jeton de rafraîchissement révocable.</li>
+            <li>Protection CSRF, en-têtes de sécurité stricts et politique de sécurité de contenu (CSP).</li>
+            <li>Limitation de débit contre les attaques par force brute.</li>
+            <li>Rotation des clés de salon au départ d'un membre.</li>
+        </ul>
+
+        <h2>7. Vos droits</h2>
+        <p>Conformément au RGPD, vous disposez des droits suivants&nbsp;:</p>
+        <ul>
+            <li><strong>Accès</strong> (art. 15)&nbsp;: obtenir une copie de vos données. Les messages étant chiffrés, seule leur version chiffrée peut être fournie.</li>
+            <li><strong>Rectification</strong> (art. 16)&nbsp;: corriger vos informations de compte.</li>
+            <li><strong>Effacement</strong> (art. 17)&nbsp;: supprimer votre compte et les données associées, directement depuis l'application.</li>
+            <li><strong>Portabilité</strong> (art. 20)&nbsp;: récupérer vos données dans un format structuré.</li>
+            <li><strong>Opposition</strong> (art. 21)&nbsp;: refuser la mesure d'audience à tout moment, sans conséquence sur le service.</li>
+            <li><strong>Retrait du consentement</strong> (art. 7)&nbsp;: aussi simple à exercer que son octroi, via le lien ci-dessus.</li>
+        </ul>
+        <p>
+            Pour exercer ces droits&nbsp;: <a href="mailto:privacy@ronyme.app">privacy@ronyme.app</a>.
+            Une réponse vous sera apportée sous un mois.
+        </p>
+        <p>
+            Si la réponse ne vous satisfait pas, vous pouvez saisir la
+            <a href="https://www.cnil.fr/fr/plaintes" rel="noopener noreferrer">CNIL</a>.
+        </p>
+
+        <h2>8. Violation de données</h2>
+        <p>
+            En cas de violation susceptible d'engendrer un risque pour vos droits, la CNIL sera
+            notifiée sous 72 heures et les personnes concernées informées sans délai. Le
+            chiffrement de bout en bout limite structurellement la portée d'une telle
+            violation&nbsp;: une copie de la base ne livrerait aucun message lisible.
+        </p>
+
+        <h2>9. Modification de cette politique</h2>
+        <p>
+            Toute évolution sera publiée sur cette page avec une nouvelle date de mise à jour.
+            Un changement affectant vos droits sera signalé lors de votre prochaine connexion.
+        </p>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>© 2026 Ronyme — Projet d'examen SDV DEV 2026</p>
+            <nav class="footer-links" aria-label="Liens légaux">
+                <a href="/cgu.html">Conditions d'utilisation</a>
+                <a href="/rgpd.html">Confidentialité &amp; RGPD</a>
+                <a href="/app.html">Accéder à l'application</a>
+            </nav>
+        </div>
+    </footer>
+</body>
+</html>

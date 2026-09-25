@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0a0c10">
+    <meta name="robots" content="noindex">
+
+    <title>Application — Ronyme</title>
+    <meta name="description" content="Accédez à vos salons chiffrés Ronyme. Connexion et inscription sécurisées, chiffrement de bout en bout côté navigateur.">
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico" sizes="32x32">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
+
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Ronyme">
+    <meta property="og:title" content="Application — Ronyme">
+    <meta property="og:description" content="Vos salons chiffrés de bout en bout.">
+    <meta property="og:image" content="https://ronyme.app/og-image.png">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <link rel="stylesheet" href="/style.css">
+    <script src="/site.js" defer></script>
+    <script src="/app.js" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#main">Aller au contenu principal</a>
+
+    <!-- Zone d'annonces pour lecteurs d'écran + notifications -->
+    <div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
+
+    <!-- ===================== Écran d'authentification ===================== -->
+    <div id="auth-screen">
+        <header class="site-nav">
+            <nav class="container" aria-label="Navigation principale">
+                <a class="brand" href="/">
+                    <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                        <rect x="2" y="2" width="28" height="28" rx="8" fill="#2563eb"/>
+                        <path d="M16 9a4 4 0 0 0-4 4v2h-.5A1.5 1.5 0 0 0 10 16.5v5A1.5 1.5 0 0 0 11.5 23h9a1.5 1.5 0 0 0 1.5-1.5v-5a1.5 1.5 0 0 0-1.5-1.5H20v-2a4 4 0 0 0-4-4Zm2 6h-4v-2a2 2 0 1 1 4 0v2Z" fill="#fff"/>
+                    </svg>
+                    Ronyme
+                </a>
+                <ul class="nav-links">
+                    <li><a href="/">Accueil</a></li>
+                    <li><a href="/rgpd.html">Confidentialité</a></li>
+                </ul>
+            </nav>
+        </header>
+
+        <main class="auth-layout" id="main">
+            <!-- ---- Connexion ---- -->
+            <div class="auth-card" id="login-card">
+                <h1>Connexion</h1>
+                <p>Vos clés sont déchiffrées localement avec votre mot de passe.</p>
+
+                <div class="form-alert" id="login-alert" role="alert"></div>
+
+                <form id="login-form" novalidate>
+                    <div class="field">
+                        <label for="login-username">Nom d'utilisateur<span class="required" aria-hidden="true">*</span></label>
+                        <input type="text" id="login-username" name="username" autocomplete="username"
+                               required aria-describedby="login-username-error" maxlength="30">
+                        <p class="field-error" id="login-username-error" aria-live="polite"></p>
+                    </div>
+
+                    <div class="field">
+                        <label for="login-password">Mot de passe<span class="required" aria-hidden="true">*</span></label>
+                        <div class="password-wrap">
+                            <input type="password" id="login-password" name="password" autocomplete="current-password"
+                                   required aria-describedby="login-password-error" maxlength="128">
+                            <button type="button" class="password-toggle" data-toggle="login-password"
+                                    aria-label="Afficher le mot de passe">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <p class="field-error" id="login-password-error" aria-live="polite"></p>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-block" id="login-submit">
+                        <span class="btn-label">Se connecter</span>
+                    </button>
+                </form>
+
+                <p class="switch-link">
+                    Pas encore de compte ?
+                    <a href="#" id="show-signup">Créer un compte</a>
+                </p>
+            </div>
+
+            <!-- ---- Inscription ---- -->
+            <div class="auth-card is-hidden" id="signup-card">
+                <h1>Créer un compte</h1>
+                <p>Vos clés de chiffrement sont générées ici, dans votre navigateur.</p>
+
+                <div class="form-alert" id="signup-alert" role="alert"></div>
+
+                <form id="signup-form" novalidate>
+                    <!-- Piège à robots : masqué visuellement, ignoré par les humains -->
+                    <div class="honeypot" aria-hidden="true">
+                        <label for="signup-website">Ne pas remplir</label>
+                        <input type="text" id="signup-website" name="website" tabindex="-1" autocomplete="off">
+                    </div>
+
+                    <div class="field">
+                        <label for="signup-username">Nom d'utilisateur<span class="required" aria-hidden="true">*</span></label>
+                        <input type="text" id="signup-username" name="username" autocomplete="username"
+                               required minlength="3" maxlength="30" pattern="[A-Za-z0-9_-]+"
+                               aria-describedby="signup-username-hint signup-username-error">
+                        <span class="field-hint" id="signup-username-hint">3 à 30 caractères : lettres, chiffres, tiret ou souligné.</span>
+                        <p class="field-error" id="signup-username-error" aria-live="polite"></p>
+                    </div>
+
+                    <div class="field">
+                        <label for="signup-email">Adresse e-mail<span class="required" aria-hidden="true">*</span></label>
+                        <input type="email" id="signup-email" name="email" autocomplete="email"
+                               required maxlength="254" inputmode="email"
+                               aria-describedby="signup-email-hint signup-email-error">
+                        <span class="field-hint" id="signup-email-hint">Sert uniquement à récupérer votre compte. Jamais transmise à un tiers.</span>
+                        <p class="field-error" id="signup-email-error" aria-live="polite"></p>
+                    </div>
+
+                    <div class="field">
+                        <label for="signup-password">Mot de passe<span class="required" aria-hidden="true">*</span></label>
+                        <div class="password-wrap">
+                            <input type="password" id="signup-password" name="password" autocomplete="new-password"
+                                   required minlength="8" maxlength="128"
+                                   aria-describedby="signup-password-hint signup-password-error">
+                            <button type="button" class="password-toggle" data-toggle="signup-password"
+                                    aria-label="Afficher le mot de passe">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                                    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <span class="field-hint" id="signup-password-hint">8 caractères minimum, avec au moins une lettre et un chiffre. Il protège votre clé privée : nous ne pouvons pas le réinitialiser.</span>
+                        <p class="field-error" id="signup-password-error" aria-live="polite"></p>
+                    </div>
+
+                    <div class="field">
+                        <label for="signup-password2">Confirmer le mot de passe<span class="required" aria-hidden="true">*</span></label>
+                        <input type="password" id="signup-password2" name="password2" autocomplete="new-password"
+                               required maxlength="128" aria-describedby="signup-password2-error">
+                        <p class="field-error" id="signup-password2-error" aria-live="polite"></p>
+                    </div>
+
+                    <div class="callout">
+                        <p>
+                            En créant un compte, vous acceptez les
+                            <a href="/cgu.html">conditions d'utilisation</a> et la
+                            <a href="/rgpd.html">politique de confidentialité</a>.
+                        </p>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-block" id="signup-submit" data-cta="signup">
+                        <span class="btn-label">Créer mon compte chiffré</span>
+                    </button>
+                </form>
+
+                <p class="switch-link">
+                    Déjà inscrit ?
+                    <a href="#" id="show-login">Se connecter</a>
+                </p>
+            </div>
+        </main>
+    </div>
+
+    <!-- ===================== Application de chat ===================== -->
+    <div class="app-shell is-hidden" id="chat-screen">
+        <aside class="app-sidebar" id="app-sidebar" aria-label="Salons et canaux">
+            <div class="sidebar-header">
+                <a class="brand" href="/">
+                    <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                        <rect x="2" y="2" width="28" height="28" rx="8" fill="#2563eb"/>
+                        <path d="M16 9a4 4 0 0 0-4 4v2h-.5A1.5 1.5 0 0 0 10 16.5v5A1.5 1.5 0 0 0 11.5 23h9a1.5 1.5 0 0 0 1.5-1.5v-5a1.5 1.5 0 0 0-1.5-1.5H20v-2a4 4 0 0 0-4-4Zm2 6h-4v-2a2 2 0 1 1 4 0v2Z" fill="#fff"/>
+                    </svg>
+                    Ronyme
+                </a>
+                <button type="button" class="btn btn-ghost btn-icon sidebar-toggle" id="sidebar-close" aria-label="Fermer le menu">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                        <path d="m6 6 12 12M18 6 6 18"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="sidebar-section">
+                <h2 class="sidebar-title">
+                    Salons
+                    <button type="button" class="btn btn-ghost btn-icon" id="create-salon-btn" aria-label="Créer un salon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                            <path d="M12 5v14M5 12h14"/>
+                        </svg>
+                    </button>
+                </h2>
+            </div>
+            <ul class="salon-list" id="salon-list"></ul>
+
+            <div class="sidebar-section is-hidden" id="channel-section">
+                <h2 class="sidebar-title">
+                    Canaux
+                    <button type="button" class="btn btn-ghost btn-icon" id="create-channel-btn" aria-label="Créer un canal">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                            <path d="M12 5v14M5 12h14"/>
+                        </svg>
+                    </button>
+                </h2>
+            </div>
+            <ul class="channel-list" id="channel-list"></ul>
+
+            <div class="sidebar-footer">
+                <span class="avatar" id="user-avatar" aria-hidden="true"></span>
+                <span class="user-name" id="current-user"></span>
+                <button type="button" class="btn btn-ghost btn-icon" id="logout-btn" aria-label="Se déconnecter">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                        <path d="m16 17 5-5-5-5M21 12H9"/>
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <main class="app-main">
+            <header class="app-header">
+                <button type="button" class="btn btn-ghost btn-icon sidebar-toggle" id="sidebar-open" aria-label="Ouvrir le menu" aria-expanded="false" aria-controls="app-sidebar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false">
+                        <path d="M4 7h16M4 12h16M4 17h16"/>
+                    </svg>
+                </button>
+
+                <h1 id="chat-title">Aucun salon sélectionné</h1>
+
+                <span class="ws-status" id="ws-status" data-state="offline">Hors ligne</span>
+
+                <button type="button" class="btn btn-secondary is-hidden" id="members-btn">
+                    <span class="btn-label">Membres</span>
+                </button>
+            </header>
+
+            <div class="messages" id="messages" aria-live="polite" aria-relevant="additions">
+                <div class="empty-state" id="empty-state">
+                    <h2>Bienvenue sur Ronyme</h2>
+                    <p>Créez un salon pour commencer à discuter. Tout est chiffré dans votre navigateur avant d'être envoyé.</p>
+                    <button type="button" class="btn btn-primary" id="empty-create-btn">
+                        <span class="btn-label">Créer mon premier salon</span>
+                    </button>
+                </div>
+            </div>
+
+            <form class="composer is-hidden" id="composer">
+                <label class="visually-hidden" for="message-input">Votre message</label>
+                <input type="text" id="message-input" placeholder="Écrivez un message chiffré…"
+                       autocomplete="off" maxlength="4000" required>
+                <button type="submit" class="btn btn-primary" id="send-btn">
+                    <span class="btn-label">Envoyer</span>
+                </button>
+            </form>
+        </main>
+    </div>
+
+    <!-- ===================== Boîte de dialogue ===================== -->
+    <div class="modal-overlay is-hidden" id="modal-overlay">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" id="modal">
+            <h2 id="modal-title"></h2>
+            <div class="field">
+                <label for="modal-input" id="modal-label"></label>
+                <input type="text" id="modal-input" aria-describedby="modal-error">
+                <p class="field-error" id="modal-error" aria-live="polite"></p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="modal-cancel">
+                    <span class="btn-label">Annuler</span>
+                </button>
+                <button type="button" class="btn btn-primary" id="modal-confirm">
+                    <span class="btn-label">Confirmer</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

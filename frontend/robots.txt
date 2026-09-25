@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /$
+Allow: /cgu.html
+Allow: /rgpd.html
+
+# L'application et l'API ne doivent pas être indexées.
+Disallow: /app.html
+Disallow: /auth/
+Disallow: /salons/
+Disallow: /api/
+Disallow: /ws/
+Disallow: /docs
+Disallow: /redoc
+Disallow: /openapi.json
+
+Sitemap: https://ronyme.app/sitemap.xml
