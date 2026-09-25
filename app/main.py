@@ -12,7 +12,7 @@ from redis.asyncio import Redis
 from app.config import Settings
 from app.errors import register_exception_handlers
 from app.realtime import ConnectionManager, EventBus
-from app.routers import auth, conversations, friends, health, me, messages, rooms, users, ws
+from app.routers import auth, conversations, friends, health, me, messages, notifications, rooms, users, ws
 from app.security.csrf import CSRFMiddleware
 from app.security.headers import SecurityHeadersMiddleware
 
@@ -59,6 +59,7 @@ def create_app(settings: Settings | None = None, redis_factory: Callable[[], Red
         messages.router,
         friends.router,
         conversations.router,
+        notifications.router,
         ws.router,
     )
     for router in routers:

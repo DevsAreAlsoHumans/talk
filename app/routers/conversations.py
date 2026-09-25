@@ -20,10 +20,12 @@ from app.deps import (
     ConversationsDep,
     EventBusDep,
     FriendsDep,
+    NotificationsDep,
     RedisDep,
     SettingsDep,
     UsersDep,
 )
+from app.notifications import THREAD_CONVERSATION, notify_message_sent
 from app.schemas import (
     ConversationDetail,
     ConversationMessageOut,
@@ -144,6 +146,7 @@ async def send_message(
     auth: AuthDep,
     convs: ConversationsDep,
     messages: ConversationMessagesDep,
+    notifications: NotificationsDep,
     redis: RedisDep,
     settings: SettingsDep,
     bus: EventBusDep,
@@ -170,8 +173,17 @@ async def send_message(
         kind=body.kind,
         mime=body.mime,
     )
-    await bus.publish(
-        {"type": "dm", "message": _as_conversation_message(message)},
-        await convs.member_ids(str(conv_id)),
+    member_ids = await convs.member_ids(str(conv_id))
+    await bus.publish({"type": "dm", "message": _as_conversation_message(message)}, member_ids)
+    await notify_message_sent(
+        notifications,
+        bus,
+        recipients=member_ids,
+        sender_id=auth.user["id"],
+        sender_username=auth.user["username"],
+        thread_kind=THREAD_CONVERSATION,
+        thread_id=str(conv_id),
+        thread_label=auth.user["username"],  # le seul destinataire est l'interlocuteur : son pseudo le nomme
+        message=message,
     )
     return _as_conversation_message(message)

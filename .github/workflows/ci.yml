@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Linter (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+
+  tests:
+    name: Tests (unitaires + intégration, Redis réel) et couverture
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_REDIS_URL: redis://localhost:6379/15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements-dev.txt
+      # Vecteurs de test régénérés à chaque exécution : chaque implémentation (Python de référence,
+      # vrai code du navigateur) doit savoir lire ce que produit l'autre.
+      - name: Générer les vecteurs d'interopérabilité
+        run: |
+          python -m tests.js.generate_python_vectors
+          node tests/js/generate_js_vectors.mjs
+      - name: Tests JavaScript (chiffrement du navigateur)
+        run: node --test tests/js/crypto.test.mjs
+      - name: Tests Python avec couverture
+        run: pytest --cov --cov-report=term-missing --cov-fail-under=90
+
+  ui:
+    name: Test de l'interface (vrai serveur + Redis, jsdom)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      REDIS_URL: redis://localhost:6379/0
+      ALLOWED_ORIGINS: http://localhost:8000
+      # Secret GitHub (facultatif : sans lui, une clé éphémère est générée).
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: pip install -r requirements.txt
+      - run: npm ci
+      - name: Démarrer le serveur
+        run: |
+          uvicorn app.main:create_app --factory --port 8000 --ws-max-size 4194304 &
+          for attempt in $(seq 1 40); do curl -sf http://localhost:8000/api/health && break; sleep 0.5; done
+      - run: npm run test:ui
+
+  docker:
+    name: Docker (build + docker compose run --rm test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construire les images
+        run: docker compose build app test
+      - name: Linter + tests dans le conteneur
+        run: docker compose run --rm test
+      - name: Vérifier que l'application démarre et est saine
+        run: |
+          docker compose up -d --wait app
+          curl -sf http://localhost:8000/api/health
+          docker compose down -v

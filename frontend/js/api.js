@@ -101,3 +101,8 @@ export function conversationHistory(convId, before, limit) {
 }
 export const sendConversationMessage = (convId, payload) =>
   request('POST', `/api/conversations/${convId}/messages`, payload);
+
+export const listNotifications = (limit) => request('GET', `/api/notifications?limit=${limit}`);
+export const markThreadRead = (threadKind, threadId) =>
+  request('POST', '/api/notifications/read', { thread_kind: threadKind, thread_id: threadId });
+export const markAllNotificationsRead = () => request('POST', '/api/notifications/read-all');

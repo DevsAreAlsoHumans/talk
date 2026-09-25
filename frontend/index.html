@@ -47,7 +47,14 @@
     <div id="app" class="app" hidden>
       <aside id="rail" class="rail" aria-label="Salons, conversations et amis">
         <div class="rail-head">
-          <span class="wordmark small">talk</span>
+          <div class="rail-brand">
+            <span class="wordmark small">talk</span>
+            <button type="button" id="notif-bell" class="bell" aria-haspopup="dialog">
+              <span class="sr-only">Notifications</span>
+              <svg class="bell-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6v3.6L4.5 16h15L18 12.6V9a6 6 0 0 0-6-6Zm0 18a2.6 2.6 0 0 0 2.5-2h-5A2.6 2.6 0 0 0 12 21Z" /></svg>
+              <span id="notif-badge" class="notif-count" hidden></span>
+            </button>
+          </div>
           <div class="tabs rail-tabs" role="tablist" aria-label="Navigation">
             <button type="button" role="tab" id="tab-sessions" aria-selected="true" aria-controls="sessions-panel">Sessions</button>
             <button type="button" role="tab" id="tab-friends" aria-selected="false" aria-controls="friends-panel">Amis</button>
@@ -180,6 +187,22 @@
         <div class="dialog-actions">
           <button type="button" id="profile-cancel" class="link">Annuler</button>
           <button type="submit" id="profile-save" class="primary">Enregistrer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="notif-dialog" class="dialog notif-dialog" aria-labelledby="notif-title">
+      <form method="dialog" novalidate>
+        <h3 id="notif-title">Notifications</h3>
+        <p class="hint">
+          Vos messages sont chiffrés : le serveur ne peut pas les lire. Il vous dit seulement qui a écrit, et où.
+        </p>
+        <button type="button" id="notif-enable" class="chip" hidden>Activer les notifications du navigateur</button>
+        <ul id="notif-list" class="notif-list"></ul>
+        <p id="notif-empty" class="empty" hidden>Rien de neuf. Les messages reçus apparaîtront ici.</p>
+        <div class="dialog-actions">
+          <button type="button" id="notif-read-all" class="link">Tout marquer comme lu</button>
+          <button type="submit" class="primary">Fermer</button>
         </div>
       </form>
     </dialog>

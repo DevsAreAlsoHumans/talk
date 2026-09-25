@@ -214,3 +214,16 @@ class Actor:
 
     def set_role(self, room_id: str, other: "Actor", role: str):
         return self.post(f"/api/rooms/{room_id}/roles", {"username": other.identity.username, "role": role})
+
+    # ---- Notifications ----
+
+    def notifications(self, **params) -> dict:
+        response = self.get("/api/notifications", params=params)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def read_thread_notifications(self, thread_kind: str, thread_id: str):
+        return self.post("/api/notifications/read", {"thread_kind": thread_kind, "thread_id": thread_id})
+
+    def read_all_notifications(self):
+        return self.post("/api/notifications/read-all")

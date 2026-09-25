@@ -20,6 +20,8 @@ MUTATIONS = [
     ("DELETE", "/api/friends/bob", None),
     ("POST", "/api/conversations", {}),
     ("POST", "/api/conversations/00000000-0000-4000-8000-000000000000/messages", {}),
+    ("POST", "/api/notifications/read", {}),
+    ("POST", "/api/notifications/read-all", None),
 ]
 
 

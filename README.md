@@ -170,6 +170,16 @@ La documentation interactive de FastAPI (`/docs`) est désactivée : surface d'a
   conservée en `sessionStorage` uniquement. Elle ne déchiffre que la clé privée renvoyée par le serveur avec un cookie
   de session HttpOnly (inaccessible au JavaScript) ; elle est purgée à la déconnexion, à l'expiration de la session et à
   la fermeture de l'onglet. `localStorage`/`indexedDB` ne sont jamais utilisés : rien ne survit à l'onglet.
+- **Notifications persistées côté serveur, jamais de contenu.** L'état des non-lus vit dans Redis (et pas dans un
+  `Set` JavaScript) : il survit à un refresh, à un onglet fermé et à un changement de machine. Une notification décrit
+  **qui** a écrit, **dans quel fil** et **de quel type d'envoi** (`text`, `image`, `voice`) — ni le texte, ni l'IV, ni le
+  chiffré, que le serveur est de toute façon incapable de lire. L'interface décide seule de ce qu'elle affiche, et
+ Clique sur une notification pour ouvrir le fil, qui est alors marqué comme lu. Deux messages du même auteur dans le
+  même fil en moins de deux minutes s'effondrent en une seule ligne avec un compteur, et l'historique est borné à
+  100 lignes par utilisateur. Le panneau est donc une liste de *qui* et *où*, jamais de *quoi*.
+- **Notifications du navigateur sur autorisation explicite.** Le bouton n'apparaît que si la permission est encore à
+  demander ; une fois refusée, on ne la reclame plus. La bannière système n'est affichée que si l'onglet est en
+  arrière-plan — sinon le toast et le badge suffisent.
 
 ### Modèle de données Redis
 
@@ -191,6 +201,10 @@ La documentation interactive de FastAPI (`/docs`) est désactivée : surface d'a
 | `conv:{id}:members` · `conv:{id}:keys` · `conv:{id}:messages` · `conv:{id}:ivs` · `conv:{id}:seq` | set · hash · sorted set · set · entier | mêmes structure et garanties que salons, sur deux membres |
 | `conv:pair:{min}:{max}` | string(→conv id) | unicité : une seule conversation par paire d'amis |
 | `user:{id}:convs` | set | conversations directes d'un utilisateur |
+| `notif:{id}` | sorted set | historique de notifications (JSON, score = séquence), borné à 100 lignes |
+| `notif:{id}:seq` | entier | prochaine séquence de notification |
+| `notif:{id}:unread` | hash | fil (`room:{id}` ou `conv:{id}`) → messages non lus dans ce fil |
+| `notif:{id}:latest` | hash | fil → dernière notification, pour regrouper les rafales |
 | `rl:*` | string (TTL) | compteurs de limitation de débit |
 
 ### API
@@ -214,7 +228,10 @@ La documentation interactive de FastAPI (`/docs`) est désactivée : surface d'a
 | GET · POST | `/api/conversations` | Lister ses conversations · en créer une avec un ami (clés enveloppées pour les deux) |
 | GET | `/api/conversations/{id}` | Détail d'une conversation (ma clé enveloppée, le correspondant) |
 | GET · POST | `/api/conversations/{id}/messages` | Historique paginé · envoyer un message chiffré (mêmes `kind`/limites que les salons) |
-| WS | `/ws` | Événements temps réel (`message`, `dm`, `member_added`, `presence`, `presence_dm`, `friend_request`, `friend_accepted`, `friend_declined`, `role_changed`, `call_offer`, `call_answer`, `ice_candidate`, `call_end`) |
+| GET | `/api/notifications` | Notifications récentes (`limit`, 30 par défaut) **et** non-lus par fil : c'est l'état qui alimente les pastilles et la cloche |
+| POST | `/api/notifications/read` | Marquer un fil comme lu (appelé à l'ouverture d'un fil) |
+| POST | `/api/notifications/read-all` | Tout marquer comme lu |
+| WS | `/ws` | Événements temps réel (`message`, `dm`, `notification`, `member_added`, `presence`, `presence_dm`, `friend_request`, `friend_accepted`, `friend_declined`, `role_changed`, `call_offer`, `call_answer`, `ice_candidate`, `call_end`) |
 
 ---
 
@@ -236,8 +253,8 @@ ruff check . && ruff format --check .
 
 | Niveau | Contenu |
 |---|---|
-| `tests/unit/` | Hachage Argon2id · jetons CSRF (signature, liaison à la session) et origine · protocole de chiffrement (aller-retour, altération, mauvaise clé, rejeu dans un autre salon, IV uniques) · schémas (injections, formats, tailles) · limitation de débit · hygiène du frontend (pas d'`innerHTML`, pas de code inline, pas de `localStorage`/`indexedDB` ; seule la clé de déverrouillage est conservée en `sessionStorage`, dans `app.js`) · interopérabilité JS ↔ Python |
-| `tests/integration/` | Parcours complet *inscription → connexion → salon → ajout de membre → envoi → réception → historique* · **vérification que Redis ne contient ni texte clair ni clé** · amis (demande, acceptation, refus, retrait) · conversations directes (création chiffrée, réservée aux amis, une par paire, messages/IV/limitation de débit) · grades (chef → sous-chef, droits) · pagination · WebSocket · contrôle d'accès (non-membre, non-propriétaire) · CSRF absent/invalide/lié à une autre session, origine étrangère · injections · en-têtes, cookies, erreurs génériques, CORS absent · limitation de débit · rotation et destruction de session |
+| `tests/unit/` | Hachage Argon2id · jetons CSRF (signature, liaison à la session) et origine · protocole de chiffrement (aller-retour, altération, mauvaise clé, rejeu dans un autre salon, IV uniques) · schémas (injections, formats, tailles) · limitation de débit · notifications (fenêtre de regroupement des rafales, borne de l'historique, lecture d'un fil et lecture globale) · hygiène du frontend (pas d'`innerHTML`, pas de code inline, pas de `localStorage`/`indexedDB` ; seule la clé de déverrouillage est conservée en `sessionStorage`, dans `app.js`) · interopérabilité JS ↔ Python |
+| `tests/integration/` | Parcours complet *inscription → connexion → salon → ajout de membre → envoi → réception → historique* · **vérification que Redis ne contient ni texte clair ni clé** · amis (demande, acceptation, refus, retrait) · conversations directes (création chiffrée, réservée aux amis, une par paire, messages/IV/limitation de débit) · notifications (réception, regroupement, compteur par fil, **aucun contenu chiffré dans Redis**, jamais adressée à l'expéditeur, annoncée sur le WebSocket) · grades (chef → sous-chef, droits) · pagination · WebSocket · contrôle d'accès (non-membre, non-propriétaire) · CSRF absent/invalide/lié à une autre session, origine étrangère · injections · en-têtes, cookies, erreurs génériques, CORS absent · limitation de débit · rotation et destruction de session |
 | `tests/js/` | Le vrai `crypto.js` sous Node : dérivation, enveloppes de clés, messages, clés non extractables, empreintes, lecture de vecteurs produits par Python |
 | `tests/ui/` | Le vrai frontend (`app.js`) piloté dans jsdom contre un vrai serveur et un vrai Redis, avec deux utilisateurs |
 
@@ -281,7 +298,8 @@ uvicorn app.main:create_app --factory --reload
 
 ## 9. Limites connues
 
-- **Métadonnées visibles du serveur** : pseudos, noms et membres des salons, dates et tailles des messages. Seul le contenu est chiffré.
+- **Métadonnées visibles du serveur** : pseudos, noms et membres des salons, dates et tailles des messages. Seul le contenu est chiffré. Les notifications ajouteront `sender_username`, le nom du fil et le type d'envoi — c'est délibéré : l'interface ne peut ni déchiffrer ni deviner qui écrit quoi, sinon.
+- **Notifications sans contenu, donc peu bavardes** : on ne sait pas *ce qui* a été dit, seulement *qui* et *où*. Ouvrir le fil pour le lire reste nécessaire. L'historique est borné à 100 lignes et sans purge : au-delà, les plus anciennes sont simplement oubliées.
 - **Confiance dans les clés publiques.** Le serveur fournit la clé publique d'un utilisateur au moment de l'ajout ; un serveur malveillant pourrait en substituer une. Les **empreintes** affichées dans la liste des membres permettent de le détecter en les comparant hors bande ; il n'y a pas de vérification automatique.
 - **Le code JavaScript vient du serveur** : un serveur compromis pourrait servir un client piégé. C'est une limite inhérente au chiffrement de bout en bout dans une page web (une extension ou une application native la lèverait).
 - **Pas de rotation de clé de salon** ni de retrait de membre (non demandés) : un ancien membre garderait la clé d'un salon. Une seule clé par salon : pas de secret futur (forward secrecy) comme dans Signal.

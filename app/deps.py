@@ -11,6 +11,7 @@ from app.realtime import ConnectionManager, EventBus
 from app.repositories.conversations import ConversationRepository
 from app.repositories.friends import FriendRepository
 from app.repositories.messages import MessageRepository
+from app.repositories.notifications import NotificationRepository
 from app.repositories.rooms import RoomRepository
 from app.repositories.users import UserRepository
 from app.security.sessions import SessionStore
@@ -62,6 +63,10 @@ def get_conversations(redis: RedisDep) -> ConversationRepository:
     return ConversationRepository(redis)
 
 
+def get_notifications(redis: RedisDep) -> NotificationRepository:
+    return NotificationRepository(redis)
+
+
 def get_sessions(redis: RedisDep, settings: SettingsDep) -> SessionStore:
     return SessionStore(redis, settings.session_ttl_seconds)
 
@@ -72,6 +77,7 @@ MessagesDep = Annotated[MessageRepository, Depends(get_messages)]
 ConversationMessagesDep = Annotated[MessageRepository, Depends(get_conv_messages)]
 FriendsDep = Annotated[FriendRepository, Depends(get_friends)]
 ConversationsDep = Annotated[ConversationRepository, Depends(get_conversations)]
+NotificationsDep = Annotated[NotificationRepository, Depends(get_notifications)]
 SessionsDep = Annotated[SessionStore, Depends(get_sessions)]
 
 

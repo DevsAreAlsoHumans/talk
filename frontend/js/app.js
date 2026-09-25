@@ -15,6 +15,7 @@ const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const NEAR_BOTTOM_PX = 96;
 const FRIENDS_REFRESH_MS = 60_000;
+const NOTIFICATION_PAGE_SIZE = 30;
 const REVEAL_GLYPHS = '▒░▓#%&*+=?';
 const REVEAL_FRAMES = 12;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -115,6 +116,13 @@ const el = {
   callRemote: $('#call-remote'),
   toast: $('#toast'),
   announcer: $('#announcer'),
+  notifBell: $('#notif-bell'),
+  notifBadge: $('#notif-badge'),
+  notifDialog: $('#notif-dialog'),
+  notifEnable: $('#notif-enable'),
+  notifList: $('#notif-list'),
+  notifEmpty: $('#notif-empty'),
+  notifReadAll: $('#notif-read-all'),
 };
 
 const state = {
@@ -137,7 +145,10 @@ const state = {
   friends: [], // amis confirmés (MemberSummary)
   friendRequests: [], // demandes d'ami reçues, en attente
   avatars: new Map(), // id du salon → Map(id du membre → URL de l'avatar déchiffré)
-  unread: new Set(),
+  // L'état des non-lus vient du serveur : il survit à un refresh, à un onglet fermé et à
+  // un changement de machine. On ne le mémorise que le temps de l'affichage.
+  unreadCounts: new Map(), // « room:{id} » ou « conv:{id} » → messages non lus
+  notifications: [], // lignes du panneau, de la plus récente à la plus ancienne
   fingerprints: new Map(),
   socket: null,
   everConnected: false,
@@ -172,8 +183,10 @@ function announce(text) {
 }
 
 function reportError(error, fallback = 'Une erreur est survenue. Réessayez.') {
+  // Un 401 est déjà traité par `onUnauthorized` (retour à l'écran de connexion) : ce n'est pas
+  // une anomalie, il ne doit donc pas être journalisé comme une erreur de l'application.
+  if (error instanceof api.ApiError && error.status === 401) return;
   console.error(error);
-  if (error instanceof api.ApiError && error.status === 401) return; // déjà géré : retour à la connexion
   if (error instanceof api.ApiError && error.status === 429) notify('Trop de requêtes : ralentissez un instant.', 'error');
   else notify(fallback, 'error');
 }
@@ -378,9 +391,10 @@ async function enterApp() {
   el.meName.textContent = state.me.displayName || state.me.username;
   updateOwnAvatar(null);
   connectSocket();
+  renderNotificationPermission();
   clearInterval(state.friendsTimer);
   state.friendsTimer = setInterval(syncFriendsQuietly, FRIENDS_REFRESH_MS);
-  await Promise.all([refreshRooms(), refreshConversations(), refreshFriends()]);
+  await Promise.all([refreshRooms(), refreshConversations(), refreshFriends(), refreshNotifications()]);
   if (state.rooms.length > 0) await selectRoom(state.rooms[0].id);
   else if (state.convs.length > 0) await selectConversation(state.convs[0].id);
   else renderChat();
@@ -433,7 +447,10 @@ function resetSession() {
     collection.clear();
   }
   revokeAllMedia(state.timelines, state.convTimelines, state.avatars);
-  state.unread.clear();
+  state.unreadCounts.clear();
+  state.notifications = [];
+  readInFlight.clear();
+  readQueued.clear();
   api.setCsrfToken(null);
   clear(el.roomList);
   clear(el.convList);
@@ -441,6 +458,8 @@ function resetSession() {
   clear(el.messages);
   clear(el.friendList);
   clear(el.friendRequests);
+  clear(el.notifList);
+  el.notifBadge.hidden = true;
   el.app.classList.remove('thread-dm');
   el.app.hidden = true;
   el.authScreen.hidden = false;
@@ -468,9 +487,12 @@ el.logout.addEventListener('click', logout);
 
 // ---------- Salons ----------
 
-/** Clé d'unicité d'un fil (salon ou conversation) : préfixe « c: » pour les conversations directes. */
-function threadKey({ kind, id }) {
-  return kind === 'conv' ? `c:${id}` : id;
+/**
+ * Clé d'un fil pour le serveur, et pour nous : préfixée pour ne jamais confondre un salon
+ * et une conversation directe, et identique à celle des compteurs de non-lus.
+ */
+function serverThreadKey(kind, id) {
+  return `${kind}:${id}`;
 }
 
 /** Fil actuellement affiché, ou null si rien n'est sélectionné. */
@@ -503,8 +525,7 @@ function renderRoomList() {
             onclick: () => selectRoom(room.id),
           },
           h('span', { class: 'room-name' }, room.name),
-          state.unread.has(room.id) ? h('span', { class: 'unread', title: 'Nouveaux messages' }) : null,
-          state.unread.has(room.id) ? h('span', { class: 'sr-only' }, ' (nouveaux messages)') : null,
+          unreadPill(serverThreadKey('room', room.id)),
           h('span', { class: 'room-count', title: 'Membres' }, String(room.member_count)),
         ),
       ),
@@ -520,6 +541,8 @@ async function ensureRoom(roomId) {
     state.roomDetails.set(roomId, detail);
   }
   if (!state.roomKeys.has(roomId)) {
+    // La session a pu être fermée pendant l'appel : sans clé privée, on ne peut rien déballer.
+    if (!state.loggedIn || !state.me) return detail;
     const key = await e2e.unwrapRoomKey(detail.wrapped_key, state.privateKey, {
       extractable: detail.owner_id === state.me.id, // seul le propriétaire réenveloppe la clé pour de nouveaux membres
     });
@@ -531,10 +554,12 @@ async function ensureRoom(roomId) {
 async function selectRoom(roomId) {
   state.currentRoomId = roomId;
   state.currentConvId = null;
-  state.unread.delete(roomId);
+  void markThreadRead('room', roomId);
   el.app.classList.remove('thread-dm', 'rail-open', 'members-open');
   renderRoomList();
   renderConvList();
+  // La session a pu être fermée pendant le chargement : inutile d'interroger le serveur.
+  if (!state.loggedIn) return;
   try {
     await ensureRoom(roomId);
     await loadLatest(roomId);
@@ -559,7 +584,6 @@ function renderConvList() {
   const sorted = [...state.convs].sort((a, b) => a.created_at.localeCompare(b.created_at));
   for (const conv of sorted) {
     const active = conv.id === state.currentConvId;
-    const key = threadKey({ kind: 'conv', id: conv.id });
     const peer = conv.peer;
     const online = state.convOnline.get(peer.id);
     el.convList.append(
@@ -582,8 +606,7 @@ function renderConvList() {
                 { class: `presence${online ? '' : ' offline'}`, title: online ? 'En ligne' : 'Hors ligne' },
                 online ? 'en ligne' : 'hors ligne',
               ),
-          state.unread.has(key) ? h('span', { class: 'unread', title: 'Nouveaux messages' }) : null,
-          state.unread.has(key) ? h('span', { class: 'sr-only' }, ' (nouveaux messages)') : null,
+          unreadPill(serverThreadKey('conv', conv.id)),
         ),
       ),
     );
@@ -598,6 +621,8 @@ async function ensureConversation(convId) {
     state.convDetails.set(convId, detail);
   }
   if (!state.convKeys.has(convId)) {
+    // La session a pu être fermée pendant l'appel : sans clé privée, on ne peut rien déballer.
+    if (!state.loggedIn || !state.privateKey) return detail;
     const key = await e2e.unwrapRoomKey(detail.wrapped_key, state.privateKey);
     state.convKeys.set(convId, key);
   }
@@ -606,11 +631,13 @@ async function ensureConversation(convId) {
 
 async function selectConversation(convId) {
   state.currentConvId = convId;
-  state.unread.delete(threadKey({ kind: 'conv', id: convId }));
+  void markThreadRead('conv', convId);
   el.app.classList.remove('rail-open', 'members-open');
   el.app.classList.add('thread-dm');
   renderRoomList();
   renderConvList();
+  // La session a pu être fermée pendant le chargement : inutile d'interroger le serveur.
+  if (!state.loggedIn) return;
   try {
     await ensureConversation(convId);
     await loadLatestConv(convId);
@@ -707,10 +734,12 @@ async function refreshFriends() {
 }
 
 /** Filet de sécurité : si un événement WebSocket a été perdu (socket mort, onglet en arrière-plan),
- *  une demande d'ami finit quand même par s'afficher, sans attendre un refresh manuel. */
+ *  une demande d'ami finit quand même par s'afficher, et les non-lus se recalculent, sans
+ *  attendre un refresh manuel. */
 function syncFriendsQuietly() {
   if (!state.loggedIn) return;
   refreshFriends().catch(() => {}); // reprise silencieuse : le prochain passage retentera
+  refreshNotifications().catch(() => {});
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -1070,6 +1099,236 @@ el.addMemberForm.addEventListener('submit', async (event) => {
   }
 });
 
+// ---------- Notifications ----------
+
+// Le serveur ne peut pas déchiffrer nos messages : une notification dit qui a écrit, dans
+// quel fil et de quel type d'envoi, jamais le contenu. C'est volontairement tout ce qu'il
+// sait, et tout ce qu'il nous laisse décider de ce qu'on affiche.
+const NOTIFICATION_SUBJECTS = {
+  text: 'un message',
+  image: 'une image chiffrée',
+  voice: 'un message vocal chiffré',
+};
+
+function unreadFor(key) {
+  return state.unreadCounts.get(key) ?? 0;
+}
+
+function totalUnread() {
+  let total = 0;
+  for (const count of state.unreadCounts.values()) total += count;
+  return total;
+}
+
+/** Pastille d'un fil : le nombre de messages non lus, doublé d'un texte pour les lecteurs d'écran. */
+function unreadPill(key) {
+  const count = unreadFor(key);
+  if (count === 0) return null;
+  const label = count > 1 ? `${count} messages non lus` : '1 message non lu';
+  return [
+    h('span', { class: 'unread', title: label }, count > 99 ? '99+' : String(count)),
+    h('span', { class: 'sr-only' }, ` (${label})`),
+  ];
+}
+
+function renderThreadBadges() {
+  renderRoomList();
+  renderConvList();
+}
+
+/**
+ * Nom du fil tel que l'utilisateur le connaît. Le serveur n'envoie qu'une indication
+ * (le nom du salon, le pseudo en conversation directe) : on lui préfère ce qu'on a déjà
+ * sous les yeux, qui peut être un surnom.
+ */
+function threadLabelOf(notification) {
+  if (notification.thread_kind === 'conv') {
+    const peer = state.convs.find((conv) => conv.id === notification.thread_id)?.peer;
+    return peer ? peer.display_name || peer.username : notification.thread_label;
+  }
+  const room = state.rooms.find((candidate) => candidate.id === notification.thread_id);
+  return room ? room.name : notification.thread_label;
+}
+
+function notificationText(notification) {
+  const subject = NOTIFICATION_SUBJECTS[notification.kind] ?? 'un message';
+  const burst = notification.count > 1 ? ` (${notification.count} messages)` : '';
+  return `${notification.sender_username} a envoyé ${subject}${burst} dans ${threadLabelOf(notification)}`;
+}
+
+async function refreshNotifications() {
+  const feed = await api.listNotifications(NOTIFICATION_PAGE_SIZE);
+  state.notifications = feed.notifications;
+  state.unreadCounts = new Map(Object.entries(feed.unread));
+  renderNotifications();
+}
+
+function renderNotifications() {
+  const total = totalUnread();
+  el.notifBadge.textContent = total > 99 ? '99+' : String(total);
+  el.notifBadge.hidden = total === 0;
+  el.notifBell.setAttribute('aria-label', total === 0 ? 'Notifications' : `Notifications (${total} non lues)`);
+  el.notifReadAll.disabled = total === 0;
+
+  clear(el.notifList);
+  el.notifEmpty.hidden = state.notifications.length > 0;
+  for (const notification of state.notifications) {
+    const thread = { kind: notification.thread_kind, id: notification.thread_id };
+    el.notifList.append(
+      h(
+        'li',
+        {},
+        h(
+          'button',
+          {
+            type: 'button',
+            class: `notif${notification.read ? '' : ' notif-unread'}`,
+            onclick: () => void openThreadFromNotification(thread),
+          },
+          h('span', { class: 'notif-who' }, notification.sender_username),
+          h('span', { class: 'notif-what' }, notificationText(notification)),
+          h(
+            'time',
+            { datetime: notification.updated_at },
+            timeFormat.format(new Date(notification.updated_at)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+const readInFlight = new Set();
+const readQueued = new Set();
+
+/**
+ * Ouvrir un fil, c'est le marquer comme lu. La pastille disparaît immédiatement (optimisme)
+ * puis le serveur confirme ; les appels se regroupent, pour qu'une rafale dans le fil affiché
+ * ne déclenche pas une requête par message.
+ *
+ * Le serveur diffuse le message *puis* la notification : quand le fil est déjà ouvert, le
+ * compteur n'existe donc pas encore au moment du premier appel. Une notification reçue pendant
+ * une requête est remise en file plutôt que perdue, faute de quoi le fil resterait non lu.
+ */
+async function markThreadRead(kind, id) {
+  const key = serverThreadKey(kind, id);
+  if (unreadFor(key) === 0) return;
+  if (readInFlight.has(key)) {
+    readQueued.add(key);
+    return;
+  }
+  readInFlight.add(key);
+  state.unreadCounts.delete(key);
+  renderThreadBadges();
+  renderNotifications();
+  try {
+    await api.markThreadRead(kind, id);
+  } catch (error) {
+    // On ne veut pas laisser un état optimiste faux : on relit l'état réel côté serveur.
+    console.error(error);
+    await refreshNotifications().catch(() => {});
+  } finally {
+    readInFlight.delete(key);
+  }
+  if (readQueued.delete(key) && unreadFor(key) > 0) await markThreadRead(kind, id);
+}
+
+async function openThreadFromNotification(thread) {
+  if (el.notifDialog.open) el.notifDialog.close();
+  try {
+    if (thread.kind === 'conv') await selectConversation(thread.id);
+    else await selectRoom(thread.id);
+  } catch (error) {
+    reportError(error, "Impossible d'ouvrir cette conversation.");
+  }
+}
+
+function handleNotification({ notification }) {
+  if (!notification) return;
+  const known = state.notifications.findIndex((item) => item.id === notification.id);
+  // Une rafale met à jour la ligne existante (son compteur monte) au lieu d'en ajouter une.
+  if (known === -1) state.notifications.unshift(notification);
+  else state.notifications[known] = notification;
+  const key = serverThreadKey(notification.thread_kind, notification.thread_id);
+  state.unreadCounts.set(key, unreadFor(key) + 1);
+  renderNotifications();
+  renderThreadBadges();
+
+  // Fil déjà ouvert : l'utilisateur le regarde, donc il ne doit pas rester non lu.
+  const open = currentThread();
+  if (open && open.kind === notification.thread_kind && open.id === notification.thread_id) {
+    void markThreadRead(notification.thread_kind, notification.thread_id);
+    return;
+  }
+
+  const text = notificationText(notification);
+  notify(text);
+  announce(text);
+  showDesktopNotification(notification, text);
+}
+
+// ---------- Notifications du navigateur ----------
+
+const desktopSupported = () => typeof globalThis.Notification === 'function';
+
+/**
+ * Le navigateur exige une demande explicite de l'utilisateur : on n'affiche le bouton que
+ * s'il reste une permission à demander, et on ne relance jamais après un refus.
+ */
+function renderNotificationPermission() {
+  el.notifEnable.hidden = !desktopSupported() || globalThis.Notification.permission !== 'default';
+}
+
+async function requestDesktopNotifications() {
+  if (!desktopSupported()) {
+    notify("Ce navigateur ne gère pas les notifications.", 'error');
+    return;
+  }
+  const permission = await globalThis.Notification.requestPermission();
+  renderNotificationPermission();
+  if (permission === 'granted') notify('Notifications du navigateur activées.');
+  else notify("Notifications du navigateur refusées : elles restent dans l'onglet.", 'error');
+}
+
+/** Bannière système : seulement si l'autorisation a été donnée ET que l'onglet est en arrière-plan. */
+function showDesktopNotification(notification, text) {
+  if (!desktopSupported() || globalThis.Notification.permission !== 'granted') return;
+  if (document.visibilityState === 'visible') return; // l'onglet est devant : le toast et le badge suffisent
+  const thread = { kind: notification.thread_kind, id: notification.thread_id };
+  const banner = new globalThis.Notification('talk', {
+    body: text,
+    tag: serverThreadKey(thread.kind, thread.id), // une bannière par fil : la plus récente remplace l'ancienne
+  });
+  banner.addEventListener('click', () => {
+    globalThis.focus();
+    void openThreadFromNotification(thread);
+  });
+}
+
+el.notifBell.addEventListener('click', () => {
+  if (el.notifDialog.open) return;
+  renderNotifications();
+  renderNotificationPermission();
+  el.notifDialog.showModal();
+  // Des événements ont pu arriver pendant la fermeture du panneau : on se resynchronise.
+  void refreshNotifications().catch(() => {});
+});
+
+el.notifEnable.addEventListener('click', () => void requestDesktopNotifications());
+
+el.notifReadAll.addEventListener('click', async () => {
+  try {
+    await api.markAllNotificationsRead();
+  } catch (error) {
+    reportError(error, "Impossible de tout marquer comme lu.");
+    return;
+  }
+  state.unreadCounts.clear();
+  state.notifications = state.notifications.map((notification) => ({ ...notification, read: true }));
+  renderNotifications();
+  renderThreadBadges();
+});
+
 // ---------- Messages ----------
 
 function sameDay(first, second) {
@@ -1225,18 +1484,11 @@ function renderChat({ scroll = 'bottom' } = {}) {
   el.composerInput.focus();
 }
 
-function markUnread(roomId) {
-  if (roomId === state.currentRoomId) return;
-  state.unread.add(roomId);
-  renderRoomList();
-}
-
-function markUnreadConv(convId) {
-  if (convId === state.currentConvId) return;
-  state.unread.add(threadKey({ kind: 'conv', id: convId }));
-  renderConvList();
-}
-
+/**
+ * Un message qui arrive n'a plus à marquer le fil comme non lu : l'événement « notification »
+ * qui accompagne le message s'en charge, et c'est lui qui fait autorité (le serveur connaît
+ * l'état réel, y compris pour un onglet qui vient d'être rouvert).
+ */
 async function handleIncomingMessage(rawMessage, { own = false } = {}) {
   // Une conversation expose `conversation_id` ; la crypto lit `room_id` (AAD = fil:expéditeur).
   const message = rawMessage.conversation_id === undefined ? rawMessage : { ...rawMessage, room_id: rawMessage.conversation_id };
@@ -1244,22 +1496,17 @@ async function handleIncomingMessage(rawMessage, { own = false } = {}) {
   const threadId = message.room_id;
   const roomKey = isConv ? state.convKeys.get(threadId) : state.roomKeys.get(threadId);
   const timeline = isConv ? state.convTimelines.get(threadId) : state.timelines.get(threadId);
-  if (!roomKey || !timeline) {
-    if (isConv) markUnreadConv(threadId);
-    else markUnread(threadId); // fil jamais ouvert : l'historique sera chargé à l'ouverture
-    return;
-  }
+  if (!roomKey || !timeline) return; // fil jamais ouvert : l'historique sera chargé à l'ouverture
   if (timeline.has(message.seq)) return; // déjà reçu (réponse HTTP puis WebSocket)
 
   const entry = await decryptOrNull(roomKey, message);
   timeline.set(message.seq, { message, ...entry });
-  if (threadId !== (isConv ? state.currentConvId : state.currentRoomId)) {
-    if (isConv) markUnreadConv(threadId);
-    else markUnread(threadId);
-    return;
-  }
+  if (threadId !== (isConv ? state.currentConvId : state.currentRoomId)) return;
   renderMessages({ animateSeq: own ? undefined : message.seq, scroll: own ? 'bottom' : 'auto' });
-  if (!own && entry) {
+  if (own) return;
+  // Le fil affiché est à jour : ses éventuels non-lus disparaissent.
+  void markThreadRead(isConv ? 'conv' : 'room', threadId);
+  if (entry) {
     const label = entry.text !== undefined ? entry.text : entry.media?.kind === 'image' ? 'une image chiffrée' : 'un message vocal chiffré';
     announce(`${message.sender_username} : ${label}`);
   }
@@ -1666,6 +1913,9 @@ function connectSocket() {
       case 'friend_declined':
         handleFriendDeclined(payload);
         break;
+      case 'notification':
+        handleNotification(payload);
+        break;
       case 'role_changed':
         handleRoleChanged(payload).catch((error) => reportError(error));
         break;
@@ -1713,9 +1963,9 @@ function scheduleReconnect() {
   }, delay);
 }
 
-/** Après une coupure : rattrape les messages manqués du fil ouvert. */
+/** Après une coupure : rattrape les messages manqués du fil ouvert et l'état des non-lus. */
 async function resync() {
-  await Promise.all([refreshRooms(), refreshConversations(), refreshFriends()]);
+  await Promise.all([refreshRooms(), refreshConversations(), refreshFriends(), refreshNotifications()]);
   const thread = currentThread();
   if (!thread) return;
   if (thread.kind === 'conv') {
@@ -1732,10 +1982,7 @@ async function resync() {
 async function handleMemberAdded({ room_id: roomId, user }) {
   state.roomDetails.delete(roomId);
   await refreshRooms();
-  if (user.id === state.me.id) {
-    markUnread(roomId);
-    notify('Vous avez été ajouté(e) à un nouveau salon.');
-  }
+  if (user.id === state.me.id) notify('Vous avez été ajouté(e) à un nouveau salon.');
   if (roomId === state.currentRoomId) {
     await ensureRoom(roomId);
     await renderMembers();

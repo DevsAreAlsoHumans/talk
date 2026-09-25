@@ -12,7 +12,14 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from cryptography.hazmat.primitives.asymmetric import ec
-from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    StringConstraints,
+    model_validator,
+)
 
 USERNAME_PATTERN = r"^[a-z0-9_]{3,32}$"
 ROOM_NAME_PATTERN = r"^[^\x00-\x1f\x7f<>]{1,50}$"
@@ -70,6 +77,26 @@ def _check_p256_point(raw: bytes) -> None:
         ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), raw)
     except ValueError as exc:
         raise ValueError("clé publique invalide") from exc
+
+
+def _parse_uuid(value: UUID | str) -> UUID:
+    """Accepte la forme JSON d'un identifiant, qui est une chaîne.
+
+    ``strict=True`` refuse n'importe quelle coercition, or un UUID ne peut pas venir du
+    réseau autrement que sous forme de texte : on l'analyse donc nous-mêmes, en refusant
+    tout ce qui n'est ni une chaîne ni un UUID (un objet, un nombre, un booléen…).
+    """
+    if isinstance(value, UUID):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("identifiant invalide")
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise ValueError("identifiant invalide") from exc
+
+
+Uuid = Annotated[UUID, BeforeValidator(_parse_uuid)]
 
 
 Username = Annotated[str, StringConstraints(pattern=USERNAME_PATTERN)]
@@ -204,6 +231,17 @@ class AvatarRequest(StrictModel):
     ciphertext: AvatarCiphertext
 
 
+ThreadKind = Literal["room", "conv"]
+"""Salon ou conversation directe : un fil est désigné par l'un ou l'autre, jamais par le seul id."""
+
+
+class MarkThreadReadRequest(StrictModel):
+    """Marque un fil comme lu (le client l'appelle quand l'utilisateur ouvre le fil)."""
+
+    thread_kind: ThreadKind
+    thread_id: Uuid
+
+
 class AvatarEnvelope(StrictModel):
     """Avatar d'un membre, chiffré avec la clé du salon : seul un membre peut regarder."""
 
@@ -315,3 +353,36 @@ class MessagePage(BaseModel):
 class ConversationMessagePage(BaseModel):
     messages: list[ConversationMessageOut]
     has_more: bool
+
+
+class NotificationOut(BaseModel):
+    """Un message reçu, sans son contenu : le serveur ne sait pas le déchiffrer.
+
+    ``count`` vaut 1, ou le nombre de messages fusionnés quand le même auteur enchaîne
+    dans le même fil : une rafale tient sur une seule ligne.
+    """
+
+    id: UUID
+    seq: int
+    thread_kind: ThreadKind
+    thread_id: UUID
+    thread_label: str
+    sender_username: str
+    kind: str
+    count: int
+    read: bool
+    created_at: str
+    updated_at: str
+
+
+class NotificationFeed(BaseModel):
+    """Notifications récentes et, surtout, l'état des non-lus par fil.
+
+    ``unread`` est indexé par ``"{thread_kind}:{thread_id}"`` : c'est ce qui alimente les
+    pastilles de la barre latérale et la cloche, et c'est la seule chose qu'un client a
+    besoin de relire après un refresh pour retrouver exactement où il en était.
+    """
+
+    notifications: list[NotificationOut]
+    unread: dict[str, int]
+    unread_total: int
