@@ -7,4 +7,9 @@ select = ["E", "F", "I", "UP"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
+# Boucle asyncio partagée pour toute la session : les clients Mongo/Redis sont
+# des singletons créés à l'import (app/db/mongo.py, app/db/redis_client.py) et
+# doivent rester liés à une seule boucle tout au long des tests. Le scope des
+# tests eux-mêmes est forcé via `pytestmark` dans les modules d'intégration
+# (cette version de pytest-asyncio n'a pas d'option ini pour ça).
+asyncio_default_fixture_loop_scope = "session"

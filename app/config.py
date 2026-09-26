@@ -11,5 +11,10 @@ class Settings(BaseSettings):
     redis_uri: str = "redis://localhost:6379/0"
     secret_key: str = "change-me"
 
+    # Mettre à True derrière un reverse proxy HTTPS. En local/CI/Docker sur
+    # http://, doit rester False sinon le navigateur refuse de renvoyer le cookie.
+    cookie_secure: bool = False
+    session_ttl_seconds: int = 60 * 60 * 24 * 7
+
 
 settings = Settings()
