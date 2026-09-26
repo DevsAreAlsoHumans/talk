@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -27,12 +29,21 @@ class UserPublic(BaseModel):
 
 
 class PeerPublic(BaseModel):
-    """Représentation d'un autre utilisateur, exposée via les salons (jamais l'email)."""
+    """Représentation d'un autre utilisateur, exposée via les salons/amis (jamais l'email)."""
 
     id: str
     username: str
     discriminator: str
     public_key: str | None = None
+
+    @classmethod
+    def from_document(cls, document: dict[str, Any]) -> "PeerPublic":
+        return cls(
+            id=str(document["_id"]),
+            username=document["username"],
+            discriminator=document["discriminator"],
+            public_key=document.get("public_key"),
+        )
 
 
 class PublicKeyUpdate(BaseModel):

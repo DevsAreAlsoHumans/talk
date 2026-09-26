@@ -5,7 +5,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.db.mongo import db
+from app.db.mongo import db, find_user_by_tag
 from app.db.redis_client import redis_client
 from app.models.room import MessageCreate, MessagePublic, RoomCreate, RoomPublic
 from app.models.user import PeerPublic
@@ -15,17 +15,10 @@ from app.services.realtime import room_channel
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
 
-def _to_peer_public(document: dict[str, Any]) -> PeerPublic:
-    return PeerPublic(
-        id=str(document["_id"]),
-        username=document["username"],
-        discriminator=document["discriminator"],
-        public_key=document.get("public_key"),
-    )
-
-
 def _to_room_public(room: dict[str, Any], peer_document: dict[str, Any]) -> RoomPublic:
-    return RoomPublic(id=str(room["_id"]), type=room["type"], peer=_to_peer_public(peer_document))
+    return RoomPublic(
+        id=str(room["_id"]), type=room["type"], peer=PeerPublic.from_document(peer_document)
+    )
 
 
 def _to_message_public(document: dict[str, Any]) -> MessagePublic:
@@ -40,9 +33,7 @@ def _to_message_public(document: dict[str, Any]) -> MessagePublic:
 
 
 async def _find_peer(username: str, discriminator: str) -> dict[str, Any]:
-    peer = await db.users.find_one(
-        {"username_lower": username.lower(), "discriminator": discriminator}
-    )
+    peer = await find_user_by_tag(username, discriminator)
     if peer is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Utilisateur introuvable."
