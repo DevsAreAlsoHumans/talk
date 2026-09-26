@@ -17,12 +17,20 @@ jobs:
         image: redis:7-alpine
         ports:
           - 6379:6379
+      mailhog:
+        image: mailhog/mailhog:v1.0.1
+        ports:
+          - 1025:1025
+          - 8025:8025
 
     env:
       MONGO_URI: mongodb://localhost:27017
       MONGO_DB_NAME: talk_test
       REDIS_URI: redis://localhost:6379/0
       SECRET_KEY: test-secret
+      SMTP_HOST: localhost
+      SMTP_PORT: 1025
+      MAILHOG_API_URL: http://localhost:8025
 
     steps:
       - uses: actions/checkout@v4

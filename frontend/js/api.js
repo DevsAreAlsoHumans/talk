@@ -56,6 +56,14 @@ export const api = {
   login: (data) => request("POST", "/auth/login", data),
   logout: () => request("POST", "/auth/logout"),
   me: () => request("GET", "/auth/me"),
+  verifyTotp: (pendingToken, code) =>
+    request("POST", "/auth/2fa/verify", { pending_token: pendingToken, code }),
+  setupTotp: () => request("POST", "/auth/2fa/setup"),
+  confirmTotp: (code) => request("POST", "/auth/2fa/confirm", { code }),
+  disableTotp: (code) => request("POST", "/auth/2fa/disable", { code }),
+  forgotPassword: (email) => request("POST", "/auth/forgot-password", { email }),
+  resetPassword: (token, newPassword) =>
+    request("POST", "/auth/reset-password", { token, new_password: newPassword }),
   setPublicKey: (publicKey) => request("PUT", "/users/me/public-key", { public_key: publicKey }),
   setDicebearAvatar: (seed) => request("PUT", "/users/me/avatar/dicebear", { seed }),
   uploadAvatar,

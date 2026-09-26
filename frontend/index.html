@@ -24,9 +24,37 @@
             <input name="email" type="email" placeholder="Email" required />
             <input name="password" type="password" placeholder="Mot de passe" required />
             <button type="submit">Se connecter</button>
+            <button type="button" id="forgot-password-link">Mot de passe oublié ?</button>
           </form>
         </div>
         <p id="auth-error" class="error"></p>
+      </section>
+
+      <section id="totp-view" hidden>
+        <h2>Code de vérification</h2>
+        <form id="totp-login-form">
+          <input name="code" placeholder="Code à 6 chiffres" pattern="\d{6}" required />
+          <button type="submit">Valider</button>
+        </form>
+        <p id="totp-error" class="error"></p>
+      </section>
+
+      <section id="forgot-password-view" hidden>
+        <h2>Mot de passe oublié</h2>
+        <form id="forgot-password-form">
+          <input name="email" type="email" placeholder="Email" required />
+          <button type="submit">Envoyer le lien de réinitialisation</button>
+        </form>
+        <p id="forgot-password-message"></p>
+      </section>
+
+      <section id="reset-password-view" hidden>
+        <h2>Nouveau mot de passe</h2>
+        <form id="reset-password-form">
+          <input name="password" type="password" placeholder="Nouveau mot de passe" required />
+          <button type="submit">Réinitialiser</button>
+        </form>
+        <p id="reset-password-message"></p>
       </section>
 
       <section id="chat-view" hidden>
@@ -35,6 +63,19 @@
           <span id="current-user"></span>
           <button id="logout-button">Se déconnecter</button>
         </header>
+
+        <div id="totp-setup">
+          <button id="totp-setup-button">Activer la 2FA</button>
+          <div id="totp-setup-details" hidden>
+            <p>Secret : <code id="totp-secret"></code></p>
+            <p>URI : <code id="totp-uri"></code></p>
+            <form id="totp-confirm-form">
+              <input name="code" placeholder="Code à 6 chiffres" pattern="\d{6}" required />
+              <button type="submit">Confirmer l'activation</button>
+            </form>
+          </div>
+          <p id="totp-setup-message"></p>
+        </div>
 
         <form id="avatar-form">
           <input name="seed" placeholder="Seed Dicebear (ex: alice)" />

@@ -8,11 +8,14 @@ services:
       - MONGO_DB_NAME=talk
       - REDIS_URI=redis://redis:6379/0
       - SECRET_KEY=dev-secret-change-me
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
     volumes:
       - ./storage:/app/storage
     depends_on:
       - mongo
       - redis
+      - mailhog
 
   mongo:
     image: mongo:7
@@ -35,12 +38,16 @@ services:
       - MONGO_DB_NAME=talk_test
       - REDIS_URI=redis://redis:6379/1
       - SECRET_KEY=test-secret
+      - SMTP_HOST=mailhog
+      - SMTP_PORT=1025
+      - MAILHOG_API_URL=http://mailhog:8025
     volumes:
       - ./tests:/app/tests
       - ./pyproject.toml:/app/pyproject.toml
     depends_on:
       - mongo
       - redis
+      - mailhog
 
 volumes:
   mongo_data:

@@ -16,5 +16,9 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     session_ttl_seconds: int = 60 * 60 * 24 * 7
 
+    smtp_host: str = "localhost"
+    smtp_port: int = 1025
+    mail_from: str = "no-reply@talk.local"
+
 
 settings = Settings()

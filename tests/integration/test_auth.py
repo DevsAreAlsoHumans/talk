@@ -119,4 +119,6 @@ async def test_login_with_correct_credentials_returns_200() -> None:
         )
 
         assert response.status_code == 200
-        assert response.json()["email"] == email
+        body = response.json()
+        assert body["totp_required"] is False
+        assert body["user"]["email"] == email
