@@ -7,6 +7,9 @@ RESUME_PRIVE.md
 .DS_Store
 *.log
 
+# Notes de session-export creees automatiquement par l'outillage
+session-*.md
+
 # Python
 __pycache__/
 *.py[cod]
