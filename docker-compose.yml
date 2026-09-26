@@ -1,0 +1,89 @@
+# Orchestration de l'application « talk ».
+#
+#   docker compose up              -> démarre MongoDB puis l'application
+#   docker compose run --rm test   -> lance pytest sur une base dédiée
+#
+# Les services démarrent dans l'ordre défini par `depends_on`. Le point
+# clé est la condition `service_healthy` : elle n'enchaîne pas sur le
+# simple « conteneur démarré » mais sur « MongoDB répond vraiment au ping ».
+# Mongo met plusieurs secondes à être opérationnel ; sans ce healthcheck,
+# l'app se connecterait trop tôt, échouerait, et le conteneur redémarrerait
+# en boucle.
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      # Volume nommé : les messages survivent à `docker compose down`.
+      - mongo_data:/data/db
+    healthcheck:
+      test:
+        - CMD
+        - mongosh
+        - --quiet
+        - --eval
+        - db.adminCommand('ping').ok
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    # Le port 27017 n'est volontairement PAS publié : l'application y
+    # accède via le réseau Docker interne (`mongodb://mongo:27017`), ce qui
+    # laisse la base injoignable depuis l'extérieur (surface d'attaque
+    # réduite). Décommentez pour explorer les données depuis l'hôte :
+    #   ports:
+    #     - "127.0.0.1:27017:27017"
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Nom de service = nom DNS dans le réseau Docker.
+      # « localhost » est ici une erreur fréquente : dans un conteneur,
+      # il désignerait le conteneur lui-même, qui n'héberge pas MongoDB.
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DBNAME: Talk
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      # /health vérifie réellement la base (ping Mongo), pas seulement
+      # que le processus HTTP répond.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import sys
+          import urllib.request
+          try:
+              urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3)
+          except Exception:
+              sys.exit(1)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Service de test : même image, mais on lance pytest au lieu du serveur.
+  # `profiles` l'exclut de `docker compose up` (sinon pytest démarrerait
+  # et s'arrêterait en même temps que l'app) ; `docker compose run` ciblant
+  # explicitement ce service l'exécute malgré tout.
+  test:
+    build: .
+    profiles:
+      - test
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      # Base jetable, distincte de celle de l'application.
+      MONGODB_DBNAME: Talk_test
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: ["pytest", "-v"]
+
+volumes:
+  mongo_data:

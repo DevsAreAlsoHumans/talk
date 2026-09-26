@@ -6,3 +6,10 @@ RESUME_PRIVE.md
 # Artefacts
 .DS_Store
 *.log
+
+# Byte-compilés Python (regénérés automatiquement, ne doivent pas
+# être versionnés)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/

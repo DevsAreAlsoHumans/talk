@@ -1,0 +1,66 @@
+# Intégration continue — CI uniquement (pas de CD, conformément à l'énoncé).
+#
+# Déclenchée à chaque push et à chaque pull request. Le pipeline doit
+# passer au vert sur la branche personnelle : c'est la preuve de
+# non-régression exigée au rendu, et son absence coûte un malus.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Principe du moindre privilège : le job n'a que les droits de lecture.
+permissions:
+  contents: read
+
+jobs:
+  lint-and-tests:
+    name: Lint + tests
+    runs-on: ubuntu-latest
+
+    # GitHub peut démarrer un conteneur Mongo directement dans le job.
+    # C'est le même principe que le healthcheck du docker-compose, et
+    # c'est indispensable : les tests d'intégration font de vrais
+    # INSERT/QUERY, aucune base in-memory ne conviendrait.
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+          --health-start-period 10s
+
+    # La configuration passe par variables d'environnement : aucun secret
+    # n'est écrit dans le dépôt. Les valeurs réelles sensibles
+    # (clé de signature, etc.) se déclareraient dans Settings > Secrets
+    # et se liraient via ${{ secrets.NOM }}.
+    env:
+      MONGODB_URI: mongodb://localhost:27017
+      MONGODB_DBNAME: Talk_test
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Linter (ruff)
+        run: ruff check .
+
+      - name: Tests unitaires et d'intégration
+        run: pytest -v

@@ -1,6 +1,7 @@
 import os
 import uuid
 
+from app.config import settings
 from tests.conftest import auth_headers, csrf
 from tests.crypto_helpers import (
     encrypt_message,
@@ -101,6 +102,31 @@ class TestAuth:
             json={"username": "inconnu", "password": "motdepasse123"},
         )
         assert wrong.status_code == 401
+
+
+class TestSecurityHeaders:
+    async def test_security_headers_are_present(self, client):
+        response = await client.get("/api/status")
+        assert response.status_code == 200
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["Referrer-Policy"] == "no-referrer"
+        assert response.headers["Cache-Control"] == "no-store"
+        assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+
+    async def test_hsts_absent_by_default(self, client):
+        # En développement on sert du HTTP : un HSTS ici serait ignoré
+        # par le navigateur et potentiellement piégeant.
+        response = await client.get("/api/status")
+        assert "Strict-Transport-Security" not in response.headers
+
+    async def test_hsts_present_when_configured(self, client, monkeypatch):
+        monkeypatch.setattr(settings, "hsts_max_age", 31536000)
+        response = await client.get("/api/status")
+        assert (
+            response.headers["Strict-Transport-Security"]
+            == "max-age=31536000; includeSubDomains"
+        )
 
 
 class TestChatFlow:
