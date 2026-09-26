@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Talk</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Talk</h1>
+
+      <section id="auth-view">
+        <div class="auth-forms">
+          <form id="register-form">
+            <h2>Inscription</h2>
+            <input name="username" placeholder="Pseudo" required minlength="3" />
+            <input name="email" type="email" placeholder="Email" required />
+            <input name="password" type="password" placeholder="Mot de passe" required />
+            <button type="submit">S'inscrire</button>
+          </form>
+
+          <form id="login-form">
+            <h2>Connexion</h2>
+            <input name="email" type="email" placeholder="Email" required />
+            <input name="password" type="password" placeholder="Mot de passe" required />
+            <button type="submit">Se connecter</button>
+          </form>
+        </div>
+        <p id="auth-error" class="error"></p>
+      </section>
+
+      <section id="chat-view" hidden>
+        <header>
+          <span id="current-user"></span>
+          <button id="logout-button">Se déconnecter</button>
+        </header>
+
+        <form id="open-dm-form">
+          <input name="username" placeholder="Pseudo du destinataire" required />
+          <input name="discriminator" placeholder="0000" pattern="\d{4}" required />
+          <button type="submit">Ouvrir le DM</button>
+        </form>
+
+        <ul id="room-list"></ul>
+
+        <div id="active-room">
+          <p id="active-room-label">Choisis ou crée un DM.</p>
+          <ul id="messages"></ul>
+          <form id="send-form" hidden>
+            <input name="text" placeholder="Message..." autocomplete="off" required />
+            <button type="submit">Envoyer</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

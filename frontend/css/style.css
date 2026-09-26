@@ -1,0 +1,48 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 640px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.auth-forms {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.error {
+  color: #b00020;
+}
+
+#room-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+#messages {
+  list-style: none;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  min-height: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+#send-form {
+  flex-direction: row;
+}
+
+#send-form input {
+  flex: 1;
+}

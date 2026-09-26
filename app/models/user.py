@@ -17,9 +17,25 @@ class UserLogin(BaseModel):
 
 
 class UserPublic(BaseModel):
-    """Représentation d'un utilisateur exposée par l'API (jamais le hash du mot de passe)."""
+    """Représentation de l'utilisateur courant (endpoint /auth/me)."""
 
     id: str
     username: str
     discriminator: str
     email: EmailStr
+    public_key: str | None = None
+
+
+class PeerPublic(BaseModel):
+    """Représentation d'un autre utilisateur, exposée via les salons (jamais l'email)."""
+
+    id: str
+    username: str
+    discriminator: str
+    public_key: str | None = None
+
+
+class PublicKeyUpdate(BaseModel):
+    """Clé publique E2E envoyée par le client (générée côté navigateur)."""
+
+    public_key: str

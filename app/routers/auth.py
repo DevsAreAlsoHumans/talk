@@ -30,6 +30,7 @@ def _to_public(document: dict[str, Any]) -> UserPublic:
         username=document["username"],
         discriminator=document["discriminator"],
         email=document["email"],
+        public_key=document.get("public_key"),
     )
 
 
