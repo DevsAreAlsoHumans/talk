@@ -24,16 +24,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _DISCRIMINATOR_ATTEMPTS = 20
 
 
-def _to_public(document: dict[str, Any]) -> UserPublic:
-    return UserPublic(
-        id=str(document["_id"]),
-        username=document["username"],
-        discriminator=document["discriminator"],
-        email=document["email"],
-        public_key=document.get("public_key"),
-    )
-
-
 def _set_session_cookies(response: Response, session_id: str, csrf_token: str) -> None:
     response.set_cookie(
         SESSION_COOKIE_NAME,
@@ -89,7 +79,7 @@ async def register(payload: UserRegister, response: Response) -> UserPublic:
 
     session_id, csrf_token = await create_session(str(document["_id"]))
     _set_session_cookies(response, session_id, csrf_token)
-    return _to_public(document)
+    return UserPublic.from_document(document)
 
 
 @router.post("/login", response_model=UserPublic)
@@ -103,7 +93,7 @@ async def login(payload: UserLogin, response: Response) -> UserPublic:
 
     session_id, csrf_token = await create_session(str(document["_id"]))
     _set_session_cookies(response, session_id, csrf_token)
-    return _to_public(document)
+    return UserPublic.from_document(document)
 
 
 @router.post(
@@ -128,4 +118,4 @@ async def me(user_id: str = Depends(get_current_user_id)) -> UserPublic:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Utilisateur introuvable."
         )
-    return _to_public(document)
+    return UserPublic.from_document(document)

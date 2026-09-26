@@ -7,6 +7,7 @@ const authView = document.getElementById("auth-view");
 const chatView = document.getElementById("chat-view");
 const authError = document.getElementById("auth-error");
 const currentUserLabel = document.getElementById("current-user");
+const currentAvatar = document.getElementById("current-avatar");
 const roomList = document.getElementById("room-list");
 const activeRoomLabel = document.getElementById("active-room-label");
 const messagesList = document.getElementById("messages");
@@ -43,6 +44,7 @@ async function publishPublicKeyIfNeeded(user) {
 function showChatView(user) {
   currentUser = user;
   currentUserLabel.textContent = `Connecté en tant que ${user.username}#${user.discriminator}`;
+  currentAvatar.src = user.avatar ? user.avatar.url : "";
   authView.hidden = true;
   chatView.hidden = false;
   loadRooms();
@@ -58,6 +60,9 @@ async function loadRooms() {
   const rooms = await api.listRooms();
   roomList.innerHTML = "";
   for (const room of rooms) {
+    // Les salons de groupe arrivent avec la phase 8 (E2E de groupe) : on
+    // n'affiche ici que les DM pour ne pas montrer un chat non fonctionnel.
+    if (room.type !== "dm") continue;
     const item = document.createElement("li");
     const button = document.createElement("button");
     button.textContent = `${room.peer.username}#${room.peer.discriminator}`;
@@ -151,6 +156,19 @@ document.getElementById("logout-button").addEventListener("click", async () => {
   await api.logout();
   if (socket) socket.close();
   showAuthView();
+});
+
+document.getElementById("avatar-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const isUpload = event.submitter?.dataset.action === "upload";
+
+  const updatedUser = isUpload
+    ? await api.uploadAvatar(form.get("file"))
+    : await api.setDicebearAvatar(form.get("seed"));
+
+  currentUser = updatedUser;
+  currentAvatar.src = updatedUser.avatar ? updatedUser.avatar.url : "";
 });
 
 document.getElementById("open-dm-form").addEventListener("submit", async (event) => {

@@ -8,6 +8,8 @@ services:
       - MONGO_DB_NAME=talk
       - REDIS_URI=redis://redis:6379/0
       - SECRET_KEY=dev-secret-change-me
+    volumes:
+      - ./storage:/app/storage
     depends_on:
       - mongo
       - redis

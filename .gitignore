@@ -8,6 +8,9 @@ CLAUDE.md
 .DS_Store
 *.log
 
+# Stockage local des blobs (avatars uploadés, pièces jointes)
+storage/
+
 # Python
 __pycache__/
 *.pyc

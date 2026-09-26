@@ -31,9 +31,17 @@
 
       <section id="chat-view" hidden>
         <header>
+          <img id="current-avatar" alt="Avatar" width="48" height="48" />
           <span id="current-user"></span>
           <button id="logout-button">Se déconnecter</button>
         </header>
+
+        <form id="avatar-form">
+          <input name="seed" placeholder="Seed Dicebear (ex: alice)" />
+          <button type="submit">Utiliser cette seed</button>
+          <input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+          <button type="submit" data-action="upload">Uploader une image</button>
+        </form>
 
         <form id="open-dm-form">
           <input name="username" placeholder="Pseudo du destinataire" required />

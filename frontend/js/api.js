@@ -32,12 +32,33 @@ async function request(method, path, body) {
   return response.json();
 }
 
+async function uploadAvatar(file) {
+  const csrfToken = getCookie("csrf_token");
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/users/me/avatar/upload", {
+    method: "POST",
+    headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {},
+    body: formData,
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody.detail || response.statusText);
+  }
+  return response.json();
+}
+
 export const api = {
   register: (data) => request("POST", "/auth/register", data),
   login: (data) => request("POST", "/auth/login", data),
   logout: () => request("POST", "/auth/logout"),
   me: () => request("GET", "/auth/me"),
   setPublicKey: (publicKey) => request("PUT", "/users/me/public-key", { public_key: publicKey }),
+  setDicebearAvatar: (seed) => request("PUT", "/users/me/avatar/dicebear", { seed }),
+  uploadAvatar,
   openDm: (username, discriminator) => request("POST", "/rooms/dm", { username, discriminator }),
   listRooms: () => request("GET", "/rooms"),
   listMessages: (roomId) => request("GET", `/rooms/${roomId}/messages`),
