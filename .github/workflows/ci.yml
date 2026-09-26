@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-and-test:
+    name: Lint et tests
+    runs-on: ubuntu-latest
+
+    # Les tests d'intégration utilisent la vraie base MongoDB.
+    services:
+      mongo:
+        image: mongo:7
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB_NAME: talk_test
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # GitHub Actions attend le *démarrage* du conteneur de service, pas son
+      # état `healthy` : sans cette boucle, le premier test peut être exécuté
+      # avant que MongoDB n'accepte les connexions.
+      - name: Attendre MongoDB
+        run: |
+          python - <<'PY'
+          import os
+          import time
+
+          from pymongo import MongoClient
+          from pymongo.errors import PyMongoError
+
+          url = os.environ["MONGO_URL"]
+          for _ in range(30):
+              try:
+                  MongoClient(url, serverSelectionTimeoutMS=2000).admin.command("ping")
+                  print("MongoDB prêt.")
+                  break
+              except PyMongoError:
+                  time.sleep(2)
+          else:
+              raise SystemExit("MongoDB indisponible après 60 secondes.")
+          PY
+
+      - name: Linter (Ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Tests (pytest)
+        run: python -m pytest
+
+  docker:
+    name: Cohérence Docker
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Valider docker-compose
+        run: docker compose config --quiet
+
+      - name: Construire l'image
+        run: docker compose build app

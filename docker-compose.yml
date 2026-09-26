@@ -1,0 +1,52 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB_NAME: talk
+    volumes:
+      - ./app:/srv/app:ro
+      - ./frontend:/srv/frontend:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Lancement des tests : docker compose run --rm test
+  # Le profil évite que ce service soit démarré par `docker compose up`.
+  # `depends_on` fait démarrer MongoDB et attend son healthcheck : les tests
+  # d'intégration tournent ainsi contre la vraie base, pas contre un substitut.
+  # `talk_test` est distinct de `talk` pour ne jamais toucher aux données de dev.
+  test:
+    build: .
+    command: ["python", "-m", "pytest"]
+    profiles: ["test"]
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB_NAME: talk_test
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./app:/srv/app:ro
+      - ./frontend:/srv/frontend:ro
+      - ./tests:/srv/tests:ro
+      - ./pyproject.toml:/srv/pyproject.toml:ro
+
+volumes:
+  mongo_data:

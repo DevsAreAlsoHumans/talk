@@ -1,0 +1,9 @@
+# Dépendances de développement (tests + linter)
+# Utilisé par la CI GitHub Actions et par le service `test` de docker-compose.
+-r requirements.txt
+
+pytest==9.1.1
+# httpx2 est le client HTTP attendu par starlette>=1.7 (extra "full") pour TestClient.
+# Le paquet `httpx` n'est plus que la voie de repli dépréciée.
+httpx2==2.13.1
+ruff==0.16.9

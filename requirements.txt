@@ -1,0 +1,5 @@
+# Dépendances de l'application (runtime)
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+pymongo==4.18.2
+argon2-cffi==25.1.0

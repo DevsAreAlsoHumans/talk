@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Talk — en cours de développement</title>
+    <meta
+      name="description"
+      content="Talk, application de discussion chiffrée de bout en bout. En cours de développement."
+    />
+    <link rel="stylesheet" href="./css/style.css" />
+  </head>
+
+  <body>
+    <main class="container">
+      <h1 class="title">Talk</h1>
+      <p class="subtitle">Application de discussion chiffrée de bout en bout.</p>
+
+      <p class="notice">La messagerie arrive dans une prochaine étape.</p>
+
+      <p class="status">
+        État de l'API : <span id="api-status">inconnu</span>
+      </p>
+
+      <section id="auth-section" class="auth">
+        <h2 class="auth-title">Authentification</h2>
+
+        <p id="auth-message" class="auth-message" role="status" hidden></p>
+
+        <div id="auth-logged-out">
+          <form id="login-form" class="auth-form" novalidate>
+            <h3 class="auth-subtitle">Connexion</h3>
+            <label class="auth-label" for="login-username">Nom d'utilisateur</label>
+            <input
+              class="auth-input"
+              id="login-username"
+              name="username"
+              type="text"
+              autocomplete="username"
+              minlength="3"
+              maxlength="32"
+              required
+            />
+            <label class="auth-label" for="login-password">Mot de passe</label>
+            <input
+              class="auth-input"
+              id="login-password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+            <button class="auth-button" type="submit">Se connecter</button>
+          </form>
+
+          <form id="register-form" class="auth-form" novalidate>
+            <h3 class="auth-subtitle">Inscription</h3>
+            <label class="auth-label" for="register-username">Nom d'utilisateur</label>
+            <input
+              class="auth-input"
+              id="register-username"
+              name="username"
+              type="text"
+              autocomplete="username"
+              minlength="3"
+              maxlength="32"
+              pattern="[A-Za-z0-9_]{3,32}"
+              required
+            />
+            <p class="auth-hint">3 à 32 caractères : lettres, chiffres et _</p>
+            <label class="auth-label" for="register-password">Mot de passe</label>
+            <input
+              class="auth-input"
+              id="register-password"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              minlength="12"
+              required
+            />
+            <p class="auth-hint">12 caractères minimum</p>
+            <button class="auth-button" type="submit">Créer un compte</button>
+          </form>
+        </div>
+
+        <div id="auth-logged-in" hidden>
+          <p class="auth-welcome">Connecté en tant que <strong id="auth-username"></strong>.</p>
+          <button class="auth-button" id="logout-button" type="button">Se déconnecter</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="./js/app.js"></script>
+  </body>
+</html>
