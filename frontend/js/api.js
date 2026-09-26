@@ -72,4 +72,8 @@ export const api = {
   listMessages: (roomId) => request("GET", `/rooms/${roomId}/messages`),
   sendMessage: (roomId, ciphertext, iv) =>
     request("POST", `/rooms/${roomId}/messages`, { ciphertext, iv }),
+  listNotifications: () => request("GET", "/notifications"),
+  markNotificationRead: (notificationId) =>
+    request("POST", `/notifications/${notificationId}/read`),
+  markAllNotificationsRead: () => request("POST", "/notifications/read-all"),
 };

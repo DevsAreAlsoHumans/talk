@@ -15,6 +15,7 @@ from app.models.friendship import (
 )
 from app.models.user import PeerPublic
 from app.security.sessions import get_current_user_id, require_csrf
+from app.services.notifications import create_notification
 
 router = APIRouter(prefix="/friends", tags=["friends"])
 
@@ -89,11 +90,12 @@ async def send_friend_request(
                 {"_id": existing["_id"]},
                 {"$set": {"status": "accepted", "resolved_at": datetime.now(UTC)}},
             )
+            await create_notification(peer_id, "friend_accepted", {"peer_id": user_id})
             return FriendRequestResult(status="accepted", peer=PeerPublic.from_document(peer))
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Demande déjà envoyée.")
 
     try:
-        await db.friendships.insert_one(
+        result = await db.friendships.insert_one(
             {
                 "requester_id": user_id,
                 "target_id": peer_id,
@@ -107,6 +109,9 @@ async def send_friend_request(
             status_code=status.HTTP_409_CONFLICT, detail="Demande déjà envoyée."
         ) from exc
 
+    await create_notification(
+        peer_id, "friend_request", {"request_id": str(result.inserted_id), "from_user_id": user_id}
+    )
     return FriendRequestResult(status="pending", peer=PeerPublic.from_document(peer))
 
 
@@ -162,6 +167,7 @@ async def accept_friend_request(
         {"_id": request_doc["_id"]}, {"$set": {"status": "accepted", "resolved_at": resolved_at}}
     )
     peer = await db.users.find_one({"_id": ObjectId(request_doc["requester_id"])})
+    await create_notification(request_doc["requester_id"], "friend_accepted", {"peer_id": user_id})
     return FriendPublic(peer=PeerPublic.from_document(peer), since=resolved_at)
 
 

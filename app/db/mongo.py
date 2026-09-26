@@ -1,7 +1,7 @@
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pymongo import ASCENDING
+from pymongo import ASCENDING, DESCENDING
 
 from app.config import settings
 
@@ -18,6 +18,7 @@ async def ensure_indexes() -> None:
     await db.friendships.create_index(
         [("requester_id", ASCENDING), ("target_id", ASCENDING)], unique=True
     )
+    await db.notifications.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
 
 
 async def find_user_by_tag(username: str, discriminator: str) -> dict[str, Any] | None:

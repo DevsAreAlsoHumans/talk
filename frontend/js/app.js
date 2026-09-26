@@ -1,7 +1,7 @@
 import { api } from "./api.js";
 import * as cryptoUtil from "./crypto.js";
 import { loadKeyPair, saveKeyPair } from "./idb.js";
-import { connectRoomSocket } from "./ws.js";
+import { connectNotificationsSocket, connectRoomSocket } from "./ws.js";
 
 const authView = document.getElementById("auth-view");
 const totpView = document.getElementById("totp-view");
@@ -16,11 +16,14 @@ const roomList = document.getElementById("room-list");
 const activeRoomLabel = document.getElementById("active-room-label");
 const messagesList = document.getElementById("messages");
 const sendForm = document.getElementById("send-form");
+const notificationsCount = document.getElementById("notifications-count");
+const notificationsList = document.getElementById("notifications-list");
 
 let keyPair = null;
 let currentUser = null;
 let currentRoom = null; // { id, sharedKey }
 let socket = null;
+let notificationsSocket = null;
 let pendingTotpToken = null;
 
 function hideAllViews() {
@@ -61,6 +64,11 @@ function showChatView(user) {
   hideAllViews();
   chatView.hidden = false;
   loadRooms();
+  loadNotifications();
+  notificationsSocket = connectNotificationsSocket((notification) => {
+    renderNotification(notification, /* prepend= */ true);
+    updateNotificationsCount();
+  });
 }
 
 function showAuthView() {
@@ -138,6 +146,41 @@ async function renderMessage(message) {
   }
   messagesList.appendChild(item);
 }
+
+function renderNotification(notification, prepend) {
+  const item = document.createElement("li");
+  item.textContent = `[${notification.type}] ${JSON.stringify(notification.payload)}`;
+  item.dataset.notificationId = notification.id;
+  if (!notification.read) item.style.fontWeight = "bold";
+  item.addEventListener("click", async () => {
+    await api.markNotificationRead(notification.id);
+    item.style.fontWeight = "normal";
+    updateNotificationsCount();
+  });
+  if (prepend) {
+    notificationsList.insertBefore(item, notificationsList.firstChild);
+  } else {
+    notificationsList.appendChild(item);
+  }
+}
+
+function updateNotificationsCount() {
+  const unread = notificationsList.querySelectorAll("li[style*='bold']").length;
+  notificationsCount.textContent = String(unread);
+}
+
+async function loadNotifications() {
+  const notifications = await api.listNotifications();
+  notificationsList.innerHTML = "";
+  for (const notification of notifications) {
+    renderNotification(notification, false);
+  }
+  updateNotificationsCount();
+}
+
+document.getElementById("notifications-toggle").addEventListener("click", () => {
+  notificationsList.hidden = !notificationsList.hidden;
+});
 
 document.getElementById("register-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -220,6 +263,7 @@ document.getElementById("reset-password-form").addEventListener("submit", async 
 document.getElementById("logout-button").addEventListener("click", async () => {
   await api.logout();
   if (socket) socket.close();
+  if (notificationsSocket) notificationsSocket.close();
   showAuthView();
 });
 

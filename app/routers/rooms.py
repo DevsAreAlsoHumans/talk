@@ -19,6 +19,7 @@ from app.models.room import (
 )
 from app.models.user import PeerPublic
 from app.security.sessions import get_current_user_id, require_csrf
+from app.services.notifications import create_notification
 from app.services.realtime import room_channel
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
@@ -188,6 +189,10 @@ async def add_member(
     room["members"].append(new_member)
     room["member_ids"].append(peer_id)
 
+    await create_notification(
+        peer_id, "room_invite", {"room_id": str(room["_id"]), "room_name": room["name"]}
+    )
+
     member_documents = await _fetch_member_documents(room["members"])
     return _to_group_room_public(room, member_documents)
 
@@ -315,7 +320,7 @@ async def send_message(
     room_id: str, payload: MessageCreate, user_id: str = Depends(get_current_user_id)
 ) -> MessagePublic:
     """Stocke un message chiffré et le publie en temps réel aux membres connectés."""
-    await _get_membership_or_404(room_id, user_id)
+    room = await _get_membership_or_404(room_id, user_id)
 
     document: dict[str, Any] = {
         "room_id": room_id,
@@ -329,4 +334,11 @@ async def send_message(
 
     message = _to_message_public(document)
     await redis_client.publish(room_channel(room_id), message.model_dump_json())
+
+    for member_id in room["member_ids"]:
+        if member_id != user_id:
+            await create_notification(
+                member_id, "message", {"room_id": room_id, "sender_id": user_id}
+            )
+
     return message
