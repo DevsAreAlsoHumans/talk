@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from tests.conftest import CIPHERTEXT, envelope
+from tests.conftest import CIPHERTEXT
 
 
 def test_create_salon_becomes_owner(client: TestClient, registered) -> None:

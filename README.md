@@ -66,3 +66,41 @@ README.md                 # documentation (fonctionnement, sécurité, mise en p
 ---
 
 *Projet pédagogique — année 2026.*
+---
+
+# Documentation de l'implémentation
+
+*Cette section décrit le projet tel qu'il est livré sur les branches étudiantes.
+L'énoncé ci-dessus reste la référence.*
+
+## Démarrage rapide
+
+```bash
+cp .env.example .env      # renseigner SESSION_SECRET
+docker compose up         # application + Redis sur http://localhost:8000
+docker compose run --rm test   # linter + suite de tests
+```
+
+Créer un compte depuis l'interface, puis un salon, puis inviter un second
+membre : la messagerie devient lisible de bout en bout.
+
+## Documentation
+
+| Document | Contenu |
+|----------|---------|
+| [docs/INSTALLATION.md](docs/INSTALLATION.md) | Mise en place locale et Docker |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arborescence, flux de données, temps réel |
+| [docs/SECURITY.md](docs/SECURITY.md) | Menaces couvertes et mesures associées |
+| [docs/CRYPTOGRAPHIE.md](docs/CRYPTOGRAPHIE.md) | Protocole de chiffrement de bout en bout |
+| [docs/API.md](docs/API.md) | Référence des endpoints |
+
+## Principe directeur
+
+Le serveur ne voit que des enveloppes chiffrées et ne détient aucune clé
+capable de les ouvrir : les clés privées restent dans le navigateur, les clés de
+canal ne transitent que chiffrées pour chaque destinataire.
+
+## Stack
+
+Python 3.12 · FastAPI · Redis · Web Crypto API · HTML/CSS/JS vanilla ·
+Docker · GitHub Actions (ruff + pytest).
