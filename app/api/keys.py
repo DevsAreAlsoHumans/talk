@@ -61,8 +61,11 @@ def read_public_key(
             status_code=status.HTTP_404_NOT_FOUND, detail="Cle publique introuvable."
         )
     return PublicKeyOut(
-        user_id=user_id, username=profile["username"], public_key=stored["public_key"],
+        user_id=user_id,
+        username=profile["username"],
+        public_key=stored["public_key"],
         version=stored["version"],
+        created_at=stored["created_at"],
     )
 
 
@@ -97,7 +100,9 @@ def publish_channel_key(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Membre du salon introuvable."
             )
-    stored = keys.put_channel_key(redis, channel_id, target_id, user["id"], payload.wrapped_key)
+    stored = keys.put_channel_key(
+        redis, channel_id, target_id, user["id"], payload.wrapped_key, payload.iv
+    )
     return ChannelKeyOut(**stored)
 
 
@@ -110,9 +115,7 @@ def read_own_channel_key(
 ) -> ChannelKeyOut:
     stored = keys.get_channel_key(redis, channel_id, user["id"])
     if stored is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Cle de canal absente."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cle de canal absente.")
     return ChannelKeyOut(**stored)
 
 

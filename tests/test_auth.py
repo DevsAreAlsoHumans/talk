@@ -35,15 +35,19 @@ def test_register_sets_secure_session(client: TestClient, csrf_headers) -> None:
 
 
 def test_register_rejects_duplicate_username(client: TestClient, csrf_headers) -> None:
-    client.post(
+    first = client.post(
         "/auth/register",
         json={"username": VALID_USERNAME, "password": VALID_PASSWORD},
         headers=csrf_headers,
     )
+    assert first.status_code == 201
+    # L'inscription emet un nouveau jeton CSRF lie a la session : reutiliser
+    # l'ancien jeton anonyme donnerait 403 au lieu du 409 attendu.
+    fresh = client.get("/auth/csrf").json()["csrf_token"]
     duplicate = client.post(
         "/auth/register",
         json={"username": VALID_USERNAME, "password": VALID_PASSWORD},
-        headers=csrf_headers,
+        headers={"X-CSRF-Token": fresh},
     )
     assert duplicate.status_code == 409
 

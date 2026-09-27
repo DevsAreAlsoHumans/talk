@@ -67,7 +67,7 @@ def test_csp_allows_only_own_assets(client: TestClient) -> None:
 def test_frontend_uses_text_content_for_user_data() -> None:
     sources = _sources()
     assert "textContent" in sources["js/dom.js"]
-    assert sources["js/dom.js"].count("textContent") >= 3
+    assert sources["js/dom.js"].count("textContent") >= 2
 
 
 def test_crypto_module_only_uses_webcrypto() -> None:

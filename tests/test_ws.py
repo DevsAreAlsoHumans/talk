@@ -31,9 +31,7 @@ def test_socket_requires_session(new_client, salon) -> None:
 
 def test_socket_denied_for_non_member(other_account, salon) -> None:
     with pytest.raises(WebSocketDisconnect) as failure:
-        with other_account["client"].websocket_connect(
-            f"/ws/channels/{salon['channel_id']}"
-        ):
+        with other_account["client"].websocket_connect(f"/ws/channels/{salon['channel_id']}"):
             pass
     assert failure.value.code == POLICY_VIOLATION
 
@@ -48,9 +46,7 @@ def test_socket_rejects_foreign_origin(client: TestClient, salon) -> None:
     assert failure.value.code == POLICY_VIOLATION
 
 
-def test_socket_broadcasts_to_other_members(
-    client: TestClient, salon, other_account
-) -> None:
+def test_socket_broadcasts_to_other_members(client: TestClient, salon, other_account) -> None:
     client.post(
         f"/salons/{salon['id']}/members",
         json={"username": "invitee"},

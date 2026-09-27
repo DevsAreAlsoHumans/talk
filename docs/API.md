@@ -30,6 +30,7 @@ cookie `csrf_token`. Appeler `GET /auth/csrf` une fois au démarrage.
 | `DELETE` | `/salons/{id}` | propriétaire | Supprime salon, canaux et clés |
 | `GET` | `/salons/{id}/members` | membre | Liste avec rôles |
 | `POST` | `/salons/{id}/members` | modérateur | Invite par pseudo |
+| `PATCH` | `/salons/{id}/members/{user_id}` | propriétaire | Change le rôle (`moderator`/`member`) |
 | `DELETE` | `/salons/{id}/members/{user_id}` | modérateur | Retire (le propriétaire est protégé) |
 | `POST` | `/salons/{id}/channels` | modérateur | Crée un canal `text` ou `private` |
 | `GET` | `/salons/{id}/channels` | membre | Canaux visibles |

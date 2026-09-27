@@ -19,20 +19,21 @@ def test_send_and_read_message(client: TestClient, salon, registered) -> None:
     assert page["latest_seq"] == body["seq"]
 
 
-def test_server_never_sees_plaintext(
-    client: TestClient, salon, registered, redis_client
-) -> None:
+def test_server_never_sees_plaintext(client: TestClient, salon, registered, redis_client) -> None:
     secret = "mon-secret-en-clair"
-    client.post(
-        f"/channels/{salon['channel_id']}/messages", json=envelope(), headers=registered
-    )
-    dumped = "\n".join(
-        f"{key} {value}"
-        for key in redis_client.scan_iter()
-        for value in redis_client.hgetall(key).values()
-    )
+    client.post(f"/channels/{salon['channel_id']}/messages", json=envelope(), headers=registered)
+    # scan_iter remonte aussi des strings et des ZSET : hgetall echouerait
+    # avec WRONGTYPE sur ces cles, on filtre donc sur le type hash.
+    blobs = []
+    for key in redis_client.scan_iter():
+        if redis_client.type(key) == "hash":
+            blobs.append(str(redis_client.hgetall(key)))
+    dumped = "\n".join(blobs)
     assert secret not in dumped
-    assert "text" not in dumped
+    # Aucun champ de contenu en clair n'est stocke, seulement l'enveloppe.
+    assert "'text':" not in dumped
+    assert "'content':" not in dumped
+    assert "'body':" not in dumped
 
 
 def test_plaintext_field_is_rejected(client: TestClient, salon, registered) -> None:
@@ -62,15 +63,19 @@ def test_non_base64_ciphertext_is_rejected(client: TestClient, salon, registered
     assert response.status_code == 422
 
 
-def test_send_requires_authentication_and_csrf(client: TestClient, salon, csrf_headers) -> None:
+def test_send_requires_authentication_and_csrf(salon, new_client) -> None:
+    """new_client et non client : la fixture salon authentifie deja client."""
     url = f"/channels/{salon['channel_id']}/messages"
-    assert client.post(url, json=envelope()).status_code == 403
-    assert client.post(url, json=envelope(), headers=csrf_headers).status_code == 401
+    anonymous = new_client()
+    token = anonymous.get("/auth/csrf").json()["csrf_token"]
+    # Sans jeton CSRF : rejet avant toute verification de session.
+    assert anonymous.post(url, json=envelope()).status_code == 403
+    # Avec un jeton CSRF valide mais sans session : refus d'authentification.
+    denied = anonymous.post(url, json=envelope(), headers={"X-CSRF-Token": token})
+    assert denied.status_code == 401
 
 
-def test_send_requires_channel_access(
-    client: TestClient, salon, other_account
-) -> None:
+def test_send_requires_channel_access(client: TestClient, salon, other_account) -> None:
     response = other_account["client"].post(
         f"/channels/{salon['channel_id']}/messages",
         json=envelope(),
@@ -80,12 +85,10 @@ def test_send_requires_channel_access(
 
 
 def test_history_pagination(client: TestClient, salon, registered) -> None:
-    sent = [
+    for _ in range(5):
         client.post(
             f"/channels/{salon['channel_id']}/messages", json=envelope(), headers=registered
-        ).json()
-        for _ in range(5)
-    ]
+        )
     page = client.get(f"/channels/{salon['channel_id']}/messages?limit=2").json()
     assert [item["seq"] for item in page["messages"]] == [4, 5]
 
@@ -110,17 +113,22 @@ def test_poll_returns_only_new_messages(client: TestClient, salon, registered) -
     assert len(caught_up["messages"]) == 1
 
 
-def test_message_retention_is_bounded(
-    client: TestClient, salon, registered, redis_client
-) -> None:
+def test_message_retention_is_bounded(redis_client, salon) -> None:
+    """Teste au niveau du repository : via HTTP la limitation de debit
+    interviendrait avant que la borne de retention soit atteinte."""
+    channel_id = salon["channel_id"]
     for _ in range(messages.MESSAGE_RETENTION + 5):
-        client.post(
-            f"/channels/{salon['channel_id']}/messages", json=envelope(), headers=registered
+        messages.store_message(
+            redis_client,
+            channel_id=channel_id,
+            sender_id="a" * 32,
+            ciphertext=CIPHERTEXT,
+            iv=IV,
+            key_version=1,
         )
-    stored = len(redis_client.zrange(f"channel:{salon['channel_id']}:log", 0, -1))
-    assert stored == messages.MESSAGE_RETENTION
-    page = client.get(f"/channels/{salon['channel_id']}/messages?limit=100").json()
-    assert len(page["messages"]) == 100
+    log = redis_client.zrange(f"channel:{channel_id}:log", 0, -1)
+    assert len(log) == messages.MESSAGE_RETENTION
+    assert messages.get_message(redis_client, log[0]) is not None
 
 
 def test_message_rate_limit(client: TestClient, salon, registered) -> None:

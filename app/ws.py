@@ -11,7 +11,14 @@ Pour plusieurs workers, remplacer la diffusion par un Redis Pub/Sub.
 import json
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from pydantic import ValidationError
 from redis import Redis
 from starlette.websockets import WebSocketState
@@ -61,7 +68,7 @@ manager = ConnectionManager()
 
 
 def _origin_allowed(socket: WebSocket) -> bool:
-    """ meme origine que la requete, sinon la connexion est refusee."""
+    """meme origine que la requete, sinon la connexion est refusee."""
     origin = socket.headers.get("origin")
     if not origin:
         return True  # client non navigateur (tests, CLI)
@@ -69,8 +76,7 @@ def _origin_allowed(socket: WebSocket) -> bool:
     return urlsplit(origin).netloc == host
 
 
-def _authenticate(socket: WebSocket, channel_id: str) -> dict | None:
-    redis = get_redis()
+def _authenticate(socket: WebSocket, channel_id: str, redis: Redis) -> dict | None:
     session = read_session(redis, socket.cookies.get(SESSION_COOKIE))
     if session is None:
         return None
@@ -82,25 +88,26 @@ def _authenticate(socket: WebSocket, channel_id: str) -> dict | None:
     return user
 
 
-def _error(socket: WebSocket, code: str, detail: str) -> None:
-    socket.send_text(json.dumps({"type": "error", "code": code, "detail": detail}))
+async def _error(socket: WebSocket, code: str, detail: str) -> None:
+    await socket.send_text(json.dumps({"type": "error", "code": code, "detail": detail}))
 
 
 @router.websocket("/ws/channels/{channel_id}")
-async def channel_socket(socket: WebSocket, channel_id: str) -> None:
+async def channel_socket(
+    socket: WebSocket, channel_id: str, redis: Redis = Depends(get_redis)
+) -> None:
     if not _origin_allowed(socket):
         await socket.close(code=POLICY_VIOLATION)
         return
-    user = _authenticate(socket, channel_id)
+    user = _authenticate(socket, channel_id, redis)
     if user is None:
         await socket.close(code=POLICY_VIOLATION)
         return
 
     await socket.accept()
-    redis = get_redis()
     manager.join(channel_id, socket)
     settings = get_settings()
-    socket.send_text(
+    await socket.send_text(
         json.dumps(
             {
                 "type": "ready",
@@ -129,12 +136,12 @@ async def _handle_frame(
     settings: Settings,
 ) -> None:
     if len(raw) > 20000:
-        _error(socket, "too_large", "Enveloppe trop volumineuse.")
+        await _error(socket, "too_large", "Enveloppe trop volumineuse.")
         return
     try:
         payload = MessageEnvelopeIn.model_validate_json(raw)
     except ValidationError:
-        _error(socket, "invalid_envelope", "Enveloppe invalide : contenu chiffre attendu.")
+        await _error(socket, "invalid_envelope", "Enveloppe invalide : contenu chiffre attendu.")
         return
     try:
         enforce_rate_limit(
@@ -144,7 +151,7 @@ async def _handle_frame(
             window=settings.rate_limit_message_window,
         )
     except HTTPException:
-        _error(socket, "rate_limited", "Trop de messages, ralentissez.")
+        await _error(socket, "rate_limited", "Trop de messages, ralentissez.")
         return
     envelope = messages.store_message(
         redis,

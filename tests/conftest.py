@@ -98,3 +98,21 @@ def salon(client: TestClient, registered) -> dict:
 
 def envelope(ciphertext: str = CIPHERTEXT, iv: str = IV, key_version: int = 1) -> dict:
     return {"ciphertext": ciphertext, "iv": iv, "key_version": key_version}
+
+
+def add_member(client: TestClient, salon_id: str, headers: dict, username: str = "invitee") -> None:
+    """Seul un membre du salon peut inviter : l'invite ne s'auto-sert pas."""
+    response = client.post(
+        f"/salons/{salon_id}/members", json={"username": username}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+
+
+def demote(client: TestClient, salon: dict, headers: dict, other_account: dict) -> None:
+    """Retrograde un invite en membre simple (une invitation donne moderator)."""
+    response = client.patch(
+        f"/salons/{salon['id']}/members/{other_account['user']['id']}",
+        json={"role": "member"},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text

@@ -9,7 +9,8 @@ from app.api.messages import router as messages_router
 from app.api.salons import router as salons_router
 from app.config import get_settings
 from app.security.headers import SecurityHeadersMiddleware
-from app.web import mount_static, router as web_router
+from app.web import mount_static
+from app.web import router as web_router
 from app.ws import router as ws_router
 
 

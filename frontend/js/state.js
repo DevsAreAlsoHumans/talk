@@ -46,7 +46,7 @@ export function reset() {
 export async function bootstrap() {
   await api.csrf();
   state.user = await api.me();
-  state.identity = await loadOrCreateIdentity();
+  state.identity = await loadOrCreateIdentity(state.user.id);
   await api.publishPublicKey(state.identity.publicKey);
   await refreshSalons();
   return state.user;
@@ -85,7 +85,7 @@ async function resolveChannelKey(channelId) {
   const senderKey = await publicKeyOf(existing.from_user_id);
   if (!senderKey) return null;
   return unwrapChannelKey(state.identity.privateKey, senderKey, {
-    iv: "",
+    iv: existing.iv,
     wrapped_key: existing.wrapped_key,
   }).catch(() => null);
 }
@@ -108,7 +108,7 @@ export async function distributeChannelKey(channelId) {
     const publicKey = await publicKeyOf(member.id);
     if (!publicKey) continue;
     const wrapped = await wrapChannelKey(state.identity.privateKey, publicKey, raw);
-    await api.publishChannelKey(channelId, wrapped, member.id);
+    await api.publishChannelKey(channelId, wrapped.wrapped_key, wrapped.iv, member.id);
   }
   return raw;
 }
@@ -120,14 +120,17 @@ export async function inviteMember(channelId, username) {
   const salon = state.salons.find((item) => item.id === channel.salon_id);
   await api.addMember(salon.id, username);
   if (!state.channelKey) return null;
-  const publicKey = await publicKeyOf(username);
+  // L'API de cles est indexee par user_id : resoudre le pseudo d'abord.
+  const userId = await userIdOf(salon.id, username);
+  if (!userId) return null;
+  const publicKey = await publicKeyOf(userId);
   if (!publicKey) return null;
   const wrapped = await wrapChannelKey(state.identity.privateKey, publicKey, state.channelKey);
-  return api.publishChannelKey(channelId, wrapped, await userIdOf(username));
+  return api.publishChannelKey(channelId, wrapped.wrapped_key, wrapped.iv, userId);
 }
 
-async function userIdOf(username) {
-  const members = await api.listMembers(state.currentSalonId);
+async function userIdOf(salonId, username) {
+  const members = await api.listMembers(salonId);
   const found = members.find((member) => member.username === username);
   return found ? found.id : null;
 }

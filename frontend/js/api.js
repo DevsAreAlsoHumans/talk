@@ -9,8 +9,13 @@
 
 export class ApiError extends Error {
   constructor(status, detail) {
-    super(detail || `Erreur ${status}`);
+    super(
+      Array.isArray(detail)
+        ? detail.map((item) => item?.msg).filter(Boolean).join(" ; ") || `Erreur ${status}`
+        : detail || `Erreur ${status}`,
+    );
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -60,13 +65,16 @@ export const api = {
   readPublicKey: (userId) => request("GET", `/keys/${encodeURIComponent(userId)}`),
   readOwnChannelKey: (channelId) =>
     request("GET", `/channels/${encodeURIComponent(channelId)}/key`),
-  publishChannelKey: (channelId, wrappedKey, userId) =>
+  publishChannelKey: (channelId, wrappedKey, iv, userId) =>
     request("PUT", `/channels/${encodeURIComponent(channelId)}/key`, {
       wrapped_key: wrappedKey,
+      iv,
       ...(userId ? { user_id: userId } : {}),
     }),
-  listMembers: (salonId) =>
-    request("GET", `/salons/${encodeURIComponent(salonId)}/members`),
+  // L'API enveloppe la liste dans { members: [...] } : on renvoie le tableau,
+  // sinon les appelants itèrent un objet.
+  listMembers: async (salonId) =>
+    (await request("GET", `/salons/${encodeURIComponent(salonId)}/members`)).members,
   readChannelKeys: (channelId) =>
     request("GET", `/channels/${encodeURIComponent(channelId)}/keys`),
 

@@ -136,6 +136,11 @@ class MemberAdd(BaseModel):
     username: Annotated[str, StringConstraints(strip_whitespace=True, to_lower=True, max_length=32)]
 
 
+class MemberRoleUpdate(BaseModel):
+    model_config = StrictModel
+    role: Literal["moderator", "member"]
+
+
 class MemberPublic(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str

@@ -12,7 +12,15 @@
  *   par le tag, une signature d'identité separate n'est donc pas requise.
  */
 
-const KEYSTORE = "talk.identity";
+/**
+ * Cle de stockage de l'identite, rattachee au compte.
+ *
+ * Sans ce suffixe, deux comptes ouverts dans le meme navigateur partageaient la
+ * meme paire de cles : la seconde session republiait une cle publique deja
+ * connue, les enveloppes deposees pour elle ne corresponded plus a aucune cle
+ * privee detenue, et le canal devenait illisible. Une identite par compte.
+ */
+const keystoreKey = (userId) => `talk.identity.${userId}`;
 const ECDH = { name: "ECDH", namedCurve: "P-256" };
 const AES_GCM = { name: "AES-GCM", length: 256 };
 
@@ -37,27 +45,70 @@ function randomIv() {
 /* ---------- identité ---------- */
 
 /** Crée (ou recharge) la paire de clés ECDH du compte et renvoie la clé publique. */
-export async function loadOrCreateIdentity() {
-  const stored = localStorage.getItem(KEYSTORE);
+export async function loadOrCreateIdentity(userId) {
+  const stored = readKeystore(userId);
   if (stored) {
-    const parsed = JSON.parse(stored);
     const privateKey = await crypto.subtle.importKey(
       "jwk",
-      parsed.privateKey,
+      stored.privateKey,
       ECDH,
       false,
       ["deriveKey", "deriveBits"],
     );
-    return { privateKey, publicKey: await exportPublic(privateKey) };
+    // La cle privee est importee non extractible : la relire exigerait un
+    // export, que Web Crypto refuse. On lit donc la cle publique conservee, et
+    // a defaut les coordonnees x/y que le JWK stocke contient deja.
+    const publicKey = stored.publicKey || publicFromJwk(stored.privateKey);
+    if (!stored.publicKey) writeKeystore(userId, { privateKey: stored.privateKey, publicKey });
+    return { privateKey, publicKey };
   }
   const keyPair = await crypto.subtle.generateKey(ECDH, true, ["deriveKey", "deriveBits"]);
-  const privateKey = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
-  localStorage.setItem(KEYSTORE, JSON.stringify({ privateKey }));
-  return { privateKey: keyPair.privateKey, publicKey: await exportPublic(keyPair.privateKey) };
+  const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
+  const publicKey = publicFromJwk(privateJwk);
+  writeKeystore(userId, { privateKey: privateJwk, publicKey });
+  return { privateKey: keyPair.privateKey, publicKey };
 }
 
-async function exportPublic(privateKey) {
-  const raw = await crypto.subtle.exportKey("raw", privateKey);
+/**
+ * Relit le keystore du compte. Une entree illisible (ecriture interrompue, format
+ * anterieur) est effacee plutot que de bloquer la connexion : une identite de
+ * secours vaut mieux qu'une erreur cryptographique muette, au prix des messages
+ * deja chiffres avec l'ancienne cle.
+ */
+function readKeystore(userId) {
+  const key = keystoreKey(userId);
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.privateKey?.x && parsed?.privateKey?.y) return parsed;
+    console.warn("talk : keystore sans cle exploitable, identite regeneree.");
+  } catch {
+    console.warn("talk : keystore illisible, identite regeneree.");
+  }
+  localStorage.removeItem(key);
+  return null;
+}
+
+function writeKeystore(userId, value) {
+  localStorage.setItem(keystoreKey(userId), JSON.stringify(value));
+}
+
+/**
+ * Point public non compresse (0x04 || x || y) en base64url, reconstruit depuis
+ * un JWK ECDH P-256. "raw" n'est defini que pour l'export d'une cle publique :
+ * l'equivalent pour une cle privee passe par ses coordonnees.
+ */
+function publicFromJwk(jwk) {
+  const x = fromB64(jwk.x);
+  const y = fromB64(jwk.y);
+  if (x.length !== 32 || y.length !== 32) {
+    throw new Error("Cle ECDH inattendue : P-256 attend x et y sur 32 octets.");
+  }
+  const raw = new Uint8Array(65);
+  raw[0] = 0x04;
+  raw.set(x, 1);
+  raw.set(y, 33);
   return toB64(raw);
 }
 
@@ -97,7 +148,13 @@ async function importChannelKey(raw) {
   return crypto.subtle.importKey("raw", raw, AES_GCM, false, ["encrypt", "decrypt"]);
 }
 
-/** Chiffre la clé de canal pour un destinataire ; la version est geree par l'API. */
+/**
+ * Chiffre la clé de canal pour un destinataire ; la version est geree par l'API.
+ *
+ * Renvoie l'enveloppe complete : le nonce AES-GCM n'est pas un secret, mais
+ * sans lui la clé emballesée reste indéchiffrable pour le destinataire. Il
+ * accompagne donc la clé jusqu'au serveur qui le stocke en clair.
+ */
 export async function wrapChannelKey(privateKey, peerPublicB64, channelKeyRaw) {
   const peer = await importPeerPublic(peerPublicB64);
   const wrapping = await deriveWrappingKey(privateKey, peer);
@@ -107,7 +164,7 @@ export async function wrapChannelKey(privateKey, peerPublicB64, channelKeyRaw) {
     wrapping,
     channelKeyRaw,
   );
-  return toB64(wrapped);
+  return { iv: toB64(iv), wrapped_key: toB64(wrapped) };
 }
 
 /** Déchiffre la clé de canal stockée par un membre du canal. */

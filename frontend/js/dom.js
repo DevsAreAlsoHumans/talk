@@ -5,7 +5,7 @@
  * affichéeliterally et ne peut donc pas exécuter de script (anti-XSS).
  */
 
-export function element(tag, attributes = {}, children = []) {
+export function element(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
   for (const [name, value] of Object.entries(attributes)) {
     if (value === null || value === undefined || value === false) continue;
@@ -15,7 +15,9 @@ export function element(tag, attributes = {}, children = []) {
       node.addEventListener(name.slice(2).toLowerCase(), value);
     } else node.setAttribute(name, value === true ? "" : value);
   }
-  for (const child of children) {
+  // `flat` tolere les tableaux renvoyes par un `map` : sans lui, un tableau
+  // d'elements partirait dans `append` et leverait.
+  for (const child of children.flat()) {
     if (child === null || child === undefined) continue;
     node.append(typeof child === "string" ? document.createTextNode(child) : child);
   }

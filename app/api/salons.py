@@ -21,6 +21,7 @@ from app.schemas import (
     MemberAdd,
     MemberList,
     MemberPublic,
+    MemberRoleUpdate,
     MessageResponse,
     SalonCreate,
     SalonPublic,
@@ -176,6 +177,36 @@ def remove_member(
         )
     salons.remove_member(redis, salon_id, user_id)
     return MessageResponse(detail="Membre retire.")
+
+
+@router.patch(
+    "/salons/{salon_id}/members/{user_id}",
+    response_model=MemberPublic,
+    dependencies=[Depends(require_csrf)],
+)
+def change_member_role(
+    salon_id: str,
+    user_id: str,
+    payload: MemberRoleUpdate,
+    redis: Redis = Depends(get_redis),
+    _role: str = Depends(salon_owner),
+) -> MemberPublic:
+    """Promouvoir ou retrograder un membre. Reserve au proprietaire.
+
+    Sans cet endpoint, une invitation attribuerait toujours le role de
+    moderateur et le role de membre simple resterait inatteignable.
+    """
+    target = users.get_by_id(redis, user_id)
+    if target is None or salons.get_role(redis, salon_id, user_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membre introuvable.")
+    salon = salons.get_salon(redis, salon_id) or {}
+    if user_id == salon.get("owner_id"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Le role du proprietaire ne peut pas etre change.",
+        )
+    salons.change_role(redis, salon_id, user_id, payload.role)
+    return MemberPublic(id=user_id, username=target["username"], role=payload.role)
 
 
 # --- Canaux ---------------------------------------------------------------
