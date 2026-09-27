@@ -43,7 +43,7 @@ La **CI GitHub Actions** exécute les tests et le linter à chaque push / pull r
 
 ## État du projet
 
-**Étape 2 — authentification : terminée.**
+**Étape 3 — messagerie chiffrée de bout en bout : terminée.**
 
 Le dépôt contient :
 
@@ -51,9 +51,80 @@ Le dépôt contient :
 - le service MongoDB dans `docker-compose.yml` ;
 - le frontend statique (HTML / CSS / JS vanilla) affiché sur `/` ;
 - l'authentification : inscription, connexion, déconnexion, sessions serveur, protection CSRF, en-têtes de sécurité et point d'entrée WebSocket authentifié ;
-- les tests pytest (unitaires et intégration contre le vrai MongoDB), le linter Ruff et la CI.
+- la messagerie : salons, adhésion, distribution de clé de salon et messages chiffrés, en temps réel par WebSocket ;
+- les tests pytest (unitaires et intégration contre le vrai MongoDB), les tests JavaScript, un test de bout en bout pilotant le vrai client contre le vrai serveur, le linter Ruff et la CI.
 
-Aucune messagerie, aucun salon et aucun chiffrement de bout en bout ne sont encore implémentés : le WebSocket se limite à confirmer l'identité de l'utilisateur connecté.
+### Messagerie chiffrée
+
+Chaque navigateur possède une paire RSA-OAEP-2048 générée localement. La clé
+privée est conservée sous forme de `CryptoKey` **non extractible** dans IndexedDB ;
+seule la clé publique est publiée sur le serveur. Le JWK privé n'est jamais
+stocké ni transmis.
+
+Les messages sont chiffrés en **AES-256-GCM** avec un IV aléatoire de 12 octets.
+Le contenu clair n'est lié à aucun champ de l'API : le serveur ne reçoit que le
+ciphertext, l'IV et l'identifiant de l'expéditeur.
+
+L'adhésion à un salon se fait en deux temps, volontairement séparés : le serveur
+ajoute le membre, puis **le créateur du salon** emballe la clé de salon avec la
+clé publique du nouvel arrivant. Le serveur ne peut pas le faire, et ne voit
+jamais cette clé.
+
+Le créateur est le seul habilité à administrer son salon : **lui seul** peut
+ajouter ou retirer un membre, et déposer une enveloppe de clé. Cette règle est
+vérifiée côté serveur, à partir de l'identité de session : un membre ordinaire
+et un tiers sont refusés sur ces trois routes, même en appelant directement
+l'API. Elle protège la distribution : le dépôt d'une enveloppe étant « premier
+arrivé, premier servi » et jamais écrasé, un membre qui pourrait en déposer une
+pour un tiers lui imposerait sa propre clé de salon, que le destinataire
+déchiffrerait sans erreur en ne pouvant plus lire aucun message chiffré avec la
+vraie. Le créateur ne peut pas non plus se retirer lui-même : un canal sans
+créateur n'aurait plus personne pour l'administrer ni distribuer sa clé. La
+lecture de sa propre enveloppe, elle, reste ouverte à tout membre.
+
+| Route | Description |
+|-------|-------------|
+| `GET /keys/me` | Clé publique publiée et empreinte RFC 7638. |
+| `PUT /keys/me` | Publie la clé publique. Le remplacement est **refusé** (409) : c'est ce qui empêche un navigateur de créer une nouvelle paire et de ne plus pouvoir lire ses canaux. |
+| `GET /channels` | Canaux de l'utilisateur. |
+| `POST /channels` | Crée un canal. Exige une clé publique déjà publiée (409 sinon). |
+| `GET /channels/{id}` | Détail d'un canal, avec la clé publique de chaque membre et son `created_by`. |
+| `POST /channels/{id}/members` | Ajoute un membre par identifiant. **Créateur du canal uniquement.** |
+| `DELETE /channels/{id}/members/{user_id}` | Retire un membre. **Créateur du canal uniquement.** |
+| `POST /channels/{id}/keys` | Dépose une enveloppe de clé de salon (idempotent). **Créateur du canal uniquement.** |
+| `GET /channels/{id}/keys/me` | Enveloppe destinée à l'utilisateur courant. Tout membre. |
+| `GET /channels/{id}/messages` | Historique chiffré, du plus ancien au plus récent, paginé. |
+| `WS /channels/{id}` | Envoi d'un message chiffré, diffusion aux autres membres du canal. |
+
+### Limites assumées du chiffrement
+
+Ces limites sont inhérentes au modèle choisi et non des défauts d'implémentation.
+Il vaut mieux les écrire que les laisser découvrir.
+
+- **Aucune rotation de clé.** La clé de salon reste la même tant que le canal
+  existe. Ajouter un membre plus tard exige donc de pouvoir rouvrir cette clé.
+- **La clé de salon est extractible dans le navigateur.** Web Crypto refuse
+  d'exportKey ou de wrapKey une clé non extractible : sans extractibilité, aucune
+  clé ne pourrait être partagée, et le chiffrement de bout en bout serait
+  impossible à utiliser. La clé privée RSA, elle, reste non extractible. La
+  conséquence est qu'un script hostile exécuté dans la page (XSS) peut exfiltrer
+  une clé de salon et lire les messages futurs de ce canal.
+- **Pas de forward secrecy.** La clé de salon est partagée par tous les membres
+  du canal. Quiconque l'obtient peut lire tous les messages passés du canal.
+- **L'auteur n'est pas authentifié cryptographiquement.** `sender_id` provient de
+  la session, donc le serveur ne peut pas l'attribuer à quelqu'un d'autre ; mais
+  un membre ayant la clé de salon peut forger un message au nom d'un autre. Aucun
+  message n'est signé.
+- **Pas de protection contre la substitution de clé.** Aucune identité n'est
+  vérifiée automatiquement. L'empreinte de clé affichée dans l'interface sert
+  à une comparaison **hors bande**, entre participants.
+- **Retirer un membre ne le prive pas de la clé** qu'il a déjà reçue. Il ne peut
+  plus recevoir les enveloppes futures.
+- **Premier message vulnérable à la substitution.** Un attaquant qui contrôle
+  le canal de l'échange initial de clé peut s'y insérer. Aucun protocole de
+  vérification n'est mis en œuvre.
+- **Un seul processus applicatif.** La diffusion WebSocket tient en mémoire : le
+  passage à plusieurs workers exigerait un bus (Redis en pub/sub).
 
 ### Authentification
 
@@ -80,6 +151,13 @@ Toutes les mutations exigent l'en-tête `X-CSRF-Token`, alimenté par le cookie
 - **Injection NoSQL** : schémas Pydantic stricts (`extra="forbid"`, types `str`) : un opérateur comme `{"$ne": null}` est rejeté en 422 avant d'atteindre MongoDB.
 - **En-têtes** : CSP stricte, `nosniff`, `DENY`, `Referrer-Policy`, `Permissions-Policy`, HSTS en HTTPS. L'en-tête `Server` est masqué.
 - **WebSocket** : cookie de session revalidé et origine strictement vérifiée avant `accept()` ; fermeture en 1008 sinon.
+- **Clés** : RSA-OAEP-2048 / SHA-256, `extractable: false` pour la clé privée ; AES-256-GCM avec IV de 12 octets, tiré au hasard par `crypto.getRandomValues`.
+- **Données authentifiées** : le chiffrement lie le ciphertext au canal et à l'expéditeur par un AAD au format exact `talk:v1:{channel_id}:{sender_id}`. Un message rejoué dans un autre canal, ou attribué à un autre auteur, est rejeté par GCM.
+- **Validation des enveloppes** : taille bornée, base64 strict, JWK public sans composant privée, taille de modulus limitée à 2048 ou 3072 bits.
+- **Anti-déchiffrement par le serveur** : le serveur ne reçoit aucun secret. Il ne peut ni lire un message, ni produire une clé de salon, ni fabriquer une enveloppe.
+- **Dépôt idempotent** : réémettre une enveloppe pour le même membre ne remplace rien et ne crée pas de doublon.
+- **Anti-abus** : fenêtre glissante en mémoire limitant le débit d'envoi par utilisateur et par canal.
+- **Clés privées** : jamais sérialisées. Elles vivent dans IndexedDB sous forme de `CryptoKey`, ce qui exclut le vol par simple lecture du magasin.
 
 ### Configuration
 
@@ -103,10 +181,18 @@ C'est acceptable en développement et en intégration continue, pas en productio
 ```bash
 docker compose up              # API + MongoDB → http://localhost:8000
 docker compose run --rm test   # tests pytest + linter Ruff
+docker compose --profile e2e run --rm e2e   # test de bout en bout
 ```
 
 `docker compose run --rm test` démarre MongoDB et attend son healthcheck : les
 tests d'intégration s'exécutent contre la vraie base `talk_test`, isolée de `talk`.
+
+`docker compose --profile e2e run --rm e2e` démarre l'application, attend sa
+santé, puis exécute `tests_e2e/protocol.test.mjs` avec Node. Ce test utilise le
+**vrai `frontend/js/crypto.js`** contre le **vrai serveur** : c'est le seul
+endroit où un désaccord entre le client et l'API se révèle, les tests Python
+n'exploitant que des formes synthétiques. Il ne couvre ni IndexedDB ni le rendu,
+qui exigeraient un navigateur.
 
 ### Sans Docker
 
@@ -131,15 +217,30 @@ app/
 ├── db.py            # client MongoDB asynchrone et index
 ├── security.py      # Argon2id, génération et comparaison des jetons
 ├── schemas.py       # validation des entrées, représentation des sorties
+├── chat_schemas.py  # JWK, canaux, enveloppes, messages, trames WebSocket
 ├── store.py         # persistance des utilisateurs et des sessions
-├── deps.py          # CSRF, utilisateur courant, WebSocket, anti-brute-force
+├── chat_store.py    # persistance des canaux, enveloppes et messages
+├── security.py      # Argon2id, jetons, empreinte RFC 7638
+├── deps.py          # CSRF, utilisateur, adhésion, anti-brute-force
 ├── middleware.py    # en-têtes de sécurité
+├── realtime.py      # diffusion WebSocket en mémoire
 └── routers/
-    └── auth.py      # csrf, register, login, logout, me, ws
+    ├── auth.py          # csrf, register, login, logout, me, ws
+    ├── keys.py          # clé publique de l'utilisateur
+    ├── channels.py      # liste, création, détail
+    ├── members.py       # adhésion et retrait
+    ├── channel_keys.py  # dépôt et lecture des enveloppes
+    └── messages.py      # historique et WebSocket d'envoi
 frontend/
 ├── index.html
 ├── css/style.css
-└── js/app.js
+└── js/
+    ├── app.js      # authentification et amorçage
+    ├── api.js      # fetch, CSRF, WebSocket
+    ├── chat.js     # salons, membres, envoi, rendu
+    ├── crypto.js   # RSA, AES-GCM, AAD, emballage de clé
+    ├── keystore.js # IndexedDB : identité et clés de salon
+    └── *.test.mjs  # tests Web Crypto
 tests/
 ├── conftest.py
 ├── test_health.py
@@ -148,10 +249,17 @@ tests/
 ├── test_security_headers.py
 ├── test_nosql_injection.py
 ├── test_ws_auth.py
-└── test_password_hashing.py
+├── test_password_hashing.py
+├── test_keys.py       # clé publique et empreinte
+├── test_channels.py   # canaux et adhésion
+├── test_messages.py   # historique, limites, chiffrement
+└── test_realtime.py   # WebSocket et diffusion
+tests_e2e/
+└── protocol.test.mjs  # vrai client contre vrai serveur
 .github/workflows/ci.yml
 Dockerfile
 docker-compose.yml
+package.json      # scripts de test, aucune dépendance
 requirements.txt / requirements-dev.txt
 pyproject.toml   # configuration Ruff + pytest
 ```

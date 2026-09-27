@@ -144,3 +144,169 @@ body {
   border-color: #8a3a3a;
   color: #f0a0a0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Messagerie                                                          */
+/* ------------------------------------------------------------------ */
+
+/* La largeur augmente en pleine page : un fil de discussion illisible dans
+   une carte de 32rem n'aurait pas servi à grand-chose. */
+@media (min-width: 64rem) {
+  .container {
+    max-width: 72rem;
+    text-align: left;
+  }
+}
+
+.chat {
+  display: grid;
+  grid-template-columns: 16rem 1fr;
+  gap: 1.5rem;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #2c2f3a;
+}
+
+@media (max-width: 48rem) {
+  .chat {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chat-heading {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.channel-list,
+.member-list,
+.message-list {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.channel-button {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.25rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.channel-button:hover {
+  background-color: #262935;
+}
+
+.channel-button-active {
+  border-color: var(--accent);
+  background-color: #262935;
+}
+
+.chat-form {
+  margin-bottom: 1rem;
+}
+
+/* Le champ et le bouton partagent une ligne : un message s'écrit d'une main. */
+.composer-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.composer-row .auth-input {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.message-list {
+  height: 22rem;
+  padding: 0.5rem;
+  overflow-y: auto;
+  border: 1px solid #343846;
+  border-radius: 8px;
+  background-color: #16171d;
+}
+
+.message {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.2rem 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.message-author {
+  flex: 0 0 8rem;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.message-body {
+  flex: 1;
+  white-space: pre-wrap;
+}
+
+/* Message envoyé mais pas encore confirmé par le serveur. */
+.message-pending {
+  opacity: 0.6;
+}
+
+.chat-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.members {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #2c2f3a;
+}
+
+.members summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.member-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.15rem 0;
+  font-size: 0.85rem;
+}
+
+.member-fingerprint {
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.member-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.auth-button-secondary {
+  background-color: #3a3d4b;
+  color: var(--text);
+}
+
+.fingerprint-line {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.fingerprint-line code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}

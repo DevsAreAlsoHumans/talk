@@ -23,6 +23,12 @@ class DuplicateUsernameError(Exception):
     """Levée lorsqu'un nom d'utilisateur est déjà pris."""
 
 
+# Le MVP interdit le remplacement d'une clé publique : `key_version` reste donc
+# à 1 en permanence. Toute évolution future devra s'accompagner d'une procédure de
+# ré-emballage de toutes les enveloppes existantes.
+PUBLIC_KEY_VERSION = 1
+
+
 @dataclass(frozen=True)
 class NewSession:
     """Jetons en clair d'une session fraîchement créée.
@@ -52,6 +58,14 @@ class UserStore(Protocol):
     async def delete_session_by_hash(self, token_hash: str) -> None: ...
 
     async def get_user_by_session(self, token: str) -> dict[str, Any] | None: ...
+
+    async def get_user_by_id(self, user_id: Any) -> dict[str, Any] | None: ...
+
+    async def get_public_key(self, user_id: Any) -> dict[str, Any] | None: ...
+
+    async def save_public_key(
+        self, user_id: Any, jwk: dict[str, Any], fingerprint: str
+    ) -> bool: ...
 
 
 class MongoUserStore:
@@ -122,3 +136,48 @@ class MongoUserStore:
         if session is None or session.get("user_id") is None:
             return None
         return await self._users.find_one({"_id": session["user_id"], "disabled": False})
+
+    async def get_user_by_id(self, user_id: Any) -> dict[str, Any] | None:
+        return await self._users.find_one({"_id": user_id, "disabled": False})
+
+    async def get_public_key(self, user_id: Any) -> dict[str, Any] | None:
+        """Renvoie la clé publique enregistrée, ou `None` si l'utilisateur n'en a pas.
+
+        La projection est explicite : ni le haché du mot de passe, ni une
+        éventuelle clé privée ne peuvent se retrouver par erreur dans la valeur
+        renvoyée au routeur.
+        """
+        return await self._users.find_one(
+            {"_id": user_id, "disabled": False}, {"public_key": 1, "username": 1}
+        )
+
+    async def save_public_key(self, user_id: Any, jwk: dict[str, Any], fingerprint: str) -> bool:
+        """Enregistre la clé publique, uniquement si le compte n'en possède pas.
+
+        Renvoie `True` si c'est cet appel qui a écrit la clé, `False` si le
+        document en possédait déjà une. C'est `matched_count` qui porte cette
+        information, et la remontée n'est pas cosmétique : le filtre
+        `{"public_key": {"$exists": False}}` rend l'écriture atomique, donc
+        déterminante, mais silencieuse. Deux publications concurrentes ne
+        peuvent pas s'écraser, et il appartient au routeur — seul lieu qui
+        connaît le contexte de la requête — de dire à un perdant que sa clé
+        n'a pas été enregistrée.
+
+        L'idempotence et le refus de remplacement restent appliqués au niveau du
+        routeur, qui doit pouvoir distinguer « pas encore de clé » de « clé
+        différente », deux cas que cet upsert ne voit pas.
+        """
+        result = await self._users.update_one(
+            {"_id": user_id, "public_key": {"$exists": False}},
+            {
+                "$set": {
+                    "public_key": {
+                        "jwk": jwk,
+                        "fingerprint": fingerprint,
+                        "version": PUBLIC_KEY_VERSION,
+                        "updated_at": datetime.now(UTC),
+                    }
+                }
+            },
+        )
+        return result.matched_count == 1

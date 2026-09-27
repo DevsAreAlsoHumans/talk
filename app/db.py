@@ -30,7 +30,7 @@ def get_db() -> AsyncDatabase:
 
 
 async def ensure_indexes(database: AsyncDatabase) -> None:
-    """Crée les index nécessaires à l'unicité et à l'expiration des sessions.
+    """Crée les index nécessaires à l'unicité, à l'expiration et aux curseurs.
 
     L'index unique sur `username` est ce qui rend fiable la gestion des
     inscriptions concurrentes : sans lui, deux requêtes simultanées pourraient
@@ -40,6 +40,22 @@ async def ensure_indexes(database: AsyncDatabase) -> None:
     await database.sessions.create_index("token_hash", unique=True)
     # Purge automatique des sessions expirées par le moniteur TTL de MongoDB.
     await database.sessions.create_index("expires_at", expireAfterSeconds=0)
+
+    # Un utilisateur ne possède qu'un canal pour une référence locale donnée :
+    # c'est ce qui permet de retrouver un canal créé juste avant une fermeture
+    # du navigateur, sans ambiguïté.
+    await database.channels.create_index([("created_by", 1), ("client_ref", 1)], unique=True)
+    # Recherche des canaux d'un membre.
+    await database.channels.create_index("members")
+    # Une seule enveloppe par couple (canal, destinataire) dans le MVP.
+    await database.channel_keys.create_index(
+        [("channel_id", 1), ("user_id", 1), ("key_version", 1)], unique=True
+    )
+    # Anti-rejeu : un expéditeur ne peut pas enregistrer deux fois le même
+    # message, et `key_version` permet de retrouver une enveloppe précise.
+    await database.messages.create_index([("sender_id", 1), ("client_id", 1)], unique=True)
+    # Pagination de l'historique par curseur décroissant.
+    await database.messages.create_index([("channel_id", 1), ("_id", -1)])
 
 
 async def close_client() -> None:

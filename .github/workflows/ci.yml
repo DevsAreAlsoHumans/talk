@@ -76,6 +76,47 @@ jobs:
       - name: Tests (pytest)
         run: python -m pytest
 
+  # Le frontend n'a aucune dépendance npm : les tests tournent sur l'image Node
+  # officielle, ce qui garantit que la version de Node est celle de `engines`.
+  javascript:
+    name: Tests JavaScript
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Web Crypto est disponible sans flag dans Node 20 et plus. Le test
+      # échouerait bruyamment sur une version antérieure.
+      - name: Tests unitaires du chiffrement
+        run: npm test
+
+  # Test de bout en bout du protocole : le vrai `crypto.js` contre le vrai
+  # serveur. C'est le seul endroit où un désaccord d'interface entre le client et
+  # l'API se révèle, les tests Python n'utilisant que des formes synthétiques.
+  e2e:
+    name: Bout en bout (client et serveur)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Construire l'image
+        run: docker compose build app
+
+      - name: Lancer le serveur et les tests
+        run: docker compose --profile e2e run --rm e2e
+
+      - name: Arrêter les services
+        if: always()
+        run: docker compose down -v
+
   docker:
     name: Cohérence Docker
     runs-on: ubuntu-latest

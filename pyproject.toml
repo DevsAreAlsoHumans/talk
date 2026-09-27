@@ -12,3 +12,6 @@ known-first-party = ["app", "tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# `anyio` en mode auto applique le marqueur à tous les tests asynchrones, sans
+# décorateur à ajouter un par un.
+addopts = ["--anyio-mode=auto"]

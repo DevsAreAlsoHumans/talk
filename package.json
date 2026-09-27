@@ -1,0 +1,13 @@
+{
+  "name": "talk-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend Talk : JavaScript vanilla, modules ES natifs, aucune dépendance.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test frontend/js/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

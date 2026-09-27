@@ -1,7 +1,17 @@
-"""Hachage des mots de passe, génération et comparaison de jetons."""
+"""Hachage des mots de passe, génération et comparaison de jetons.
+
+Ce module ne contient **aucune** primitive de chiffrement ni de déchiffrement :
+le serveur n'a volontairement aucun moyen de lire un message. Il ne manipule que
+du hachage et des jetons opaques.
+
+Seule exception, `public_key_thumbprint` : il hache une clé **publique** pour en
+produire une empreinte comparable hors bande. Hasher une donnée publique ne
+révèle rien.
+"""
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import secrets
@@ -61,6 +71,21 @@ def hash_token(token: str) -> str:
 def tokens_equal(left: str, right: str) -> bool:
     """Compare deux jetons en temps constant, tolérant aux entrées arbitraires."""
     return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
+def public_key_thumbprint(canonical_json: str) -> str:
+    """Empreinte d'une clé publique, selon le RFC 7638.
+
+    Le serveur ne peut pas déchiffrer un message, mais il doit pouvoir produire
+    la même empreinte qu'un client pour permettre une comparaison hors bande.
+
+    L'empreinte sert à vérifier que l'on parle bien de la même clé qu'une
+    fois donnée. Elle **ne protège pas** contre un serveur malveillant qui
+    substituerait la clé dès le premier échange et afficherait donc une
+    empreinte de son propre choix.
+    """
+    digest = hashlib.sha256(canonical_json.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def is_secure_request(scope: Scope) -> bool:

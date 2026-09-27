@@ -12,6 +12,11 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=2).status == 200 else 1)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
     restart: unless-stopped
 
   mongo:
@@ -47,6 +52,30 @@ services:
       - ./frontend:/srv/frontend:ro
       - ./tests:/srv/tests:ro
       - ./pyproject.toml:/srv/pyproject.toml:ro
+
+  # Test de bout en bout du protocole, avec la vraie implémentation cliente.
+  # Lancement : docker compose --profile e2e run --rm e2e
+  # Le profil empêche ce service de démarrer avec `docker compose up`.
+  # Node est requis pour Web Crypto, absent de l'image Python.
+  e2e:
+    image: node:22-slim
+    # L'image Node n'a pas de WORKDIR : sans cela, le motif serait cherché
+    # depuis `/` et aucun test ne serait trouvé.
+    working_dir: /srv
+    # Le motif est résolu par Node lui-même : un répertoire en argument est
+    # interprété comme un module, et `--test tests_e2e/` échoue.
+    command: ["node", "--test", "tests_e2e/*.test.mjs"]
+    profiles: ["e2e"]
+    environment:
+      TALK_E2E_URL: http://app:8000
+    # L'attente se fait sur la santé de `app` : sans elle, le test peut démarrer
+    # avant que l'application réponde et échouer sur un simple refus de connexion.
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./frontend:/srv/frontend:ro
+      - ./tests_e2e:/srv/tests_e2e:ro
 
 volumes:
   mongo_data:

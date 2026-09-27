@@ -1,94 +1,83 @@
-// Talk — frontend en cours de développement.
-// JavaScript vanilla, aucun framework, aucun script inline (CSP stricte).
+// Talk — point d'entrée du frontend.
+//
+// JavaScript vanilla, modules ES natifs, aucun framework et aucun script inline
+// (la CSP refuse `unsafe-inline`). Ce module ne fait que deux choses : gérer
+// l'authentification, et deleguer la messagerie à `chat.js` une fois connecté.
 
-const apiStatus = document.getElementById("api-status");
-const authMessage = document.getElementById("auth-message");
-const loggedOut = document.getElementById("auth-logged-out");
-const loggedIn = document.getElementById("auth-logged-in");
-const authUsername = document.getElementById("auth-username");
-const loginForm = document.getElementById("login-form");
-const registerForm = document.getElementById("register-form");
-const logoutButton = document.getElementById("logout-button");
+import { ensureCsrfToken, getJson, postJson } from "./api.js";
+import { initChat } from "./chat.js";
 
-const CSRF_COOKIE = "talk_csrf";
-const CSRF_HEADER = "X-CSRF-Token";
+const elements = {};
+
+function cacheElements() {
+  for (const id of [
+    "api-status",
+    "auth-message",
+    "auth-logged-out",
+    "auth-logged-in",
+    "auth-username",
+    "login-form",
+    "register-form",
+    "logout-button",
+    "chat-section",
+  ]) {
+    elements[id] = document.getElementById(id);
+  }
+}
 
 async function checkApi() {
-  if (!apiStatus) {
+  const status = elements["api-status"];
+  if (!status) {
     return;
   }
-
   try {
-    const response = await fetch("/health");
-    const data = await response.json();
-    apiStatus.textContent = data.status === "ok" ? "en ligne" : "réponse inattendue";
+    const data = await (await getJson("/health")).json();
+    status.textContent = data.status === "ok" ? "en ligne" : "réponse inattendue";
   } catch {
-    apiStatus.textContent = "injoignable";
+    status.textContent = "injoignable";
   }
-}
-
-function readCookie(name) {
-  const prefix = `${name}=`;
-  const found = document.cookie.split("; ").find((entry) => entry.startsWith(prefix));
-  return found ? decodeURIComponent(found.slice(prefix.length)) : "";
-}
-
-// Le cookie talk_csrf n'est pas HttpOnly : le JavaScript doit pouvoir le lire
-// pour le renvoyer dans l'en-tête exigé par le serveur sur chaque mutation.
-async function ensureCsrfToken() {
-  let token = readCookie(CSRF_COOKIE);
-  if (token) {
-    return token;
-  }
-  const response = await fetch("/auth/csrf", { credentials: "same-origin" });
-  if (!response.ok) {
-    return "";
-  }
-  token = (await response.json()).csrf_token;
-  return token;
-}
-
-async function postJson(path, body) {
-  const csrfToken = await ensureCsrfToken();
-  return fetch(path, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json", [CSRF_HEADER]: csrfToken },
-    body: JSON.stringify(body),
-  });
 }
 
 function showMessage(text, isError) {
-  if (!authMessage) {
+  const message = elements["auth-message"];
+  if (!message) {
     return;
   }
-  authMessage.textContent = text;
-  authMessage.hidden = text === "";
-  authMessage.classList.toggle("auth-message-error", Boolean(isError));
+  message.textContent = text;
+  message.hidden = text === "";
+  message.classList.toggle("auth-message-error", Boolean(isError));
 }
 
 function showSession(user) {
   const connected = Boolean(user);
-  if (loggedOut) {
-    loggedOut.hidden = connected;
-  }
-  if (loggedIn) {
-    loggedIn.hidden = !connected;
-  }
-  if (connected && authUsername) {
-    authUsername.textContent = user.username;
+  elements["auth-logged-out"].hidden = connected;
+  elements["auth-logged-in"].hidden = !connected;
+  elements["chat-section"].hidden = !connected;
+  if (connected) {
+    elements["auth-username"].textContent = user.username;
   }
 }
 
+/**
+ * Rafraîchit la session, puis démarre la messagerie si l'utilisateur est
+ * connecté.
+ *
+ * L'initialisation du chat est déclenchée à chaque affichage de session, et pas
+ * seulement à la connexion : un rechargement de page doit retrouver les canaux
+ * et les clés déjà présentes dans le navigateur.
+ */
 async function refreshSession() {
-  const response = await fetch("/auth/me", { credentials: "same-origin" });
+  const response = await getJson("/auth/me");
   if (response.status === 401) {
     showSession(null);
     return;
   }
-  if (response.ok) {
-    showSession(await response.json());
+  if (!response.ok) {
+    return;
   }
+  const user = await response.json();
+  showSession(user);
+  await initChat(user);
 }
 
 async function handleSubmit(event, path, form) {
@@ -115,26 +104,30 @@ async function handleSubmit(event, path, form) {
   showMessage(detail, true);
 }
 
-if (loginForm) {
-  loginForm.addEventListener("submit", (event) => handleSubmit(event, "/auth/login", loginForm));
-}
-
-if (registerForm) {
-  registerForm.addEventListener("submit", (event) =>
-    handleSubmit(event, "/auth/register", registerForm),
+function wireEvents() {
+  elements["login-form"].addEventListener("submit", (event) =>
+    handleSubmit(event, "/auth/login", elements["login-form"]),
   );
-}
-
-if (logoutButton) {
-  logoutButton.addEventListener("click", async () => {
+  elements["register-form"].addEventListener("submit", (event) =>
+    handleSubmit(event, "/auth/register", elements["register-form"]),
+  );
+  elements["logout-button"].addEventListener("click", async () => {
     const response = await postJson("/auth/logout", {});
-    showMessage(
-      response.ok ? "Déconnecté." : "La déconnexion a échoué.",
-      !response.ok,
-    );
-    showSession(null);
+    showMessage(response.ok ? "Déconnecté." : "La déconnexion a échoué.", !response.ok);
+    if (response.ok) {
+      // Les clés locales ne sont pas effacées. La clé privée RSA est le seul
+      // moyen de lire les enveloppes reçues, et les clés de salon ne peuvent
+      // pas être réémises par le serveur : les supprimer rendrait les canaux
+      // définitivement illisibles depuis ce navigateur. C'est un choix assumé :
+      // quiconque a accès à ce profil peut lire ces canaux, ce qui vaut aussi
+      // pour un mot de passe volé.
+      showSession(null);
+    }
   });
 }
 
+cacheElements();
+wireEvents();
 checkApi();
+ensureCsrfToken();
 refreshSession();

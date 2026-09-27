@@ -1,24 +1,28 @@
 """Point d'entrée FastAPI de Talk.
 
-Étape 2 : authentification (inscription, connexion, sessions, CSRF, en-têtes de
-sécurité) et point d'entrée WebSocket authentifié par cookie.
+Étapes 2 et 3 : authentification (inscription, connexion, sessions, CSRF,
+en-têtes de sécurité) et messagerie chiffrée de bout en bout.
 
 Ordre d'enregistrement impératif : le frontend est monté sur `/`, un chemin
 qui correspond à tout. Toute route déclarée *après* ce montage serait
-inatteignable, car le premier correspondant l'emporte.
+inatteignable, car le premier correspondant l'emporte. D'où l'ordre des
+`include_router` ci-dessous.
 """
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import db
 from app.config import get_settings
 from app.middleware import SecurityHeadersMiddleware
-from app.routers import auth
+from app.routers import auth, channel_keys, channels, keys, members, messages
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -38,10 +42,46 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Les seuls champs d'erreur repris dans une réponse 422. La liste est
+# exhaustive par construction : tout champ absent d'ici est retiré, y compris
+# ceux qu'une version future de Pydantic pourrait ajouter.
+VALIDATION_ERROR_FIELDS = ("type", "loc", "msg")
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Renvoye une 422 sans jamais réinjecter la valeur rejetée.
+
+    Par défaut, FastAPI sérialise `exc.errors()` en entier, et Pydantic y place
+    dans `input` la valeur qui a échoué. Pour une clé publique, cette valeur
+    peut être précisément la clé privée que le client vient d'envoyer par
+    erreur : le refus se transformait alors en fuite, jusqu'au DOM puisque
+    `api.js` recopie `detail` dans son message d'erreur et `chat.js` l'affiche.
+
+    Le refus reste donc explicite — `type`, `loc` et `msg` suffisent à
+    comprendre quelle validation a échoué, et `msg` nomme les composantes
+    fautives sans jamais citer leur valeur — mais la valeur, elle, ne sort pas
+    du serveur. Le statut 422 est conservé : le frontend et les tests
+    distinguent toujours le refus de validation d'une erreur serveur.
+    """
+    errors = [
+        {field: error[field] for field in VALIDATION_ERROR_FIELDS if field in error}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content=jsonable_encoder({"detail": errors}))
+
+
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Avant le montage du frontend sur "/" : voir la note d'ordre en tête de module.
+# Les préfixes se chevauchent (`/channels/...`) mais aucun motif ne capture de
+# segment contenant un `/`, donc ces routes ne sont pas ambiguës entre elles.
 app.include_router(auth.router)
+app.include_router(keys.router)
+app.include_router(channels.router)
+app.include_router(members.router)
+app.include_router(channel_keys.router)
+app.include_router(messages.router)
 
 
 @app.get("/health", tags=["santé"])

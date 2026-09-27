@@ -18,6 +18,7 @@ from fastapi import Depends, HTTPException, Request, WebSocket, status
 from pymongo.asynchronous.database import AsyncDatabase
 from starlette.exceptions import WebSocketException
 
+from app.chat_store import ChatStore, MongoChatStore, to_object_id
 from app.config import CSRF_HEADER_NAME, SESSION_COOKIE_NAME, get_settings
 from app.db import get_db
 from app.security import tokens_equal
@@ -29,6 +30,16 @@ POLICY_VIOLATION = 1008
 ATTEMPT_WINDOW_SECONDS = 900
 LOGIN_ATTEMPT_LIMIT = 5
 IP_ATTEMPT_LIMIT = 30
+
+# Anti-spam d'envoi de messages : fenêtre glissante de 10 secondes.
+MESSAGE_WINDOW_SECONDS = 10
+MESSAGE_ATTEMPT_LIMIT = 30
+
+CHANNEL_NOT_FOUND = "Canal introuvable."
+CHANNEL_FORBIDDEN = "Accès refusé à ce canal."
+CHANNEL_CREATOR_ONLY = (
+    "Seul le créateur du canal peut ajouter ou retirer un membre, et distribuer la clé de salon."
+)
 
 
 class SlidingWindowLimiter:
@@ -71,11 +82,17 @@ class SlidingWindowLimiter:
 
 _login_limiter = SlidingWindowLimiter(LOGIN_ATTEMPT_LIMIT, ATTEMPT_WINDOW_SECONDS)
 _ip_limiter = SlidingWindowLimiter(IP_ATTEMPT_LIMIT, ATTEMPT_WINDOW_SECONDS)
+_message_limiter = SlidingWindowLimiter(MESSAGE_ATTEMPT_LIMIT, MESSAGE_WINDOW_SECONDS)
 
 
 def get_store(database: Annotated[AsyncDatabase, Depends(get_db)]) -> UserStore:
     """Dépendance FastAPI : accès aux données."""
     return MongoUserStore(database)
+
+
+def get_chat_store(database: Annotated[AsyncDatabase, Depends(get_db)]) -> ChatStore:
+    """Dépendance FastAPI : accès aux canaux, enveloppes et messages."""
+    return MongoChatStore(database)
 
 
 def client_ip(request: Request) -> str:
@@ -169,3 +186,85 @@ async def get_current_user_ws(
     if user is None:
         raise WebSocketException(POLICY_VIOLATION, "Session invalide ou expirée.")
     return user
+
+
+def message_rate_limit_retry_after(user_id: Any) -> int:
+    """Enregistre un envoi de message. Renvoie 0 si autorisé, sinon un délai.
+
+    Le limiteur est en mémoire, comme celui des connexions : il protège d'un
+    usage excessif mais ne constitue pas une garantie en cas de plusieurs
+    workers.
+    """
+    return _message_limiter.register(f"msg:{user_id}")
+
+
+async def require_channel_member(
+    channel_id: str,
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+    store: Annotated[ChatStore, Depends(get_chat_store)],
+) -> dict[str, Any]:
+    """Exige l'appartenance au canal et renvoie celui-ci.
+
+    Distingue volontairement l'absence de l'existence : un identifiant qui ne
+    correspond à aucun canal répond 404, l'existence d'un canal dont l'appelant
+    n'est pas membre répond 403. Cette nuance reste en pratique peu observable,
+    mais elle évite de confirmer l'existence d'un canal à un tiers.
+    """
+    object_id = to_object_id(channel_id)
+    if object_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, CHANNEL_NOT_FOUND)
+    channel = await store.get_channel(object_id)
+    if channel is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, CHANNEL_NOT_FOUND)
+    if user["_id"] not in channel.get("members", []):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, CHANNEL_FORBIDDEN)
+    return channel
+
+
+async def require_channel_creator(
+    channel_id: str,
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+    store: Annotated[ChatStore, Depends(get_chat_store)],
+) -> dict[str, Any]:
+    """Exige que l'appelant soit le créateur du canal, et renvoie celui-ci.
+
+    Le créateur est l'utilisateur inscrit dans `created_by` par `create_channel`,
+    à partir de la session et jamais d'un corps de requête. Ce champ est donc la
+    seule autorité possible : l'identité de l'appelant vient de la session, celle
+    du canal de la base, et un `user_id` fourni par le client ne sert qu'à
+    désigner le *destinataire* de l'opération, jamais à décider qui l'exécute.
+
+    Cette dépendance remplace `require_channel_member` là où un acte engage le
+    canal : inviter, retirer, distribuer la clé de salon. Un membre ordinaire en
+    est exclu — il pourrait sinon préparer une enveloppe pour un tiers et
+    devancer le créateur, le dépôt étant « premier arrivé, premier servi » et
+    jamais écrasé. Un tiers est exclu pour la même raison, et reçoit le même
+    refus : la seule différence est qu'un membre a déjà accès au canal.
+    """
+    object_id = to_object_id(channel_id)
+    if object_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, CHANNEL_NOT_FOUND)
+    channel = await store.get_channel(object_id)
+    if channel is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, CHANNEL_NOT_FOUND)
+    if channel.get("created_by") != user["_id"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, CHANNEL_CREATOR_ONLY)
+    return channel
+
+
+async def require_public_key(
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+    store: Annotated[UserStore, Depends(get_store)],
+) -> dict[str, Any]:
+    """Exige que l'appelant ait publié sa clé publique.
+
+    Sans elle, il ne pourrait emballer aucune clé de salon : mieux vaut refuser
+    de produire un salon ou un message que personne ne pourra déchiffrer.
+    """
+    public_key = await store.get_public_key(user["_id"])
+    if public_key is None or "public_key" not in public_key:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Aucune clé publique publiée : impossible de participer à un canal.",
+        )
+    return public_key["public_key"]
