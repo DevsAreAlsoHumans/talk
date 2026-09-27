@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from app import db
 from app.config import get_settings
 from app.middleware import SecurityHeadersMiddleware
-from app.routers import auth, channel_keys, channels, keys, members, messages
+from app.routers import auth, channel_keys, channels, keys, messages, servers
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -79,9 +79,12 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(auth.router)
 app.include_router(keys.router)
 app.include_router(channels.router)
-app.include_router(members.router)
 app.include_router(channel_keys.router)
 app.include_router(messages.router)
+# Serveurs : création, lecture, adhésion, et les canaux qui leur appartiennent.
+# `/servers/...` ne chevauche aucune autre route, mais reste enregistré avant le
+# montage du frontend sur "/".
+app.include_router(servers.router)
 
 
 @app.get("/health", tags=["santé"])

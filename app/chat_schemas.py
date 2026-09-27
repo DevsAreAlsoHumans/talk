@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import binascii
 import re
+from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -39,6 +40,25 @@ MIN_WRAPPED_KEY_BYTES = 128
 MAX_WRAPPED_KEY_BYTES = 512
 
 CHANNEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$")
+
+
+def _normalize_name(value: str) -> str:
+    """Normalise et valide le nom d'une entité nommée : canal ou serveur.
+
+    Les deux obéissent à la **même** règle, appliquée ici une seule fois. Un
+    serveur n'a aucune raison d'accepter un nom qu'un canal refuse : il contient
+    des canaux, et l'homogénéité évite que l'ergonomie de saisie diverge selon
+    l'entité visée. Le message ne nomme donc ni l'un ni l'autre, ce qui le rend
+    valable pour les deux.
+    """
+    normalized = value.strip()
+    if not CHANNEL_NAME_PATTERN.fullmatch(normalized):
+        raise ValueError(
+            "Le nom doit faire 1 à 64 caractères : lettres, chiffres, espace, "
+            "tiret ou tiret bas, et commencer par un caractère alphanumérique."
+        )
+    return normalized
+
 
 # Composantes d'une clé privée RSA. Une seule présence suffit à indiquer qu'un
 # client tente de faire transiter sa clé privée.
@@ -210,54 +230,98 @@ class ChannelCreateIn(BaseModel):
     @field_validator("name")
     @classmethod
     def _validate_name(cls, value: str) -> str:
-        normalized = value.strip()
-        if not CHANNEL_NAME_PATTERN.fullmatch(normalized):
-            raise ValueError(
-                "Le nom doit faire 1 à 64 caractères : lettres, chiffres, espace, "
-                "tiret ou tiret bas, et commencer par un caractère alphanumérique."
-            )
-        return normalized
-
-
-class MemberOut(BaseModel):
-    """Membre d'un canal, avec sa clé publique et son empreinte.
-
-    La clé publique est exposée parce qu'un membre en a besoin pour emballer la
-    clé de salon à destination d'un autre : c'est une donnée publique par
-    construction, et la withholding rendrait l'ajout de membre impossible depuis
-    le navigateur, seul endroit où l'opération a lieu.
-    """
-
-    id: str
-    username: str
-    public_key_fingerprint: str | None = None
-    public_key_jwk: PublicJwk | None = None
+        return _normalize_name(value)
 
 
 class ChannelOut(BaseModel):
     """Représentation d'un canal.
 
-    `created_by` est le seul membre habilité à en administrer la composition :
-    ajouter ou retirer un membre, distribuer la clé de salon. L'exposer permet à
-    l'interface de n'offrir ces actions qu'à son détenteur, sans que cela tienne
-    lieu d'autorisation — le serveur la vérifie de son côté, sur la valeur qu'il
-    a lui-même écrite.
+    Le canal expose `server_id` et rien d'autre sur l'appartenance. Ni
+    `members`, ni `created_by` : cette information appartient au serveur parent,
+    et le renvoi serait une copie destinée à diverger. L'interface remonte au
+    serveur par `server_id` quand elle a besoin de savoir qui peut lire le canal.
+
+    `client_ref` reste exposé : c'est la référence locale qui permet au
+    navigateur de retrouver un canal créé juste avant une fermeture inattendue.
     """
 
     id: str
     name: str
+    server_id: str
     created_at: Any
     client_ref: str
-    created_by: str
-    members: list[MemberOut]
 
 
 class MemberRefIn(BaseModel):
-    """Corps d'ajout d'un membre."""
+    """Corps d'ajout d'un membre à un serveur."""
 
     model_config = ConfigDict(extra="forbid")
 
     user_id: str
+
+
+class ServerCreateIn(BaseModel):
+    """Corps de création d'un serveur.
+
+    Le corps ne contient qu'un nom, et c'est délibéré :
+
+    * `created_by` est refusé, comme tout champ inconnu (`extra="forbid"`). Le
+      créateur ne peut venir que de la session ; l'accepter ici rendrait
+      l'identité du serveur falsifiable par le client ;
+    * `joined_at` est refusé pour la même raison : l'ordre d'adhésion décide du
+      successeur du créateur, il ne peut donc pas être choisi par celui qui
+      rejoint ;
+    * aucun `client_ref` n'est requis, contrairement à un canal. Un serveur ne
+      détient aucune clé : celle-ci naît avec son premier canal, et c'est ce
+      canal-là qui a besoin d'une référence locale pour être repris après une
+      fermeture du navigateur.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        # Même règle que pour un canal : voir `_normalize_name`.
+        return _normalize_name(value)
+
+
+class ServerMemberOut(BaseModel):
+    """Membre d'un serveur, avec son ancienneté d'adhésion.
+
+    `joined_at` est la donnée qui permet de désigner le membre le plus ancien,
+    donc le successeur du créateur si celui-ci part sans avoir choisi de
+    successeur.
+
+    La clé publique est exposée pour la même raison qu'elle l'est dans la
+    représentation d'un canal avant la migration, et selon les mêmes modalités :
+    à terme, emballer la clé de salon d'un canal pour ce membre se fait dans le
+    navigateur d'un autre membre du serveur, ce qui suppose d'en connaître la clé
+    publique. Une clé publique n'est pas un secret, et le haché du mot de passe
+    n'est jamais chargé : la projection de `users_by_ids` l'exclut explicitement.
+    """
+
+    user_id: str
+    username: str
+    joined_at: datetime
+    public_key_fingerprint: str | None = None
+    public_key_jwk: PublicJwk | None = None
+
+
+class ServerOut(BaseModel):
+    """Représentation d'un serveur.
+
+    Aucun matériel cryptographique n'y figure : ni clé de salon, ni clé privée,
+    ni texte chiffré. Le serveur n'en détient aucun.
+    """
+
+    id: str
+    name: str
+    created_at: datetime
+    created_by: str
+    members: list[ServerMemberOut]
 
 
 class ChannelKeyIn(BaseModel):

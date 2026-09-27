@@ -37,8 +37,11 @@ MESSAGE_ATTEMPT_LIMIT = 30
 
 CHANNEL_NOT_FOUND = "Canal introuvable."
 CHANNEL_FORBIDDEN = "Accès refusé à ce canal."
-CHANNEL_CREATOR_ONLY = (
-    "Seul le créateur du canal peut ajouter ou retirer un membre, et distribuer la clé de salon."
+SERVER_NOT_FOUND = "Serveur introuvable."
+SERVER_FORBIDDEN = "Accès refusé à ce serveur."
+SERVER_CREATOR_ONLY = (
+    "Seul le créateur du serveur peut ajouter ou retirer un membre, créer un canal, "
+    "et distribuer la clé de salon."
 )
 
 
@@ -198,17 +201,26 @@ def message_rate_limit_retry_after(user_id: Any) -> int:
     return _message_limiter.register(f"msg:{user_id}")
 
 
-async def require_channel_member(
+async def require_channel_server(
     channel_id: str,
     user: Annotated[dict[str, Any], Depends(get_current_user)],
     store: Annotated[ChatStore, Depends(get_chat_store)],
-) -> dict[str, Any]:
-    """Exige l'appartenance au canal et renvoie celui-ci.
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Exige l'appartenance au serveur parent du canal. Renvoie (canal, serveur).
 
-    Distingue volontairement l'absence de l'existence : un identifiant qui ne
-    correspond à aucun canal répond 404, l'existence d'un canal dont l'appelant
-    n'est pas membre répond 403. Cette nuance reste en pratique peu observable,
-    mais elle évite de confirmer l'existence d'un canal à un tiers.
+    C'est le point unique de la migration : une seule dépendance porte désormais
+    l'autorisation d'un canal, et elle suit toujours le même chemin — canal,
+    `server_id`, serveur, `members`. Toutes les routes l'utilisent, de sorte
+    qu'aucune ne peut réintroduire son propre contrôle.
+
+    Le canal et le serveur sont tous deux renvoyés : le premier pour les routes
+    qui ont besoin de son identifiant, le second parce que plusieurs d'entre
+    elles ont ensuite besoin de son créateur pour une seconde vérification.
+
+    Un identifiant de canal mal formé, ou un canal absent, répond 404. Un canal
+    existant dont le serveur parent n'existe pas est également traité comme
+    absent — l'incohérence ne peut pas survenir par l'API, et la révéler
+    confirmerait l'existence d'un canal à quelqu'un qui n'y a pas droit.
     """
     object_id = to_object_id(channel_id)
     if object_id is None:
@@ -216,40 +228,92 @@ async def require_channel_member(
     channel = await store.get_channel(object_id)
     if channel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, CHANNEL_NOT_FOUND)
-    if user["_id"] not in channel.get("members", []):
+    server = await store.get_server(channel["server_id"])
+    if server is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, CHANNEL_NOT_FOUND)
+    if not any(member.get("user_id") == user["_id"] for member in server.get("members", [])):
         raise HTTPException(status.HTTP_403_FORBIDDEN, CHANNEL_FORBIDDEN)
-    return channel
+    return channel, server
 
 
-async def require_channel_creator(
+async def require_channel_server_creator(
     channel_id: str,
     user: Annotated[dict[str, Any], Depends(get_current_user)],
     store: Annotated[ChatStore, Depends(get_chat_store)],
-) -> dict[str, Any]:
-    """Exige que l'appelant soit le créateur du canal, et renvoie celui-ci.
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Comme `require_channel_server`, et exige le créateur du serveur parent.
 
-    Le créateur est l'utilisateur inscrit dans `created_by` par `create_channel`,
-    à partir de la session et jamais d'un corps de requête. Ce champ est donc la
-    seule autorité possible : l'identité de l'appelant vient de la session, celle
-    du canal de la base, et un `user_id` fourni par le client ne sert qu'à
-    désigner le *destinataire* de l'opération, jamais à décider qui l'exécute.
+    Séparée de la précédente parce que les deux questions ne se ressemblent pas :
+    l'une demande « peux-tu lire ? », l'autre « peux-tu administrer ? ». Un canal
+    n'ayant plus de propriétaire, l'administration remonte au serveur : c'est
+    son créateur qui distribue la clé de salon.
 
-    Cette dépendance remplace `require_channel_member` là où un acte engage le
-    canal : inviter, retirer, distribuer la clé de salon. Un membre ordinaire en
-    est exclu — il pourrait sinon préparer une enveloppe pour un tiers et
-    devancer le créateur, le dépôt étant « premier arrivé, premier servi » et
-    jamais écrasé. Un tiers est exclu pour la même raison, et reçoit le même
-    refus : la seule différence est qu'un membre a déjà accès au canal.
+    Un membre ordinaire en est exclu — il pourrait sinon préparer une enveloppe
+    pour un tiers et devancer le créateur, le dépôt étant « premier arrivé,
+    premier servi » et jamais écrasé. Un tiers reçoit le même refus que s'il
+    n'avait pas de canal du tout.
     """
-    object_id = to_object_id(channel_id)
+    channel, server = await require_channel_server(channel_id, user, store)
+    if server.get("created_by") != user["_id"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, SERVER_CREATOR_ONLY)
+    return channel, server
+
+
+async def require_server_creator(
+    server_id: str,
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+    store: Annotated[ChatStore, Depends(get_chat_store)],
+) -> dict[str, Any]:
+    """Exige que l'appelant soit le créateur du serveur, et renvoie celui-ci.
+
+    L'identité vient de la session ; `created_by` a été écrit à la création, à
+    partir de cette même session, et jamais d'un corps de requête. Le `user_id`
+    que le client transmet sert à désigner le *destinataire* d'une adhésion,
+    jamais à décider qui l'exécute.
+
+    Le contrôle est plus strict que l'appartenance : un membre ordinaire ne peut
+    ni ajouter ni retirer de membre, ni distribuer une clé de salon. Le transfert
+    de propriété n'existe pas encore, donc un serveur ne peut pas changer de
+    mains : son créateur le reste.
+    """
+    object_id = to_object_id(server_id)
     if object_id is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, CHANNEL_NOT_FOUND)
-    channel = await store.get_channel(object_id)
-    if channel is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, CHANNEL_NOT_FOUND)
-    if channel.get("created_by") != user["_id"]:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, CHANNEL_CREATOR_ONLY)
-    return channel
+        raise HTTPException(status.HTTP_404_NOT_FOUND, SERVER_NOT_FOUND)
+    server = await store.get_server(object_id)
+    if server is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, SERVER_NOT_FOUND)
+    if server.get("created_by") != user["_id"]:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, SERVER_CREATOR_ONLY)
+    return server
+
+
+async def require_server_member(
+    server_id: str,
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+    store: Annotated[ChatStore, Depends(get_chat_store)],
+) -> dict[str, Any]:
+    """Exige l'appartenance au serveur et renvoie celui-ci.
+
+    Suit exactement la convention déjà en place pour un canal : un identifiant
+    mal formé répond 404, un serveur absent répond 404, et un serveur dont
+    l'appelant n'est pas membre répond 403. La distinction reste peu observable
+    de l'extérieur, mais elle évite de confirmer l'existence d'un serveur à un
+    tiers.
+
+    Les membres sont des sous-documents : l'appartenance se recherche donc sur le
+    chemin `member["user_id"]`. Un `user["_id"] in server["members"]` comparerait
+    un ObjectId à des dictionnaires et serait toujours faux — donc « pas membre »
+    pour tout le monde, y compris le créateur.
+    """
+    object_id = to_object_id(server_id)
+    if object_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, SERVER_NOT_FOUND)
+    server = await store.get_server(object_id)
+    if server is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, SERVER_NOT_FOUND)
+    if not any(member.get("user_id") == user["_id"] for member in server.get("members", [])):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, SERVER_FORBIDDEN)
+    return server
 
 
 async def require_public_key(

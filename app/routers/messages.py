@@ -36,7 +36,7 @@ from app.deps import (
     get_chat_store,
     get_current_user_ws,
     message_rate_limit_retry_after,
-    require_channel_member,
+    require_channel_server,
     require_trusted_origin_ws,
 )
 from app.realtime import connection_manager as manager
@@ -52,12 +52,15 @@ CHANNEL_FORBIDDEN = "Accès refusé à ce canal."
 @router.get("/channels/{channel_id}/messages", response_model=MessageListOut)
 async def list_messages(
     channel_id: str,
-    _channel: Annotated[dict[str, Any], Depends(require_channel_member)],
+    pair: Annotated[tuple[dict[str, Any], dict[str, Any]], Depends(require_channel_server)],
     chat: Annotated[ChatStore, Depends(get_chat_store)],
     limit: Annotated[int, Query(ge=1, le=MAX_HISTORY_LIMIT)] = DEFAULT_HISTORY_LIMIT,
     before: Annotated[str | None, Query()] = None,
 ) -> MessageListOut:
     """Historique paginé, du plus ancien au plus récent.
+
+    Réservé aux membres du serveur parent du canal. La dépendance rend le canal
+    déjà résolu, donc `channel_id` n'est relu que pour le curseur.
 
     `before` est l'identifiant du message **le plus ancien** déjà reçu : la page
     suivante contient donc les messages plus anciens que lui. Les identifiants
@@ -65,14 +68,14 @@ async def list_messages(
     là où un décalage sauterait des messages dès qu'un message arrive entre deux
     appels.
     """
-    channel_object_id = to_object_id(channel_id)
+    channel, _server = pair
     cursor = to_object_id(before) if before else None
     if before and cursor is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Curseur invalide.")
 
     # On demande un message de plus que la page demandée : sa présence prouve
     # qu'il en existe d'plus anciens, sans coût de comptage supplémentaire.
-    fetched = await chat.list_messages(channel_object_id, cursor, limit + 1)
+    fetched = await chat.list_messages(channel["_id"], cursor, limit + 1)
     has_more = len(fetched) > limit
     # Le magasin rend les messages du plus ancien au plus récent ; le message
     # surnuméraire est donc le plus ancien et se trouve en tête.
@@ -97,11 +100,12 @@ async def channel_socket(
     `accept()`. Ces deux refus lèvent une `WebSocketException`, que le client
     reçoit en 1008.
 
-    L'appartenance au canal, elle, est contrôlée après `accept()` : le client
-    obtient alors un code applicatif explicite, plus lisible qu'un échec de
-    négociation. Vérifier l'origine reste indispensable — un navigateur envoie
-    les cookies automatiquement, et une page tierce pourrait donc ouvrir ce
-    socket à la place de l'utilisateur.
+    L'appartenance, elle, est contrôlée après `accept()` : le client obtient
+    alors un code applicatif explicite, plus lisible qu'un échec de négociation.
+    Le chemin est le même qu'en HTTP — canal, serveur parent, membres — et
+    aucune copie de liste de membres n'est reconstruite ici. Vérifier l'origine
+    reste indispensable — un navigateur envoie les cookies automatiquement, et
+    une page tierce pourrait donc ouvrir ce socket à la place de l'utilisateur.
     """
     await websocket.accept()
 
@@ -110,7 +114,11 @@ async def channel_socket(
     if channel is None:
         await websocket.close(code=4404, reason=CHANNEL_NOT_FOUND)
         return
-    if user["_id"] not in channel.get("members", []):
+    server = await chat.get_server(channel["server_id"])
+    if server is None:
+        await websocket.close(code=4404, reason=CHANNEL_NOT_FOUND)
+        return
+    if not any(member.get("user_id") == user["_id"] for member in server.get("members", [])):
         await websocket.close(code=4403, reason=CHANNEL_FORBIDDEN)
         return
 
