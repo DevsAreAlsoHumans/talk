@@ -101,6 +101,25 @@
           <h2 class="chat-heading">Serveurs</h2>
           <ul class="server-list" id="server-list"></ul>
 
+          <form id="create-server-form" class="chat-form" novalidate>
+            <label class="auth-label" for="server-name">Nouveau serveur</label>
+            <input
+              class="auth-input"
+              id="server-name"
+              name="name"
+              type="text"
+              maxlength="64"
+              pattern="[A-Za-z0-9][A-Za-z0-9 _-]*"
+              placeholder="general"
+              required
+            />
+            <p class="auth-hint">
+              1 à 64 caractères : lettres, chiffres, espace, tiret ou tiret bas, et commençant par un
+              caractère alphanumérique.
+            </p>
+            <button class="auth-button" type="submit">Créer</button>
+          </form>
+
           <h2 class="chat-heading">Canaux</h2>
           <ul class="channel-list" id="channel-list"></ul>
 
@@ -180,7 +199,7 @@
               </form>
             </div>
             <p class="auth-hint">
-              Seul le créateur du canal peut ajouter ou retirer un membre, et transmettre la
+              Seul le créateur du serveur peut ajouter ou retirer un membre, et transmettre la
               clé de salon. Ajouter un membre ne lui donne pas accès aux messages : il lui faut
               cette clé, que le créateur produit depuis son navigateur. Retirer un membre ne lui
               retire pas la clé qu'il possède déjà.

@@ -100,6 +100,7 @@ function cacheElements() {
   elements.composerInput = document.getElementById("message-input");
   elements.createInput = document.getElementById("channel-name");
   elements.createButton = document.querySelector("#create-channel-form button[type=submit]");
+  elements.serverCreateInput = document.getElementById("server-name");
   elements.channelTarget = document.getElementById("channel-target");
   elements.serverHint = document.getElementById("server-hint");
   elements.addMemberInput = document.getElementById("member-username");
@@ -315,10 +316,49 @@ async function selectServer(serverId) {
     state.currentChannelId = null;
   }
   await refreshChannels();
+  // Le serveur courant a changé, or la liste des serveurs et la cible de création
+  // ne se redessinent qu'ici : `renderCreateTarget` n'est atteint que par
+  // `renderServers`, et `renderServers` n'est appelé que par `refreshServers`.
+  // Sans ce rerendu, le serveur choisi ne serait jamais marqué actif,
+  // `#channel-target` garderait « Aucun serveur sélectionné. » et le bouton de
+  // création de canal resterait désactivé — un serveur étant choisi, on ne
+  // pourrait plus créer le canal qu'il contient.
+  //
+  // Le rerendu vient après `refreshChannels` et non avant : `renderServers`
+  // redessine aussi la liste des canaux, et l'appeler d'abord afficherait
+  // brièvement ceux de l'ancien serveur. Le second rendu est idempotent.
+  renderServers();
 }
 
 function currentServer() {
   return state.serverById.get(state.currentServerId) || null;
+}
+
+/**
+ * Crée un serveur, puis en fait le contexte courant.
+ *
+ * L'ordre des deux rafraîchissements est load-bearing : `selectServer` refuse un
+ * identifiant absent de `serverById`, cette table étant construite par
+ * `refreshServers`. Créer d'abord, recharger la liste, puis sélectionner — dans
+ * l'autre sens, la sélection serait ignorée et l'utilisateur resterait sur un
+ * serveur vide, sans comprendre pourquoi.
+ *
+ * Le serveur créé est le seul jamais présélectionné automatiquement. Au
+ * chargement, aucun ne l'est : la navigation part d'un serveur, et le choisir
+ * relève de l'usage. Ici en revanche, un serveur vient d'être créé et ne peut
+ * être qu'un seul, le laisser non sélectionné condamnerait l'utilisateur à
+ * retrouver son propre serveur dans une liste avant de créer son premier canal.
+ *
+ * Aucun `client_ref` n'est produit : un serveur ne détient aucune clé. La clé de
+ * salon naît avec le premier canal, et c'est ce canal-là qui a besoin d'une
+ * référence locale pour être repris après une fermeture du navigateur.
+ */
+async function createServer(name) {
+  const server = await expectJson(await postJson("/servers", { name }));
+  await refreshServers();
+  await selectServer(server.id);
+  setStatus(`Serveur « ${server.name} » créé. Créez maintenant votre premier canal.`);
+  return server;
 }
 
 /**
@@ -708,6 +748,20 @@ function authorName(senderId) {
 /* ------------------------------------------------------------------ */
 
 function wireEvents() {
+  elements.serverCreateInput.closest("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = elements.serverCreateInput.value.trim();
+    if (!name) {
+      return;
+    }
+    elements.serverCreateInput.value = "";
+    try {
+      await createServer(name);
+    } catch (error) {
+      showError(error.message);
+    }
+  });
+
   document.getElementById("create-channel-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = elements.createInput.value.trim();
