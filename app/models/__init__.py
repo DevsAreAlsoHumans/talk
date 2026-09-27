@@ -1,5 +1,5 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
 from enum import Enum
 
@@ -40,6 +40,7 @@ class UserResponse(BaseModel):
     email: str
     created_at: datetime
     role: UserRole
+    access_token: Optional[str] = None
 
 
 class RoomType(str, Enum):

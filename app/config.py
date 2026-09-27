@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "talk"
     DEBUG: bool = False
+    SEED_ADMIN: bool = False
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 

@@ -10,8 +10,16 @@ import os
 # Ajouter le répertoire parent au path pour importer app
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.security import SecurityUtils
-from app.models import RoomType, MessageType, UserRole, MemberRole, MessageType
+from app.security import SecurityUtils  # noqa: E402
+from app.models import (  # noqa: E402
+    MemberRole,
+    MessageCreate,
+    MessageType,
+    RoomCreate,
+    RoomType,
+    UserCreate,
+    UserRole,
+)
 
 
 def test_security_utils():
@@ -111,7 +119,6 @@ def test_app_imports():
     
     from app.main import app
     from app.config import settings
-    from app.database import get_redis, close_redis
     
     assert app is not None, "FastAPI app should import"
     assert settings is not None, "Settings should import"

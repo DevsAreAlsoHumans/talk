@@ -9,6 +9,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - DEBUG=false
+      - SEED_ADMIN=true
     depends_on:
       - redis
     volumes:

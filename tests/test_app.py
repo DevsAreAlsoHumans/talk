@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.security import SecurityUtils
 from app.models import RoomType, MessageType
-import json
 
 
 # Fixtures
@@ -32,7 +31,7 @@ def test_user():
 def auth_header(client, test_user):
     """Retourne l'header Authorization avec le token."""
     # Inscription
-    register_response = client.post("/api/auth/register", json=test_user)
+    client.post("/api/auth/register", json=test_user)
     
     # Login
     login_data = {

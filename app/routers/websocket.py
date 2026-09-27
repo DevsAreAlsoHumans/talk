@@ -1,100 +1,74 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from fastapi.security import OAuth2PasswordBearer
-from app.security import SecurityUtils
-import json
-from typing import Dict
-import secrets
+import asyncio
 from datetime import datetime
+import json
+import secrets
+
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi.security import OAuth2PasswordBearer
+from redis.asyncio import Redis
+
+from app.database import get_redis
+from app.security import SecurityUtils
+from app.services.redis_store import encode
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-# Connexions WebSocket actives
-_connections: Dict[str, WebSocket] = {}
 
 
 @router.websocket("/")
-async def websocket_endpoint(websocket: WebSocket, token: str = Depends(oauth2_scheme)):
-    """Point de terminaison WebSocket."""
+async def websocket_endpoint(websocket: WebSocket, token: str, redis: Redis = Depends(get_redis)):
+    user_id = SecurityUtils.extract_user_id_from_token(token)
+    await websocket.accept()
+    pubsub = redis.pubsub()
+    subscribed_channel = None
+    listener_task = None
+
+    async def listen_to_room() -> None:
+        while True:
+            event = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if event and event.get("data"):
+                await websocket.send_text(event["data"])
+            await asyncio.sleep(0.05)
+
     try:
-        # Vérifier le token et obtenir l'user_id
-        user_id = SecurityUtils.extract_user_id_from_token(token)
+        while True:
+            data = json.loads(await websocket.receive_text())
+            action = data.get("action")
+            room_id = data.get("room_id")
 
-        # Accepter la connexion
-        await websocket.accept()
+            if action == "join_room" and room_id:
+                if subscribed_channel:
+                    await pubsub.unsubscribe(subscribed_channel)
+                subscribed_channel = f"room:{room_id}:events"
+                await pubsub.subscribe(subscribed_channel)
+                if listener_task is None:
+                    listener_task = asyncio.create_task(listen_to_room())
+                await websocket.send_json({"type": "joined_room", "room_id": room_id})
 
-        # Stocker la connexion WebSocket
-        connection_id = f"conn_{secrets.token_urlsafe(8)}"
-        _connections[connection_id] = {
-            "websocket": websocket,
-            "user_id": user_id,
-            "room_id": None,
-            "connected_at": datetime.utcnow()
-        }
+            elif action == "send_message" and room_id:
+                event = {
+                    "type": "message",
+                    "room_id": room_id,
+                    "user_id": user_id,
+                    "content": data.get("content", ""),
+                    "encrypted": data.get("encrypted", True),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "id": f"ws_{secrets.token_urlsafe(8)}",
+                }
+                await redis.publish(f"room:{room_id}:events", encode(event))
 
-        try:
-            while True:
-                # Recevoir les données du client
-                data = await websocket.receive_text()
-                message_data = json.loads(data)
-
-                # Traiter le message
-                action = message_data.get("action")
-                room_id = message_data.get("room_id")
-
-                if action == "join_room":
-                    # Rejoindre un salon
-                    _connections[connection_id]["room_id"] = room_id
-                    await websocket.send_text(json.dumps({
-                        "type": "joined_room",
-                        "room_id": room_id
-                    }))
-
-                elif action == "send_message":
-                    # Envoyer un message
-                    content = message_data.get("content")
-                    encrypted = message_data.get("encrypted", True)
-
-                    # En production, vérifier les permissions et émettre via Redis
-                    # Pour l'exemple, on envoie juste un message de confirmation
-                    await websocket.send_text(json.dumps({
-                        "type": "message_sent",
-                        "room_id": room_id,
-                        "content": f"Message reçu (chiffré: {encrypted})",
-                        "timestamp": datetime.utcnow().isoformat()
-                    }))
-
-                elif action == "ping":
-                    # Pong
-                    await websocket.send_text(json.dumps({
-                        "type": "pong"
-                    }))
-
-        except WebSocketDisconnect:
-            pass
-        finally:
-            # Nettoyer la connexion
-            if connection_id in _connections:
-                del _connections[connection_id]
-
-    except Exception as e:
-        # Envoyer une erreur au client
-        await websocket.close(code=1008, reason=str(e))
+            elif action == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if listener_task:
+            listener_task.cancel()
+        if subscribed_channel:
+            await pubsub.unsubscribe(subscribed_channel)
+        await pubsub.close()
 
 
 @router.get("/connections")
 async def get_connections():
-    """Récupère les connexions WebSocket actives (debug)."""
-    return {
-        "total_connections": len(_connections),
-        "connections": [
-            {
-                "id": cid,
-                "user_id": conn["user_id"],
-                "room_id": conn["room_id"],
-                "connected_at": conn["connected_at"].isoformat()
-            }
-            for cid, conn in _connections.items()
-        ]
-    }
+    return {"message": "Les connexions sont gérées par Redis Pub/Sub"}
