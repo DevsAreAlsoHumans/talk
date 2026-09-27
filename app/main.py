@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from app.database import close_redis, get_redis
 from app.config import settings
@@ -54,6 +55,8 @@ def create_app() -> FastAPI:
     async def health_check():
         """Vérification de la santé de l'application."""
         return {"status": "healthy", "service": settings.APP_NAME}
+
+    app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 
     return app
 

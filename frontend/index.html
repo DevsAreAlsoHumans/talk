@@ -26,9 +26,34 @@
             <!-- Sidebar: rooms list -->
             <aside id="sidebar">
                 <div id="rooms-list">
-                    <h2>Salons</h2>
-                    <button id="btn-create-room" class="btn-primary">+ Créer un salon</button>
-                    <ul id="room-list"></ul>
+                    <div class="section-heading">
+                        <h2>Serveurs</h2>
+                        <button id="btn-create-server" class="icon-button" type="button" title="Créer un serveur">+</button>
+                    </div>
+                    <select id="server-select" class="space-select">
+                        <option value="">Sélectionner un serveur</option>
+                    </select>
+                    <div class="section-heading">
+                        <h2>Salons du serveur</h2>
+                        <button id="btn-create-channel" class="icon-button" type="button" title="Créer un salon">+</button>
+                    </div>
+                    <select id="channel-select" class="space-select" disabled>
+                        <option value="">Sélectionner un salon</option>
+                    </select>
+                    <div class="section-heading">
+                        <h2>Groupes</h2>
+                        <button id="btn-create-group" class="icon-button" type="button" title="Créer un groupe">+</button>
+                    </div>
+                    <select id="group-select" class="space-select">
+                        <option value="">Sélectionner un groupe</option>
+                    </select>
+                    <div class="section-heading">
+                        <h2>Messages directs</h2>
+                        <button id="btn-create-direct" class="icon-button" type="button" title="Créer un message direct">+</button>
+                    </div>
+                    <select id="direct-select" class="space-select">
+                        <option value="">Sélectionner une conversation</option>
+                    </select>
                 </div>
             </aside>
 
@@ -54,6 +79,12 @@
                     <span class="status-indicator" id="e2e-indicator"></span>
                     <span>Chiffrement E2E</span>
                 </div>
+                <div id="member-management">
+                    <h3>Ajouter un membre</h3>
+                    <input type="text" id="member-identifier" placeholder="Nom ou email">
+                    <button id="btn-add-member" class="btn-primary" type="button">Ajouter</button>
+                    <p id="member-feedback"></p>
+                </div>
             </aside>
         </main>
     </div>
@@ -61,7 +92,7 @@
     <!-- Create room modal -->
     <div id="create-room-modal" class="modal" style="display:none;">
         <div class="modal-content">
-            <h3>Nouveau salon</h3>
+            <h3 id="create-room-title">Nouvel espace</h3>
             <form id="create-room-form">
                 <label for="room-name">Nom du salon</label>
                 <input type="text" id="room-name" required maxlength="100">
@@ -69,11 +100,15 @@
                 <textarea id="room-description" maxlength="500"></textarea>
                 <label for="room-type">Type</label>
                 <select id="room-type">
-                    <option value="channel">Salon</option>
                     <option value="server">Serveur</option>
+                    <option value="channel">Salon</option>
                     <option value="group">Groupe</option>
                     <option value="direct">Message direct</option>
                 </select>
+                <label id="parent-server-label" for="parent-server">Serveur parent du salon</label>
+                <select id="parent-server"></select>
+                <label id="member-identifiers-label" for="member-identifiers">Membres invités</label>
+                <input type="text" id="member-identifiers" placeholder="nom ou email, séparés par des virgules">
                 <button type="submit" class="btn-primary">Créer</button>
                 <button type="button" id="btn-cancel-room">Annuler</button>
             </form>
@@ -84,8 +119,8 @@
     <div id="login-form">
         <h2>Connexion</h2>
         <form id="login-form-element">
-            <label for="login-email">Email</label>
-            <input type="email" id="login-email" required>
+            <label for="login-email">Email ou nom d'utilisateur</label>
+            <input type="text" id="login-email" required>
             <label for="login-password">Mot de passe</label>
             <input type="password" id="login-password" required>
             <button type="submit">Se connecter</button>

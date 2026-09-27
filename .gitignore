@@ -11,3 +11,6 @@ PROJECT_LOG.md
 .venv/
 __pycache__/
 *.pyc
+.github/
+.pytest_cache/
+.ruff_cache/

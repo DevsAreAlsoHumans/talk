@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional
 from datetime import datetime
 from enum import Enum
@@ -57,7 +57,27 @@ class RoomCreate(BaseModel):
     description: Optional[str] = None
     room_type: RoomType = RoomType.CHANNEL
     is_private: bool = False
-    parent_server: Optional[str] = None  # ID du serveur parent pour les canaux
+    parent_server: Optional[str] = None
+    member_ids: list[str] = Field(default_factory=list)
+    member_identifiers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_room_structure(self):
+        if self.room_type == RoomType.SERVER and self.parent_server:
+            raise ValueError("Un serveur ne peut pas avoir de serveur parent")
+        if self.room_type == RoomType.CHANNEL and not self.parent_server:
+            raise ValueError("Un salon doit appartenir à un serveur")
+        invited_members = self.member_ids + self.member_identifiers
+        if self.room_type == RoomType.DIRECT and len(invited_members) != 1:
+            raise ValueError("Un message direct doit cibler exactement un membre")
+        if self.room_type == RoomType.GROUP and not invited_members:
+            raise ValueError("Un groupe doit avoir au moins un membre invité")
+        return self
+
+
+class MemberAdd(BaseModel):
+    """Membre à ajouter par identifiant, email ou nom d'utilisateur."""
+    identifier: str = Field(min_length=1)
 
 
 class Room(BaseModel):

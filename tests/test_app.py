@@ -45,6 +45,16 @@ def auth_header(client, test_user):
     return {"Authorization": f"Bearer {token}"}
 
 
+def create_test_server(client, auth_header):
+    response = client.post(
+        "/api/rooms/",
+        json={"name": "Test Server", "room_type": RoomType.SERVER.value},
+        headers=auth_header,
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
 # Tests d'authentification
 class TestAuth:
     """Tests pour le module d'authentification."""
@@ -125,11 +135,13 @@ class TestRooms:
 
     def test_create_room(self, client, auth_header):
         """Test de création d'un salon."""
+        server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Test Room",
             "description": "Salon de test",
             "room_type": RoomType.CHANNEL.value,
-            "is_private": False
+            "is_private": False,
+            "parent_server": server_id,
         }
         response = client.post("/api/rooms/", json=room_data, headers=auth_header)
         assert response.status_code == 201
@@ -140,11 +152,13 @@ class TestRooms:
     def test_update_room(self, client, auth_header):
         """Test de mise à jour d'un salon."""
         # Créer d'abord un salon
+        server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Room to Update",
             "description": "Original description",
             "room_type": RoomType.CHANNEL.value,
-            "is_private": False
+            "is_private": False,
+            "parent_server": server_id,
         }
         create_response = client.post("/api/rooms/", json=room_data, headers=auth_header)
         assert create_response.status_code == 201
@@ -155,7 +169,8 @@ class TestRooms:
             "name": "Updated Room",
             "description": "Updated description",
             "room_type": RoomType.CHANNEL.value,
-            "is_private": False
+            "is_private": False,
+            "parent_server": server_id,
         }
         update_response = client.put(f"/api/rooms/{room_id}", json=update_data, headers=auth_header)
         assert update_response.status_code == 200
@@ -164,11 +179,13 @@ class TestRooms:
     def test_delete_room(self, client, auth_header):
         """Test de suppression d'un salon."""
         # Créer d'abord un salon
+        server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Room to Delete",
             "description": "Salon à supprimer",
             "room_type": RoomType.CHANNEL.value,
-            "is_private": False
+            "is_private": False,
+            "parent_server": server_id,
         }
         create_response = client.post("/api/rooms/", json=room_data, headers=auth_header)
         assert create_response.status_code == 201
@@ -190,11 +207,13 @@ class TestMessages:
     def test_send_message(self, client, auth_header):
         """Test d'envoi d'un message."""
         # Créer d'abord un salon
+        server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Test Room for Messages",
             "description": "Salon pour tests de messages",
             "room_type": RoomType.CHANNEL.value,
-            "is_private": False
+            "is_private": False,
+            "parent_server": server_id,
         }
         room_response = client.post("/api/rooms/", json=room_data, headers=auth_header)
         room_id = room_response.json()["id"]
@@ -214,11 +233,13 @@ class TestMessages:
     def test_list_messages(self, client, auth_header):
         """Test de liste des messages d'un salon."""
         # Créer un salon
+        server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Messages Room",
             "description": "Salon pour les messages",
             "room_type": RoomType.CHANNEL.value,
-            "is_private": False
+            "is_private": False,
+            "parent_server": server_id,
         }
         room_response = client.post("/api/rooms/", json=room_data, headers=auth_header)
         room_id = room_response.json()["id"]
@@ -307,9 +328,11 @@ class TestIntegration:
         assert user_response.status_code == 200
 
         # 4. Création d'un salon
+        server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Integration Test Room",
-            "room_type": RoomType.CHANNEL.value
+            "room_type": RoomType.CHANNEL.value,
+            "parent_server": server_id,
         }
         room_response = client.post("/api/rooms/", json=room_data, headers=auth_header)
         assert room_response.status_code == 201

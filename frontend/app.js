@@ -1,12 +1,22 @@
 // frontend/app.js - Application principale Talk
 
-const API_BASE_URL = window.location.origin.replace(/:\d+/, '');
+const API_BASE_URL = window.location.origin;
 
 // UI State
 let currentRoomId = null;
+let currentServerId = null;
 let currentUser = null;
+let servers = [];
 let ws = null;
 let e2eEnabled = true;
+let accessToken = localStorage.getItem('talk_access_token');
+
+function authHeaders(headers = {}) {
+    if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+    }
+    return headers;
+}
 
 // DOM Elements
 const dom = {
@@ -17,15 +27,28 @@ const dom = {
     btnLogout: document.getElementById('btn-logout'),
     loginFormElement: document.getElementById('login-form-element'),
     registerFormElement: document.getElementById('register-form'),
-    roomList: document.getElementById('room-list'),
+    serverSelect: document.getElementById('server-select'),
+    channelSelect: document.getElementById('channel-select'),
+    groupSelect: document.getElementById('group-select'),
+    directSelect: document.getElementById('direct-select'),
     messagesContainer: document.getElementById('messages-container'),
     chatRoomName: document.getElementById('chat-room-name'),
     messageInput: document.getElementById('message-input'),
     btnSend: document.getElementById('btn-send'),
     userInfo: document.getElementById('user-info'),
     e2eIndicator: document.getElementById('e2e-indicator'),
+    memberIdentifier: document.getElementById('member-identifier'),
+    btnAddMember: document.getElementById('btn-add-member'),
+    memberFeedback: document.getElementById('member-feedback'),
     createRoomModal: document.getElementById('create-room-modal'),
+    roomType: document.getElementById('room-type'),
+    createRoomTitle: document.getElementById('create-room-title'),
+    parentServer: document.getElementById('parent-server'),
+    parentServerLabel: document.getElementById('parent-server-label'),
+    memberIdentifiers: document.getElementById('member-identifiers'),
+    memberIdentifiersLabel: document.getElementById('member-identifiers-label'),
     btnCreateRoom: document.getElementById('btn-create-room'),
+    btnCreateChannel: document.getElementById('btn-create-channel'),
     btnCancelRoom: document.getElementById('btn-cancel-room'),
     createRoomForm: document.getElementById('create-room-form'),
 };
@@ -34,7 +57,9 @@ const dom = {
 async function init() {
     try {
         // Vérifier si l'utilisateur est connecté
-        const response = await fetch(`${API_BASE_URL}/api/auth/me`);
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+            headers: authHeaders()
+        });
         if (response.ok) {
             currentUser = await response.json();
             showApp();
@@ -62,6 +87,8 @@ async function login(email, password) {
 
         if (response.ok) {
             const user = await response.json();
+            accessToken = user.access_token;
+            localStorage.setItem('talk_access_token', accessToken);
             currentUser = user;
             showApp();
             await loadRooms();
@@ -88,9 +115,8 @@ async function register(username, email, password) {
         });
 
         if (response.ok) {
-            const user = await response.json();
-            alert('Inscription réussie! Vous pouvez maintenant vous connecter.');
-            showLoginForm();
+            await response.json();
+            await login(email, password);
         } else {
             const error = await response.json();
             alert(error.detail || 'Échec de l\'inscription');
@@ -115,7 +141,13 @@ async function fetchCsrfToken() {
 }
 
 function logout() {
+    fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: authHeaders()
+    });
     currentUser = null;
+    accessToken = null;
+    localStorage.removeItem('talk_access_token');
     currentRoomId = null;
     if (ws) {
         ws.close();
@@ -126,7 +158,8 @@ function logout() {
 
 // UI handlers
 function showLoginForm() {
-    dom.loginForm.style.display = 'block';
+    dom.loginForm.style.display = 'grid';
+    dom.loginFormElement.style.display = 'block';
     dom.registerForm.style.display = 'none';
     document.getElementById('app').style.display = 'none';
     dom.messageInput.disabled = true;
@@ -134,7 +167,8 @@ function showLoginForm() {
 }
 
 function showRegisterForm() {
-    dom.loginForm.style.display = 'none';
+    dom.loginForm.style.display = 'grid';
+    dom.loginFormElement.style.display = 'none';
     dom.registerForm.style.display = 'block';
     document.getElementById('app').style.display = 'none';
     dom.messageInput.disabled = true;
@@ -175,39 +209,55 @@ function updateE2EStatus() {
 // Rooms handlers
 async function loadRooms() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/rooms/`);
-        if (response.ok) {
-            const rooms = await response.json();
-            renderRooms(rooms);
+        const responses = await Promise.all([
+            fetch(`${API_BASE_URL}/api/rooms/servers`, { headers: authHeaders() }),
+            fetch(`${API_BASE_URL}/api/rooms/groups`, { headers: authHeaders() }),
+            fetch(`${API_BASE_URL}/api/rooms/directs`, { headers: authHeaders() })
+        ]);
+        if (responses.every(response => response.ok)) {
+            servers = await responses[0].json();
+            renderSpaceSelect(servers, dom.serverSelect, 'Sélectionner un serveur');
+            renderSpaceSelect(await responses[1].json(), dom.groupSelect, 'Sélectionner un groupe');
+            renderSpaceSelect(await responses[2].json(), dom.directSelect, 'Sélectionner une conversation');
+            if (currentServerId) {
+                dom.serverSelect.value = currentServerId;
+                await loadChannels(currentServerId);
+            }
+            updateChannelCreationState();
         }
     } catch (error) {
         console.error('Erreur de chargement des salons:', error);
     }
 }
 
-function renderRooms(rooms) {
-    dom.roomList.innerHTML = '';
-
-    if (rooms.length === 0) {
-        dom.roomList.innerHTML = '<li>Aucun salon trouvé</li>';
-        return;
-    }
-
+function renderSpaceSelect(rooms, selectElement, placeholder) {
+    selectElement.innerHTML = `<option value="">${placeholder}</option>`;
     rooms.forEach(room => {
-        const li = document.createElement('li');
-        li.dataset.id = room.id;
-        li.innerHTML = `
-            <div class="room-name">${room.name}</div>
-            <div class="room-info">${room.description || ''}</div>
-        `;
-
-        if (room.id === currentRoomId) {
-            li.classList.add('active');
-        }
-
-        li.addEventListener('click', () => joinRoom(room.id, room.name));
-        dom.roomList.appendChild(li);
+        const option = document.createElement('option');
+        option.value = room.id;
+        option.textContent = room.name;
+        selectElement.appendChild(option);
     });
+    selectElement.disabled = rooms.length === 0;
+}
+
+async function loadChannels(serverId) {
+    const response = await fetch(`${API_BASE_URL}/api/rooms/server/${serverId}/channels`, {
+        headers: authHeaders()
+    });
+    if (response.ok) {
+        const channels = await response.json();
+        renderSpaceSelect(channels, dom.channelSelect, 'Sélectionner un salon');
+        dom.channelSelect.disabled = channels.length === 0;
+    }
+}
+
+function updateChannelCreationState() {
+    const server = servers.find(item => item.id === currentServerId);
+    const canCreate = Boolean(server && currentUser && server.created_by === currentUser.id);
+    const button = document.getElementById('btn-create-channel');
+    button.disabled = !canCreate;
+    button.title = canCreate ? 'Créer un salon' : 'Seul le propriétaire du serveur peut créer un salon';
 }
 
 async function joinRoom(roomId, roomName = null) {
@@ -226,7 +276,7 @@ async function joinRoom(roomId, roomName = null) {
     connectWebSocket(roomId);
 
     // Mettre à jour la liste des salons
-    document.querySelectorAll('#room-list li').forEach(li => {
+    document.querySelectorAll('.space-item').forEach(li => {
         if (li.dataset.id === roomId) {
             li.classList.add('active');
         } else {
@@ -237,7 +287,9 @@ async function joinRoom(roomId, roomName = null) {
 
 async function loadMessages() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/messages/room/${currentRoomId}`);
+        const response = await fetch(`${API_BASE_URL}/api/messages/room/${currentRoomId}`, {
+            headers: authHeaders()
+        });
         if (response.ok) {
             const messages = await response.json();
             renderMessages(messages);
@@ -282,7 +334,8 @@ function connectWebSocket(roomId) {
         ws.close();
     }
 
-    const wsUrl = `${API_BASE_URL}/ws/?token=${generateToken()}`;
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/?token=${encodeURIComponent(accessToken)}`;
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -391,12 +444,6 @@ function decryptMessage(encryptedMessage) {
     }
 }
 
-// Helper functions
-generateToken = () => {
-    // Dans une implémentation réelle, on obtiendrait le token depuis le stockage
-    return 'demo-token';
-}
-
 // Event listeners
 // Login form
 if (dom.loginFormElement) {
@@ -441,6 +488,53 @@ if (dom.btnLogout) {
     });
 }
 
+if (dom.btnAddMember) {
+    dom.btnAddMember.addEventListener('click', async () => {
+        const targetRoomId = currentRoomId || currentServerId;
+        const identifier = dom.memberIdentifier.value.trim();
+        if (!targetRoomId || !identifier) return;
+        const response = await fetch(`${API_BASE_URL}/api/rooms/${targetRoomId}/members`, {
+            method: 'POST',
+            headers: authHeaders({'Content-Type': 'application/json'}),
+            body: JSON.stringify({identifier})
+        });
+        const result = await response.json();
+        dom.memberFeedback.textContent = response.ok ? result.message : (result.detail || 'Ajout impossible');
+        if (response.ok) dom.memberIdentifier.value = '';
+    });
+}
+
+dom.serverSelect.addEventListener('change', async () => {
+    currentServerId = dom.serverSelect.value || null;
+    currentRoomId = null;
+    dom.channelSelect.value = '';
+    dom.channelSelect.disabled = !currentServerId;
+    if (currentServerId) {
+        const server = servers.find(item => item.id === currentServerId);
+        dom.chatRoomName.textContent = server ? server.name : 'Serveur sélectionné';
+        await loadChannels(currentServerId);
+    }
+    updateChannelCreationState();
+});
+
+dom.channelSelect.addEventListener('change', () => {
+    const roomId = dom.channelSelect.value;
+    if (roomId) {
+        const name = dom.channelSelect.options[dom.channelSelect.selectedIndex].textContent;
+        joinRoom(roomId, name);
+    }
+});
+
+dom.groupSelect.addEventListener('change', () => {
+    const roomId = dom.groupSelect.value;
+    if (roomId) joinRoom(roomId, dom.groupSelect.options[dom.groupSelect.selectedIndex].textContent);
+});
+
+dom.directSelect.addEventListener('change', () => {
+    const roomId = dom.directSelect.value;
+    if (roomId) joinRoom(roomId, dom.directSelect.options[dom.directSelect.selectedIndex].textContent);
+});
+
 // Create room
 if (dom.createRoomForm) {
     dom.createRoomForm.addEventListener('submit', async (e) => {
@@ -448,19 +542,26 @@ if (dom.createRoomForm) {
         const name = document.getElementById('room-name').value;
         const description = document.getElementById('room-description').value;
         const roomType = document.getElementById('room-type').value;
+        const parentServer = document.getElementById('parent-server').value || null;
+        const memberIdentifiers = document.getElementById('member-identifiers').value
+            .split(',')
+            .map(identifier => identifier.trim())
+            .filter(Boolean);
 
         try {
             const response = await fetch(`${API_BASE_URL}/api/rooms/`, {
                 method: 'POST',
-                headers: {
+                headers: authHeaders({
                     'Content-Type': 'application/json',
                     'X-CSRF-Token': window.csrfToken || ''
-                },
+                }),
                 body: JSON.stringify({
                     name,
                     description,
                     room_type: roomType,
-                    is_private: false
+                    parent_server: parentServer,
+                    member_identifiers: memberIdentifiers,
+                    is_private: roomType !== 'server' && roomType !== 'channel'
                 })
             });
 
@@ -486,9 +587,32 @@ if (dom.btnCancelRoom) {
 
 if (dom.btnCreateRoom) {
     dom.btnCreateRoom.addEventListener('click', () => {
-        dom.createRoomModal.style.display = 'block';
+        openCreateModal('channel');
     });
 }
+
+function openCreateModal(type) {
+    if (type === 'channel' && dom.btnCreateChannel.disabled) return;
+    const titles = {
+        server: 'Nouveau serveur',
+        channel: 'Nouveau salon',
+        group: 'Nouveau groupe',
+        direct: 'Nouveau message direct'
+    };
+    dom.createRoomTitle.textContent = titles[type];
+    dom.roomType.value = type;
+    dom.parentServer.innerHTML = servers.map(server => `<option value="${server.id}">${server.name}</option>`).join('');
+    dom.parentServer.style.display = type === 'channel' ? 'block' : 'none';
+    dom.parentServerLabel.style.display = type === 'channel' ? 'block' : 'none';
+    dom.memberIdentifiers.style.display = ['group', 'direct'].includes(type) ? 'block' : 'none';
+    dom.memberIdentifiersLabel.style.display = ['group', 'direct'].includes(type) ? 'block' : 'none';
+    dom.createRoomModal.style.display = 'grid';
+}
+
+['server', 'channel', 'group', 'direct'].forEach(type => {
+    const button = document.getElementById(`btn-create-${type}`);
+    if (button) button.addEventListener('click', () => openCreateModal(type));
+});
 
 function closeCreateRoomModal() {
     dom.createRoomModal.style.display = 'none';
@@ -513,4 +637,4 @@ if (dom.btnSend) {
 window.addEventListener('load', init);
 
 // Auto-refresh E2E status
-setInterval(updateE2EStatus, 1000);
+setInterval(updateE2EStatus, 1000);setInterval(updateE2EStatus, 1000);
