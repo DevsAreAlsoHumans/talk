@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Talk - Chat chiffré de bout en bout</title>
+    <link rel="stylesheet" href="/style.css">
+    <meta name="description" content="Application de messagerie chiffrée de bout en bout, type Discord/Telegram">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;">
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header id="app-header">
+            <h1>Talk</h1>
+            <nav id="nav-links">
+                <button id="btn-logout" class="btn-link">Déconnexion</button>
+            </nav>
+        </header>
+
+        <!-- Main content -->
+        <main id="app-main">
+            <!-- Sidebar: rooms list -->
+            <aside id="sidebar">
+                <div id="rooms-list">
+                    <h2>Salons</h2>
+                    <button id="btn-create-room" class="btn-primary">+ Créer un salon</button>
+                    <ul id="room-list"></ul>
+                </div>
+            </aside>
+
+            <!-- Chat area -->
+            <section id="chat-area">
+                <div id="chat-header">
+                    <h2 id="chat-room-name">Sélectionnez un salon</h2>
+                </div>
+                <div id="messages-container" class="messages">
+                    <p class="placeholder">Choisissez un salon pour commencer</p>
+                </div>
+                <div id="message-input-area">
+                    <input type="text" id="message-input" placeholder="Tapez un message..." disabled>
+                    <button id="btn-send" disabled>Envoyer</button>
+                </div>
+            </section>
+
+            <!-- User info -->
+            <aside id="user-panel">
+                <h3>Utilisateur</h3>
+                <div id="user-info"></div>
+                <div id="e2e-status">
+                    <span class="status-indicator" id="e2e-indicator"></span>
+                    <span>Chiffrement E2E</span>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Create room modal -->
+    <div id="create-room-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <h3>Nouveau salon</h3>
+            <form id="create-room-form">
+                <label for="room-name">Nom du salon</label>
+                <input type="text" id="room-name" required maxlength="100">
+                <label for="room-description">Description</label>
+                <textarea id="room-description" maxlength="500"></textarea>
+                <label for="room-type">Type</label>
+                <select id="room-type">
+                    <option value="channel">Salon</option>
+                    <option value="server">Serveur</option>
+                    <option value="group">Groupe</option>
+                    <option value="direct">Message direct</option>
+                </select>
+                <button type="submit" class="btn-primary">Créer</button>
+                <button type="button" id="btn-cancel-room">Annuler</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Login form (shown initially) -->
+    <div id="login-form">
+        <h2>Connexion</h2>
+        <form id="login-form-element">
+            <label for="login-email">Email</label>
+            <input type="email" id="login-email" required>
+            <label for="login-password">Mot de passe</label>
+            <input type="password" id="login-password" required>
+            <button type="submit">Se connecter</button>
+            <p>Pas encore de compte ? <a href="#" id="btn-show-register">S'inscrire</a></p>
+        </form>
+        <form id="register-form" style="display:none;">
+            <label for="reg-username">Nom d'utilisateur</label>
+            <input type="text" id="reg-username" required>
+            <label for="reg-email">Email</label>
+            <input type="email" id="reg-email" required>
+            <label for="reg-password">Mot de passe</label>
+            <input type="password" id="reg-password" required>
+            <button type="submit">S'inscrire</button>
+            <p>Déjà un compte ? <a href="#" id="btn-show-login">Se connecter</a></p
+        </form>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "openrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://openrouter.ai/api/v1",
+        "apiKey": "{env:OPENROUTER_API_KEY}"
+      },
+      "models": {
+        "openrouter/free": { "name": "Free Models Router" },
+        "poolside/laguna-xs-2.1:free": { "name": "Laguna XS 2.1 (free, coding)" }
+      }
+    }
+  },
+  "model": "openrouter/openrouter/free",
+  "default_agent": "orchestrator",
+
+  "agent": {
+    "orchestrator": {
+      "mode": "primary",
+      "description": "Chef d'orchestre du projet talk. Lit PROJECT_LOG.md, découpe les tâches, délègue au bon subagent, ne code jamais lui-même en détail.",
+      "prompt": "Tu es l'orchestrateur du projet talk. Au démarrage, lis uniquement PROJECT_LOG.md (jamais l'historique complet du chat). Découpe chaque demande en sous-tâches et délègue : exploration/lecture de code -> @scout, écriture/implémentation -> @coder, vérification avant commit -> @reviewer. Ne réécris pas de code toi-même sauf tâche triviale. Après chaque sous-tâche terminée, mets à jour PROJECT_LOG.md (une ligne dans Journal, coche la Checklist)."
+    },
+    "scout": {
+      "mode": "all",
+      "description": "Exploration en lecture seule du code existant, sans modification.",
+      "permission": { "edit": "deny", "bash": "deny", "webfetch": "allow" },
+      "prompt": "Tu explores uniquement, tu ne modifies jamais de fichier. Réponds brièvement."
+    },
+    "coder": {
+      "mode": "all",
+      "description": "Implémente une fonctionnalité précise décrite par l'orchestrateur.",
+      "prompt": "Tu implémentes exactement la tâche demandée, rien de plus. Change minimal."
+    },
+    "reviewer": {
+      "mode": "all",
+      "description": "Relit un changement avant commit.",
+      "permission": { "edit": "deny", "bash": "ask" },
+      "prompt": "Tu relis le code produit, tu vérifies sécurité, tests, cohérence avec la checklist. Tu listes uniquement les problèmes trouvés."
+    }
+  }
+}

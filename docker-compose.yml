@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DEBUG=false
+    depends_on:
+      - redis
+    volumes:
+      - ./app:/app/app
+      - ./frontend:/app/frontend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  test:
+    build: .
+    command: pytest tests/ -v --cov=app --cov-report=term-missing
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DEBUG=true
+    depends_on:
+      - redis
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./requirements.txt:/app/requirements.txt
+
+volumes:
+  redis_data:

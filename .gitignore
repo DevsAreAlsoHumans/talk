@@ -1,5 +1,7 @@
 # Secrets locaux — ne jamais committer
 RESUME_PRIVE.md
+AGENTS.md
+PROJECT_LOG.md
 .env
 .env.*
 
