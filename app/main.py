@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
+from app.api.salons import router as salons_router
 from app.config import get_settings
 from app.security.headers import SecurityHeadersMiddleware
 
@@ -25,6 +26,7 @@ def create_app() -> FastAPI:
             allow_headers=["Content-Type", "X-CSRF-Token"],
         )
     app.include_router(auth_router)
+    app.include_router(salons_router)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:
