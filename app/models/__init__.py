@@ -80,6 +80,12 @@ class MemberAdd(BaseModel):
     identifier: str = Field(min_length=1)
 
 
+class RoomUpdate(BaseModel):
+    """Champs modifiables par le propriétaire d'un espace."""
+    name: str = Field(min_length=1, max_length=100)
+    description: Optional[str] = None
+
+
 class Room(BaseModel):
     """Modèle salon/canal."""
     id: str

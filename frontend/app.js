@@ -48,6 +48,10 @@ const dom = {
     settingsModal: document.getElementById('settings-modal'),
     settingsTitle: document.getElementById('settings-title'),
     settingsDescription: document.getElementById('settings-description'),
+    spaceEditing: document.getElementById('space-editing'),
+    settingsName: document.getElementById('settings-name'),
+    settingsDescriptionInput: document.getElementById('settings-description-input'),
+    btnSaveSpace: document.getElementById('btn-save-space'),
     settingsMemberList: document.getElementById('settings-member-list'),
     btnCloseSettings: document.getElementById('btn-close-settings'),
     memberActions: document.getElementById('member-actions'),
@@ -98,6 +102,8 @@ async function login(email, password) {
 
         if (response.ok) {
             const user = await response.json();
+            const previousUserId = currentUser && currentUser.id;
+            if (previousUserId !== user.id) resetWorkspaceState();
             accessToken = user.access_token;
             localStorage.setItem('talk_access_token', accessToken);
             currentUser = user;
@@ -156,19 +162,38 @@ function logout() {
         method: 'POST',
         headers: authHeaders()
     });
+    resetWorkspaceState();
     currentUser = null;
     accessToken = null;
     localStorage.removeItem('talk_access_token');
+    showLoginForm();
+}
+
+function resetWorkspaceState() {
     currentRoomId = null;
+    currentServerId = null;
+    servers = [];
+    spacesById.clear();
     if (ws) {
+        ws.onclose = null;
         ws.close();
         ws = null;
     }
-    showLoginForm();
+    dom.chatRoomName.textContent = 'Sélectionnez un espace';
+    dom.messagesContainer.innerHTML = '<p class="placeholder">Choisissez un espace pour commencer</p>';
+    dom.serverSelect.innerHTML = '<option value="">Sélectionner un serveur</option>';
+    dom.channelSelect.innerHTML = '<option value="">Sélectionner un salon</option>';
+    dom.groupSelect.innerHTML = '<option value="">Sélectionner un groupe</option>';
+    dom.directSelect.innerHTML = '<option value="">Sélectionner une conversation</option>';
+    dom.channelSelect.disabled = true;
+    dom.messageInput.value = '';
+    dom.messageInput.disabled = true;
+    dom.btnSend.disabled = true;
 }
 
 // UI handlers
 function showLoginForm() {
+    resetWorkspaceState();
     dom.loginForm.style.display = 'grid';
     dom.loginFormElement.style.display = 'block';
     dom.registerForm.style.display = 'none';
@@ -264,6 +289,20 @@ async function loadChannels(serverId) {
     }
 }
 
+function clearConversation(title = 'Sélectionnez un serveur') {
+    currentRoomId = null;
+    if (ws) {
+        ws.onclose = null;
+        ws.close();
+        ws = null;
+    }
+    dom.chatRoomName.textContent = title;
+    dom.messagesContainer.innerHTML = '<p class="placeholder">Sélectionnez un salon pour afficher la conversation</p>';
+    dom.messageInput.value = '';
+    dom.messageInput.disabled = true;
+    dom.btnSend.disabled = true;
+}
+
 function updateChannelCreationState() {
     const server = servers.find(item => item.id === currentServerId);
     const canCreate = Boolean(server && currentUser && server.created_by === currentUser.id);
@@ -277,7 +316,13 @@ async function joinRoom(roomId, roomName = null) {
     if (currentRoomId === roomId) return;
 
     currentRoomId = roomId;
-    dom.chatRoomName.textContent = roomName || roomId;
+    const selectedRoom = spacesById.get(roomId);
+    const parentServer = selectedRoom && selectedRoom.parent_server
+        ? spacesById.get(selectedRoom.parent_server)
+        : null;
+    dom.chatRoomName.textContent = parentServer
+        ? `${parentServer.name} / ${roomName || roomId}`
+        : (roomName || roomId);
 
     // Réinitialiser la liste des messages
     dom.messagesContainer.innerHTML = '<p class="placeholder">Chargement des messages...</p>';
@@ -556,11 +601,32 @@ function openSettings(type) {
     dom.memberIdentifier.value = '';
     dom.memberFeedback.textContent = '';
     const canManage = Boolean(space && currentUser && space.created_by === currentUser.id && type !== 'direct');
+    dom.spaceEditing.style.display = canManage ? 'block' : 'none';
+    dom.settingsName.value = space ? space.name : '';
+    dom.settingsDescriptionInput.value = space ? (space.description || '') : '';
     dom.memberActions.style.display = canManage ? 'block' : 'none';
     dom.btnHideDirect.style.display = type === 'direct' ? 'block' : 'none';
     loadSettingsMembers(target.id, type, canManage);
     dom.settingsModal.style.display = 'grid';
 }
+
+dom.btnSaveSpace.addEventListener('click', async () => {
+    if (!settingsRoomId) return;
+    const response = await fetch(`${API_BASE_URL}/api/rooms/${settingsRoomId}`, {
+        method: 'PUT',
+        headers: authHeaders({'Content-Type': 'application/json'}),
+        body: JSON.stringify({
+            name: dom.settingsName.value.trim(),
+            description: dom.settingsDescriptionInput.value.trim() || null
+        })
+    });
+    const result = await response.json();
+    dom.memberFeedback.textContent = response.ok ? 'Espace modifié' : (result.detail || 'Modification impossible');
+    if (response.ok) {
+        await loadRooms();
+        dom.settingsTitle.textContent = `Paramètres de ${result.name}`;
+    }
+});
 
 async function hideDirectConversation() {
     if (!settingsRoomId) return;
@@ -648,19 +714,25 @@ dom.memberIdentifier.addEventListener('input', () => {
 
 dom.serverSelect.addEventListener('change', async () => {
     currentServerId = dom.serverSelect.value || null;
-    currentRoomId = null;
+    clearConversation(currentServerId ? 'Sélectionnez un salon' : 'Sélectionnez un serveur');
     dom.channelSelect.value = '';
     dom.channelSelect.disabled = !currentServerId;
     if (currentServerId) {
         const server = servers.find(item => item.id === currentServerId);
         dom.chatRoomName.textContent = server ? server.name : 'Serveur sélectionné';
         await loadChannels(currentServerId);
+    } else {
+        dom.channelSelect.innerHTML = '<option value="">Sélectionner un salon</option>';
     }
     updateChannelCreationState();
 });
 
 dom.channelSelect.addEventListener('change', () => {
     const roomId = dom.channelSelect.value;
+    if (!roomId) {
+        clearConversation('Sélectionnez un salon');
+        return;
+    }
     if (roomId) {
         const name = dom.channelSelect.options[dom.channelSelect.selectedIndex].textContent;
         joinRoom(roomId, name);
@@ -669,11 +741,19 @@ dom.channelSelect.addEventListener('change', () => {
 
 dom.groupSelect.addEventListener('change', () => {
     const roomId = dom.groupSelect.value;
+    if (!roomId) {
+        clearConversation('Sélectionnez un groupe');
+        return;
+    }
     if (roomId) joinRoom(roomId, dom.groupSelect.options[dom.groupSelect.selectedIndex].textContent);
 });
 
 dom.directSelect.addEventListener('change', () => {
     const roomId = dom.directSelect.value;
+    if (!roomId) {
+        clearConversation('Sélectionnez une conversation');
+        return;
+    }
     if (roomId) joinRoom(roomId, dom.directSelect.options[dom.directSelect.selectedIndex].textContent);
 });
 

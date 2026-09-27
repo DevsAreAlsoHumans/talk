@@ -6,7 +6,7 @@ from fastapi.security import OAuth2PasswordBearer
 from redis.asyncio import Redis
 
 from app.database import get_redis
-from app.models import MemberAdd, Room, RoomCreate, RoomType
+from app.models import MemberAdd, Room, RoomCreate, RoomType, RoomUpdate
 from app.security import SecurityUtils
 from app.services.redis_store import encode, get_json, set_json
 
@@ -163,16 +163,12 @@ async def create_room(room_data: RoomCreate, token: str = Depends(oauth2_scheme)
 
 
 @router.put("/{room_id}", response_model=Room)
-async def update_room(room_id: str, room_data: RoomCreate, token: str = Depends(oauth2_scheme), redis: Redis = Depends(get_redis)):
+async def update_room(room_id: str, room_data: RoomUpdate, token: str = Depends(oauth2_scheme), redis: Redis = Depends(get_redis)):
     user_id = await get_current_user_id(token)
     room = await require_member(redis, room_id, user_id)
     if room["created_by"] != user_id:
         raise HTTPException(status_code=403, detail="Non autorisé")
-    if room["room_type"] != room_data.room_type.value:
-        raise HTTPException(status_code=400, detail="Le type d'espace ne peut pas être modifié")
-    if room["room_type"] == RoomType.CHANNEL.value and room["parent_server"] != room_data.parent_server:
-        raise HTTPException(status_code=400, detail="Le serveur parent ne peut pas être modifié")
-    room.update({"name": room_data.name, "description": room_data.description, "is_private": room_data.is_private})
+    room.update({"name": room_data.name, "description": room_data.description})
     await set_json(redis, ROOM_KEY.format(room_id), room)
     return room
 

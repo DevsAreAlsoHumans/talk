@@ -26,8 +26,11 @@ SESSION_KEY = "session:{}"
 async def register(user_data: UserCreate, redis: Redis = Depends(get_redis)):
     """Inscrit un nouvel utilisateur."""
     email_key = EMAIL_KEY.format(user_data.email.lower())
+    username_key = USERNAME_KEY.format(user_data.username.lower())
     if await redis.exists(email_key):
         raise HTTPException(status_code=400, detail="Cet email est déjà utilisé")
+    if await redis.exists(username_key):
+        raise HTTPException(status_code=400, detail="Ce nom d'utilisateur est déjà utilisé")
 
     # Hash du mot de passe
     hashed_pw = SecurityUtils.hash_password(user_data.password)
@@ -43,11 +46,11 @@ async def register(user_data: UserCreate, redis: Redis = Depends(get_redis)):
     }
     async with redis.pipeline(transaction=True) as pipeline:
         pipeline.set(email_key, user_id, nx=True)
-        pipeline.set(USERNAME_KEY.format(user_data.username.lower()), user_id, nx=True)
+        pipeline.set(username_key, user_id, nx=True)
         pipeline.set(USER_KEY.format(user_id), encode(user))
         results = await pipeline.execute()
     if not results[0] or not results[1]:
-        await redis.delete(USER_KEY.format(user_id))
+        await redis.delete(USER_KEY.format(user_id), email_key)
         raise HTTPException(status_code=400, detail="Utilisateur déjà existant")
 
     return {

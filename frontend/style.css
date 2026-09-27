@@ -106,6 +106,7 @@ button {
 #app-main {
     display: grid;
     grid-template-columns: 260px minmax(0, 1fr) 230px;
+    height: calc(100vh - 72px);
     overflow: hidden;
     min-height: 0;
 }
@@ -274,6 +275,7 @@ button {
 #chat-area {
     display: grid;
     grid-template-rows: auto 1fr auto;
+    height: 100%;
     min-width: 0;
     min-height: 0;
     background: var(--paper);
@@ -420,6 +422,25 @@ button {
     margin-bottom: 18px;
     color: var(--muted);
     font-size: 0.85rem;
+}
+
+#space-editing {
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 18px;
+}
+
+#space-editing textarea {
+    width: 100%;
+    min-height: 70px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+    resize: vertical;
+}
+
+#space-editing .btn-primary {
+    margin-top: 10px;
 }
 
 #settings-member-list {
@@ -620,6 +641,7 @@ button {
 
     #app-main {
         grid-template-columns: 1fr;
+        height: calc(100vh - 62px);
     }
 
     #sidebar {
