@@ -86,16 +86,25 @@ export const api = {
   setDicebearAvatar: (seed) => request("PUT", "/users/me/avatar/dicebear", { seed }),
   uploadAvatar,
   openDm: (username, discriminator) => request("POST", "/rooms/dm", { username, discriminator }),
+  createGroupRoom: (name) => request("POST", "/rooms/groups", { name }),
+  addRoomMember: (roomId, username, discriminator) =>
+    request("POST", `/rooms/${roomId}/members`, { username, discriminator }),
+  removeRoomMember: (roomId, memberId) =>
+    request("DELETE", `/rooms/${roomId}/members/${memberId}`),
   listRooms: () => request("GET", "/rooms"),
   listMessages: (roomId) => request("GET", `/rooms/${roomId}/messages`),
-  sendMessage: (roomId, ciphertext, iv, attachmentId) =>
+  sendMessage: (roomId, ciphertext, iv, attachmentId, keyEpoch) =>
     request("POST", `/rooms/${roomId}/messages`, {
       ciphertext,
       iv,
       attachment_id: attachmentId || null,
+      key_epoch: keyEpoch ?? null,
     }),
   uploadAttachment,
   downloadAttachment,
+  rotateGroupKey: (roomId, wrapperPublicKey, entries) =>
+    request("POST", `/rooms/${roomId}/keys`, { wrapper_public_key: wrapperPublicKey, entries }),
+  getGroupKeys: (roomId) => request("GET", `/rooms/${roomId}/keys`),
   listNotifications: () => request("GET", "/notifications"),
   markNotificationRead: (notificationId) =>
     request("POST", `/notifications/${notificationId}/read`),

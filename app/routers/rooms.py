@@ -20,6 +20,7 @@ from app.models.room import (
     RoomMemberPublic,
     RoomPublic,
 )
+from app.models.room_key import RoomKeyPublic, RoomKeyRotate
 from app.models.user import PeerPublic
 from app.security.sessions import get_current_user_id, require_csrf
 from app.services.notifications import create_notification
@@ -55,7 +56,13 @@ def _to_group_room_public(
         for member in room["members"]
         if member["user_id"] in member_documents
     ]
-    return RoomPublic(id=str(room["_id"]), type="group", name=room["name"], members=members)
+    return RoomPublic(
+        id=str(room["_id"]),
+        type="group",
+        name=room["name"],
+        members=members,
+        key_epoch=room.get("key_epoch", 0),
+    )
 
 
 def _to_attachment_public(document: dict[str, Any]) -> AttachmentPublic:
@@ -76,6 +83,7 @@ def _to_message_public(
         attachment=_to_attachment_public(attachment_document)
         if attachment_document is not None
         else None,
+        key_epoch=document.get("key_epoch"),
         created_at=document["created_at"],
     )
 
@@ -363,6 +371,7 @@ async def send_message(
         "ciphertext": payload.ciphertext,
         "iv": payload.iv,
         "attachment_id": payload.attachment_id,
+        "key_epoch": payload.key_epoch,
         "created_at": datetime.now(UTC),
     }
     result = await db.messages.insert_one(document)
@@ -428,3 +437,68 @@ async def download_attachment(
             status_code=status.HTTP_404_NOT_FOUND, detail="Pièce jointe introuvable."
         )
     return FileResponse(path, media_type="application/octet-stream")
+
+
+@router.post(
+    "/{room_id}/keys", response_model=RoomPublic, dependencies=[Depends(require_csrf)]
+)
+async def rotate_group_key(
+    room_id: str, payload: RoomKeyRotate, user_id: str = Depends(get_current_user_id)
+) -> RoomPublic:
+    """Enregistre une nouvelle rotation de la clé de salon, enveloppée pour chaque membre actuel.
+
+    Le serveur ne voit jamais la clé de salon en clair : il ne fait que stocker, par membre,
+    la clé déjà chiffrée côté client (ECDH avec la clé publique de l'auteur de la rotation).
+    """
+    room = await _get_group_or_400(room_id, user_id)
+    _require_min_role(room, user_id, "admin")
+
+    entry_member_ids = {entry.member_id for entry in payload.entries}
+    if entry_member_ids != set(room["member_ids"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La rotation doit couvrir exactement tous les membres actuels du salon.",
+        )
+
+    new_epoch = room.get("key_epoch", 0) + 1
+    await db.rooms.update_one({"_id": room["_id"]}, {"$set": {"key_epoch": new_epoch}})
+    room["key_epoch"] = new_epoch
+
+    now = datetime.now(UTC)
+    await db.room_keys.insert_many(
+        [
+            {
+                "room_id": room_id,
+                "epoch": new_epoch,
+                "member_id": entry.member_id,
+                "wrapped_key": entry.wrapped_key,
+                "wrapped_key_iv": entry.wrapped_key_iv,
+                "wrapper_public_key": payload.wrapper_public_key,
+                "created_at": now,
+            }
+            for entry in payload.entries
+        ]
+    )
+
+    member_documents = await _fetch_member_documents(room["members"])
+    return _to_group_room_public(room, member_documents)
+
+
+@router.get("/{room_id}/keys", response_model=list[RoomKeyPublic])
+async def list_group_keys(
+    room_id: str, user_id: str = Depends(get_current_user_id)
+) -> list[RoomKeyPublic]:
+    """Liste, pour l'utilisateur courant, les clés de salon reçues à chaque epoch."""
+    await _get_membership_or_404(room_id, user_id)
+
+    cursor = db.room_keys.find({"room_id": room_id, "member_id": user_id}).sort("epoch", 1)
+    documents = await cursor.to_list(length=None)
+    return [
+        RoomKeyPublic(
+            epoch=document["epoch"],
+            wrapped_key=document["wrapped_key"],
+            wrapped_key_iv=document["wrapped_key_iv"],
+            wrapper_public_key=document["wrapper_public_key"],
+        )
+        for document in documents
+    ]

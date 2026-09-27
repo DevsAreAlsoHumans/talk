@@ -47,6 +47,7 @@ class RoomPublic(BaseModel):
     peer: PeerPublic | None = None
     name: str | None = None
     members: list[RoomMemberPublic] | None = None
+    key_epoch: int | None = None
 
 
 class MessageCreate(BaseModel):
@@ -55,6 +56,7 @@ class MessageCreate(BaseModel):
     ciphertext: str
     iv: str
     attachment_id: str | None = None
+    key_epoch: int | None = None
 
 
 class MessagePublic(BaseModel):
@@ -66,4 +68,5 @@ class MessagePublic(BaseModel):
     ciphertext: str
     iv: str
     attachment: AttachmentPublic | None = None
+    key_epoch: int | None = None
     created_at: datetime

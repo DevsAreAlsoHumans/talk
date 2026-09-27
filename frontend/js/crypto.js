@@ -41,6 +41,39 @@ export async function decryptMessage(key, ciphertextBase64, ivBase64) {
   return new TextDecoder().decode(plaintextBuffer);
 }
 
+export async function generateRoomKey() {
+  return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
+// "Wrap" = chiffrer la clé de salon avec le secret ECDH partagé entre l'auteur de la
+// rotation et un membre précis, pour que seul ce membre puisse la récupérer.
+export async function wrapRoomKeyForMember(myPrivateKey, memberPublicKeyRaw, roomKey) {
+  const memberPublicKey = await importPeerPublicKey(memberPublicKeyRaw);
+  const wrappingKey = await deriveSharedKey(myPrivateKey, memberPublicKey);
+  const rawRoomKey = await crypto.subtle.exportKey("raw", roomKey);
+  const { ciphertext, iv } = await encryptBytes(wrappingKey, rawRoomKey);
+  return { wrappedKey: arrayBufferToBase64(ciphertext), wrappedKeyIv: iv };
+}
+
+export async function unwrapRoomKey(
+  myPrivateKey,
+  wrapperPublicKeyRaw,
+  wrappedKeyBase64,
+  wrappedKeyIv
+) {
+  const wrapperPublicKey = await importPeerPublicKey(wrapperPublicKeyRaw);
+  const wrappingKey = await deriveSharedKey(myPrivateKey, wrapperPublicKey);
+  const wrappedBuffer = base64ToArrayBuffer(wrappedKeyBase64);
+  const rawRoomKey = await decryptBytes(wrappingKey, wrappedBuffer, wrappedKeyIv);
+  return crypto.subtle.importKey("raw", rawRoomKey, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
 export async function encryptBytes(key, plainBuffer) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertextBuffer = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plainBuffer);

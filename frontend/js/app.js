@@ -14,6 +14,8 @@ const currentUserLabel = document.getElementById("current-user");
 const currentAvatar = document.getElementById("current-avatar");
 const roomList = document.getElementById("room-list");
 const activeRoomLabel = document.getElementById("active-room-label");
+const addGroupMemberForm = document.getElementById("add-group-member-form");
+const groupMembersList = document.getElementById("group-members-list");
 const messagesList = document.getElementById("messages");
 const sendForm = document.getElementById("send-form");
 const notificationsCount = document.getElementById("notifications-count");
@@ -21,7 +23,9 @@ const notificationsList = document.getElementById("notifications-list");
 
 let keyPair = null;
 let currentUser = null;
-let currentRoom = null; // { id, sharedKey }
+// DM   : { type: "dm", id, sharedKey }
+// Groupe : { type: "group", id, room, keysByEpoch: Map<epoch, CryptoKey>, currentEpoch }
+let currentRoom = null;
 let socket = null;
 let notificationsSocket = null;
 let pendingTotpToken = null;
@@ -88,34 +92,136 @@ async function loadRooms() {
   const rooms = await api.listRooms();
   roomList.innerHTML = "";
   for (const room of rooms) {
-    // Les salons de groupe arrivent avec la phase 8 (E2E de groupe) : on
-    // n'affiche ici que les DM pour ne pas montrer un chat non fonctionnel.
-    if (room.type !== "dm") continue;
     const item = document.createElement("li");
     const button = document.createElement("button");
-    button.textContent = `${room.peer.username}#${room.peer.discriminator}`;
+    button.textContent =
+      room.type === "dm" ? `${room.peer.username}#${room.peer.discriminator}` : `# ${room.name}`;
     button.addEventListener("click", () => openRoom(room));
     item.appendChild(button);
     roomList.appendChild(item);
   }
 }
 
+// Enveloppe une nouvelle clé de salon pour chaque membre actuel (ECDH avec sa clé
+// publique) et l'envoie au serveur : c'est la rotation déclenchée à chaque
+// création de groupe et à chaque changement de membres.
+async function rotateGroupKeyFor(room) {
+  const missingKeyMember = room.members.find((member) => !member.user.public_key);
+  if (missingKeyMember) {
+    throw new Error(
+      `${missingKeyMember.user.username}#${missingKeyMember.user.discriminator} n'a pas encore ` +
+        "de clé publique (il doit se connecter au moins une fois) : rotation impossible."
+    );
+  }
+
+  const pair = await ensureKeyPair();
+  const newRoomKey = await cryptoUtil.generateRoomKey();
+  const myPublicKeyRaw = await cryptoUtil.exportPublicKeyRaw(pair.publicKey);
+
+  const entries = [];
+  for (const member of room.members) {
+    const { wrappedKey, wrappedKeyIv } = await cryptoUtil.wrapRoomKeyForMember(
+      pair.privateKey,
+      member.user.public_key,
+      newRoomKey
+    );
+    entries.push({
+      member_id: member.user.id,
+      wrapped_key: wrappedKey,
+      wrapped_key_iv: wrappedKeyIv,
+    });
+  }
+
+  const updatedRoom = await api.rotateGroupKey(room.id, myPublicKeyRaw, entries);
+  return { updatedRoom, newRoomKey };
+}
+
+async function refreshGroupAfterMembershipChange(updatedRoomFromMembershipCall) {
+  const { updatedRoom, newRoomKey } = await rotateGroupKeyFor(updatedRoomFromMembershipCall);
+  currentRoom.room = updatedRoom;
+  currentRoom.currentEpoch = updatedRoom.key_epoch;
+  currentRoom.keysByEpoch.set(updatedRoom.key_epoch, newRoomKey);
+  renderGroupMembers(updatedRoom);
+}
+
+async function loadGroupKeys(room, myPrivateKey) {
+  const entries = await api.getGroupKeys(room.id);
+  const keysByEpoch = new Map();
+  for (const entry of entries) {
+    try {
+      const key = await cryptoUtil.unwrapRoomKey(
+        myPrivateKey,
+        entry.wrapper_public_key,
+        entry.wrapped_key,
+        entry.wrapped_key_iv
+      );
+      keysByEpoch.set(entry.epoch, key);
+    } catch {
+      // Une epoch illisible ne bloque pas les autres (ne devrait pas arriver en pratique).
+    }
+  }
+  return keysByEpoch;
+}
+
+function renderGroupMembers(room) {
+  groupMembersList.innerHTML = "";
+  const myRole = room.members.find((member) => member.user.id === currentUser.id)?.role;
+  for (const member of room.members) {
+    const item = document.createElement("li");
+    item.textContent = `${member.user.username}#${member.user.discriminator} (${member.role}) `;
+    if ((myRole === "owner" || myRole === "admin") && member.user.id !== currentUser.id) {
+      const kickButton = document.createElement("button");
+      kickButton.textContent = "Retirer";
+      kickButton.addEventListener("click", () => kickMember(member.user.id));
+      item.appendChild(kickButton);
+    }
+    groupMembersList.appendChild(item);
+  }
+}
+
+async function kickMember(memberId) {
+  await api.removeRoomMember(currentRoom.id, memberId);
+  const updatedRoom = {
+    ...currentRoom.room,
+    members: currentRoom.room.members.filter((member) => member.user.id !== memberId),
+  };
+  await refreshGroupAfterMembershipChange(updatedRoom);
+  await loadRooms();
+}
+
 async function openRoom(room) {
   if (socket) socket.close();
   const pair = await ensureKeyPair();
 
-  if (!room.peer.public_key) {
-    activeRoomLabel.textContent = `${room.peer.username}#${room.peer.discriminator} n'a pas encore de clé publique (il doit se connecter au moins une fois).`;
-    sendForm.hidden = true;
-    currentRoom = null;
-    return;
+  if (room.type === "dm") {
+    addGroupMemberForm.hidden = true;
+    groupMembersList.innerHTML = "";
+
+    if (!room.peer.public_key) {
+      activeRoomLabel.textContent = `${room.peer.username}#${room.peer.discriminator} n'a pas encore de clé publique (il doit se connecter au moins une fois).`;
+      sendForm.hidden = true;
+      currentRoom = null;
+      return;
+    }
+
+    const peerPublicKey = await cryptoUtil.importPeerPublicKey(room.peer.public_key);
+    const sharedKey = await cryptoUtil.deriveSharedKey(pair.privateKey, peerPublicKey);
+    currentRoom = { type: "dm", id: room.id, sharedKey };
+    activeRoomLabel.textContent = `DM avec ${room.peer.username}#${room.peer.discriminator}`;
+  } else {
+    const keysByEpoch = await loadGroupKeys(room, pair.privateKey);
+    currentRoom = {
+      type: "group",
+      id: room.id,
+      room,
+      keysByEpoch,
+      currentEpoch: room.key_epoch,
+    };
+    activeRoomLabel.textContent = `Groupe : ${room.name}`;
+    renderGroupMembers(room);
+    addGroupMemberForm.hidden = false;
   }
 
-  const peerPublicKey = await cryptoUtil.importPeerPublicKey(room.peer.public_key);
-  const sharedKey = await cryptoUtil.deriveSharedKey(pair.privateKey, peerPublicKey);
-  currentRoom = { id: room.id, sharedKey };
-
-  activeRoomLabel.textContent = `DM avec ${room.peer.username}#${room.peer.discriminator}`;
   sendForm.hidden = false;
   messagesList.innerHTML = "";
 
@@ -131,12 +237,19 @@ async function openRoom(room) {
   });
 }
 
+function keyForMessage(message) {
+  if (currentRoom.type === "dm") return currentRoom.sharedKey;
+  return currentRoom.keysByEpoch.get(message.key_epoch);
+}
+
 async function renderMessage(message) {
   const item = document.createElement("li");
   const author = message.sender_id === currentUser.id ? "Moi" : "Eux";
   try {
+    const key = keyForMessage(message);
+    if (!key) throw new Error("clé manquante pour cette epoch");
     const plaintext = message.ciphertext
-      ? await cryptoUtil.decryptMessage(currentRoom.sharedKey, message.ciphertext, message.iv)
+      ? await cryptoUtil.decryptMessage(key, message.ciphertext, message.iv)
       : "";
     item.textContent = plaintext ? `${author} : ${plaintext}` : `${author} :`;
   } catch {
@@ -154,12 +267,9 @@ async function renderMessage(message) {
 }
 
 async function downloadAndDecryptAttachment(message) {
+  const key = keyForMessage(message);
   const ciphertextBuffer = await api.downloadAttachment(currentRoom.id, message.attachment.id);
-  const plainBuffer = await cryptoUtil.decryptBytes(
-    currentRoom.sharedKey,
-    ciphertextBuffer,
-    message.attachment.iv
-  );
+  const plainBuffer = await cryptoUtil.decryptBytes(key, ciphertextBuffer, message.attachment.iv);
   // Le nom/type d'origine n'est jamais transmis en clair au serveur (limitation assumée) :
   // le fichier est téléchargé sous un nom générique.
   const blob = new Blob([plainBuffer]);
@@ -332,6 +442,32 @@ document.getElementById("open-dm-form").addEventListener("submit", async (event)
   await openRoom(room);
 });
 
+document.getElementById("create-group-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const room = await api.createGroupRoom(form.get("name"));
+  event.target.reset();
+
+  const { updatedRoom } = await rotateGroupKeyFor(room);
+  await loadRooms();
+  await openRoom(updatedRoom);
+});
+
+addGroupMemberForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!currentRoom || currentRoom.type !== "group") return;
+  const form = new FormData(event.target);
+  const updatedRoomFromAdd = await api.addRoomMember(
+    currentRoom.id,
+    form.get("username"),
+    form.get("discriminator")
+  );
+  event.target.reset();
+
+  await refreshGroupAfterMembershipChange(updatedRoomFromAdd);
+  await loadRooms();
+});
+
 sendForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!currentRoom) return;
@@ -340,10 +476,14 @@ sendForm.addEventListener("submit", async (event) => {
   const file = form.get("file");
   event.target.reset();
 
+  const key =
+    currentRoom.type === "dm" ? currentRoom.sharedKey : currentRoom.keysByEpoch.get(currentRoom.currentEpoch);
+  const epoch = currentRoom.type === "group" ? currentRoom.currentEpoch : null;
+
   let attachmentId = null;
   if (file && file.size > 0) {
     const fileBuffer = await file.arrayBuffer();
-    const encryptedFile = await cryptoUtil.encryptBytes(currentRoom.sharedKey, fileBuffer);
+    const encryptedFile = await cryptoUtil.encryptBytes(key, fileBuffer);
     const attachment = await api.uploadAttachment(
       currentRoom.id,
       new Blob([encryptedFile.ciphertext]),
@@ -352,8 +492,8 @@ sendForm.addEventListener("submit", async (event) => {
     attachmentId = attachment.id;
   }
 
-  const { ciphertext, iv } = await cryptoUtil.encryptMessage(currentRoom.sharedKey, text);
-  const message = await api.sendMessage(currentRoom.id, ciphertext, iv, attachmentId);
+  const { ciphertext, iv } = await cryptoUtil.encryptMessage(key, text);
+  const message = await api.sendMessage(currentRoom.id, ciphertext, iv, attachmentId, epoch);
   await renderMessage(message);
 });
 

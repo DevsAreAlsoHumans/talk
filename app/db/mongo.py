@@ -19,6 +19,9 @@ async def ensure_indexes() -> None:
         [("requester_id", ASCENDING), ("target_id", ASCENDING)], unique=True
     )
     await db.notifications.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+    await db.room_keys.create_index(
+        [("room_id", ASCENDING), ("epoch", ASCENDING), ("member_id", ASCENDING)], unique=True
+    )
 
 
 async def find_user_by_tag(username: str, discriminator: str) -> dict[str, Any] | None:

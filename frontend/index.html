@@ -95,10 +95,23 @@
           <button type="submit">Ouvrir le DM</button>
         </form>
 
+        <form id="create-group-form">
+          <input name="name" placeholder="Nom du groupe" required />
+          <button type="submit">Créer un groupe</button>
+        </form>
+
         <ul id="room-list"></ul>
 
         <div id="active-room">
-          <p id="active-room-label">Choisis ou crée un DM.</p>
+          <p id="active-room-label">Choisis ou crée un salon.</p>
+
+          <form id="add-group-member-form" hidden>
+            <input name="username" placeholder="Pseudo à ajouter" required />
+            <input name="discriminator" placeholder="0000" pattern="\d{4}" required />
+            <button type="submit">Ajouter au groupe</button>
+          </form>
+          <ul id="group-members-list"></ul>
+
           <ul id="messages"></ul>
           <form id="send-form" hidden>
             <input name="text" placeholder="Message..." autocomplete="off" />
