@@ -70,3 +70,11 @@ class MessagePublic(BaseModel):
     attachment: AttachmentPublic | None = None
     key_epoch: int | None = None
     created_at: datetime
+
+
+class MessageDeletedEvent(BaseModel):
+    """Diffusé en temps réel pour qu'un message supprimé disparaisse chez les autres membres."""
+
+    event: str = "message_deleted"
+    room_id: str
+    message_id: str

@@ -102,6 +102,8 @@ export const api = {
       attachment_id: attachmentId || null,
       key_epoch: keyEpoch ?? null,
     }),
+  deleteMessage: (roomId, messageId) =>
+    request("DELETE", `/rooms/${roomId}/messages/${messageId}`),
   uploadAttachment,
   downloadAttachment,
   rotateGroupKey: (roomId, wrapperPublicKey, entries) =>

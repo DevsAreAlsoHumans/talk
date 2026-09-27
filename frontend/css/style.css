@@ -446,6 +446,33 @@ button {
   padding: 0.35rem 0.6rem;
 }
 
+.message-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.message-delete {
+  display: block;
+  flex-shrink: 0;
+  margin-top: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  opacity: 0;
+}
+
+.messages-list li:hover .message-delete {
+  opacity: 1;
+}
+
+.message-delete:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
 .attachment-image {
   display: block;
   max-width: 320px;

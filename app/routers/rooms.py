@@ -15,6 +15,7 @@ from app.models.room import (
     GroupRoomCreate,
     MemberRoleUpdate,
     MessageCreate,
+    MessageDeletedEvent,
     MessagePublic,
     RoomCreate,
     RoomMemberCreate,
@@ -436,6 +437,48 @@ async def send_message(
             )
 
     return message
+
+
+@router.delete(
+    "/{room_id}/messages/{message_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_csrf)],
+)
+async def delete_message(
+    room_id: str, message_id: str, user_id: str = Depends(get_current_user_id)
+) -> None:
+    """Supprime un message (et sa pièce jointe éventuelle), réservé à son auteur."""
+    await _get_membership_or_404(room_id, user_id)
+
+    try:
+        object_id = ObjectId(message_id)
+    except InvalidId as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message introuvable."
+        ) from exc
+
+    document = await db.messages.find_one({"_id": object_id, "room_id": room_id})
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message introuvable.")
+    if document["sender_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seul l'auteur peut supprimer son message.",
+        )
+
+    await db.messages.delete_one({"_id": object_id})
+
+    attachment_id = document.get("attachment_id")
+    if attachment_id is not None:
+        attachment_document = await db.attachments.find_one({"_id": attachment_id})
+        if attachment_document is not None:
+            await db.attachments.delete_one({"_id": attachment_id})
+            blob_path(attachment_id).unlink(missing_ok=True)
+
+    await redis_client.publish(
+        room_channel(room_id),
+        MessageDeletedEvent(room_id=room_id, message_id=message_id).model_dump_json(),
+    )
 
 
 @router.post(

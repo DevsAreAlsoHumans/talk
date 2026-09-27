@@ -193,6 +193,10 @@ async function openRoom(room) {
   }
 
   socket = connectRoomSocket(room.id, (message) => {
+    if (message.event === "message_deleted") {
+      removeMessageFromDom(message.message_id);
+      return;
+    }
     if (message.sender_id !== currentUser.id) {
       renderMessage(message);
     }
@@ -213,19 +217,44 @@ function authorLabel(senderId) {
   return member ? `${member.user.username}#${member.user.discriminator}` : "Inconnu";
 }
 
+function removeMessageFromDom(messageId) {
+  messagesList.querySelector(`li[data-message-id="${messageId}"]`)?.remove();
+}
+
+async function deleteOwnMessage(message) {
+  await api.deleteMessage(currentRoom.id, message.id);
+  removeMessageFromDom(message.id);
+}
+
 async function renderMessage(message) {
   const item = document.createElement("li");
+  item.dataset.messageId = message.id;
   const author = authorLabel(message.sender_id);
+
+  const row = document.createElement("div");
+  row.className = "message-row";
+  const label = document.createElement("span");
   try {
     const key = keyForMessage(message);
     if (!key) throw new Error("clé manquante pour cette epoch");
     const plaintext = message.ciphertext
       ? await cryptoUtil.decryptMessage(key, message.ciphertext, message.iv)
       : "";
-    item.textContent = plaintext ? `${author} : ${plaintext}` : `${author} :`;
+    label.textContent = plaintext ? `${author} : ${plaintext}` : `${author} :`;
   } catch {
-    item.textContent = "[message illisible]";
+    label.textContent = "[message illisible]";
   }
+  row.appendChild(label);
+
+  if (message.sender_id === currentUser.id) {
+    const deleteButton = document.createElement("button");
+    deleteButton.textContent = "✕";
+    deleteButton.className = "message-delete";
+    deleteButton.title = "Supprimer le message";
+    deleteButton.addEventListener("click", () => deleteOwnMessage(message));
+    row.appendChild(deleteButton);
+  }
+  item.appendChild(row);
 
   if (message.attachment) {
     if (message.attachment.content_type?.startsWith("image/")) {

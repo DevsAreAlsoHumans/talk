@@ -159,3 +159,64 @@ async def test_sending_message_publishes_to_redis_channel() -> None:
         finally:
             await pubsub.unsubscribe(room_channel(room_id))
             await pubsub.aclose()
+
+
+async def test_sender_can_delete_own_message() -> None:
+    async with (
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as alice_client,
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as bob_client,
+    ):
+        await _register(alice_client, "iris", "iris-pubkey")
+        bob = await _register(bob_client, "jack", "jack-pubkey")
+
+        create_response = await alice_client.post(
+            "/rooms/dm", json={"username": "jack", "discriminator": bob["discriminator"]}
+        )
+        room_id = create_response.json()["id"]
+
+        csrf_token = alice_client.cookies.get("csrf_token")
+        send_response = await alice_client.post(
+            f"/rooms/{room_id}/messages",
+            json={"ciphertext": "cipher-to-delete", "iv": "iv"},
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        message_id = send_response.json()["id"]
+
+        delete_response = await alice_client.delete(
+            f"/rooms/{room_id}/messages/{message_id}", headers={"X-CSRF-Token": csrf_token}
+        )
+        assert delete_response.status_code == 204
+
+        history = (await bob_client.get(f"/rooms/{room_id}/messages")).json()
+        assert history == []
+
+
+async def test_cannot_delete_someone_elses_message() -> None:
+    async with (
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as alice_client,
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as bob_client,
+    ):
+        await _register(alice_client, "kate", "kate-pubkey")
+        bob = await _register(bob_client, "liam", "liam-pubkey")
+
+        create_response = await alice_client.post(
+            "/rooms/dm", json={"username": "liam", "discriminator": bob["discriminator"]}
+        )
+        room_id = create_response.json()["id"]
+
+        csrf_alice = alice_client.cookies.get("csrf_token")
+        send_response = await alice_client.post(
+            f"/rooms/{room_id}/messages",
+            json={"ciphertext": "cipher-protected", "iv": "iv"},
+            headers={"X-CSRF-Token": csrf_alice},
+        )
+        message_id = send_response.json()["id"]
+
+        csrf_bob = bob_client.cookies.get("csrf_token")
+        response = await bob_client.delete(
+            f"/rooms/{room_id}/messages/{message_id}", headers={"X-CSRF-Token": csrf_bob}
+        )
+        assert response.status_code == 403
+
+        history = (await bob_client.get(f"/rooms/{room_id}/messages")).json()
+        assert len(history) == 1
