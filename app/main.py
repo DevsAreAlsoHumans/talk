@@ -4,9 +4,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
+from app.api.keys import router as keys_router
+from app.api.messages import router as messages_router
 from app.api.salons import router as salons_router
 from app.config import get_settings
 from app.security.headers import SecurityHeadersMiddleware
+from app.ws import router as ws_router
 
 
 def create_app() -> FastAPI:
@@ -27,6 +30,9 @@ def create_app() -> FastAPI:
         )
     app.include_router(auth_router)
     app.include_router(salons_router)
+    app.include_router(keys_router)
+    app.include_router(messages_router)
+    app.include_router(ws_router)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:

@@ -94,13 +94,17 @@ def rename_salon(redis: Redis, salon_id: str, name: str) -> None:
     redis.hset(_salon_key(salon_id), "name", name)
 
 
+def member_count(redis: Redis, salon_id: str) -> int:
+    return int(redis.scard(_members_key(salon_id)))
+
+
 def list_salons(redis: Redis, user_id: str) -> list[dict]:
     salons: list[dict] = []
     for salon_id in redis.smembers(_user_salons_key(user_id)):
         salon = get_salon(redis, salon_id)
         if salon is not None:
             salon["role"] = get_role(redis, salon_id, user_id) or ROLE_MEMBER
-            salon["member_count"] = redis.scard(_members_key(salon_id))
+            salon["member_count"] = member_count(redis, salon_id)
             salons.append(salon)
     return sorted(salons, key=lambda item: item["created_at"])
 
@@ -230,10 +234,6 @@ def remove_channel_member(redis: Redis, channel_id: str, user_id: str) -> None:
 
 def is_channel_member(redis: Redis, channel_id: str, user_id: str) -> bool:
     return bool(redis.sismember(_channel_members_key(channel_id), user_id))
-
-
-def member_count(redis: Redis, salon_id: str) -> int:
-    return int(redis.scard(_members_key(salon_id)))
 
 
 def list_channel_member_ids(redis: Redis, channel_id: str) -> list[str]:

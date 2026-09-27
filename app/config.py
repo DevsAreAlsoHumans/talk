@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     rate_limit_register_max: int = 5
     rate_limit_register_window: int = 3600
 
+    # Anti spam sur la messagerie
+    rate_limit_message_max: int = 30
+    rate_limit_message_window: int = 10
+
     cors_origins: list[str] = Field(default_factory=list)
 
 

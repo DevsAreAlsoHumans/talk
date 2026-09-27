@@ -1,4 +1,4 @@
-"""Dependances partagees : session courante et garde CSRF."""
+"""Dependances partagees : session courante, garde CSRF, acces salons/canaux."""
 
 from fastapi import Depends, HTTPException, Request, status
 from redis import Redis
@@ -36,7 +36,7 @@ def optional_user(request: Request, redis: Redis = Depends(get_redis)) -> dict |
 def require_csrf(
     request: Request,
     redis: Redis = Depends(get_redis),
-    user: dict | None = Depends(optional_user),
+    _user: dict | None = Depends(optional_user),
 ) -> None:
     """Verifie la double soumission du jeton CSRF sur toute mutation."""
     session_token = request.cookies.get(SESSION_COOKIE)
@@ -50,6 +50,9 @@ def require_csrf(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Jeton CSRF invalide ou manquant.",
         )
+
+
+# --- Acces aux salons et canaux -------------------------------------------
 
 
 def salon_role(
@@ -89,3 +92,10 @@ def channel_access(
     if channel is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Canal introuvable.")
     return channel
+
+
+def require_moderator_role(
+    channel: dict = Depends(channel_access),
+    role: str = Depends(salon_role),
+) -> str:
+    return _require_min_role(role, ROLE_MODERATOR)

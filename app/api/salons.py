@@ -7,6 +7,7 @@ from app.api.deps import (
     channel_access,
     current_user,
     require_csrf,
+    require_moderator_role,
     salon_moderator,
     salon_owner,
     salon_role,
@@ -233,12 +234,10 @@ def get_channel(channel: dict = Depends(channel_access)) -> ChannelPublic:
 def update_channel(
     channel_id: str,
     payload: ChannelUpdate,
+    channel: dict = Depends(channel_access),
     redis: Redis = Depends(get_redis),
-    user: dict = Depends(current_user),
-    role: str = Depends(salon_role),
+    role: str = Depends(require_moderator_role),
 ) -> ChannelPublic:
-    if salons.ROLE_RANK[role] < salons.ROLE_RANK[salons.ROLE_MODERATOR]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Droits insuffisants.")
     fields = payload.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(
@@ -267,11 +266,8 @@ def update_channel(
 def delete_channel(
     channel: dict = Depends(channel_access),
     redis: Redis = Depends(get_redis),
-    user: dict = Depends(current_user),
-    role: str = Depends(salon_role),
+    _role: str = Depends(require_moderator_role),
 ) -> MessageResponse:
-    if salons.ROLE_RANK[role] < salons.ROLE_RANK[salons.ROLE_MODERATOR]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Droits insuffisants.")
     if len(salons.list_channels(redis, channel["salon_id"])) <= 1:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -290,16 +286,13 @@ def add_channel_member(
     payload: MemberAdd,
     channel: dict = Depends(channel_access),
     redis: Redis = Depends(get_redis),
-    user: dict = Depends(current_user),
-    role: str = Depends(salon_role),
+    _role: str = Depends(require_moderator_role),
 ) -> MessageResponse:
     if channel["kind"] != salons.KIND_PRIVATE:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Seuls les canaux prives ont une liste d'acces.",
         )
-    if salons.ROLE_RANK[role] < salons.ROLE_RANK[salons.ROLE_MODERATOR]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Droits insuffisants.")
     target = users.get_by_username(redis, payload.username)
     if target is None or salons.get_role(redis, channel["salon_id"], target["id"]) is None:
         raise HTTPException(
@@ -318,11 +311,8 @@ def remove_channel_member(
     user_id: str,
     channel: dict = Depends(channel_access),
     redis: Redis = Depends(get_redis),
-    user: dict = Depends(current_user),
-    role: str = Depends(salon_role),
+    _role: str = Depends(require_moderator_role),
 ) -> MessageResponse:
-    if salons.ROLE_RANK[role] < salons.ROLE_RANK[salons.ROLE_MODERATOR]:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Droits insuffisants.")
     if not salons.is_channel_member(redis, channel["id"], user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Membre introuvable.")
     salons.remove_channel_member(redis, channel["id"], user_id)

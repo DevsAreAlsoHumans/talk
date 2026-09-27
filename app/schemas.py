@@ -62,6 +62,8 @@ class MessageResponse(BaseModel):
     detail: str = Field(max_length=200)
 
 
+# --- Salons et canaux -----------------------------------------------------
+
 SalonName = Annotated[
     str,
     StringConstraints(
