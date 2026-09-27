@@ -144,6 +144,7 @@ class Message(BaseModel):
     id: str
     room_id: str
     user_id: str
+    author_username: Optional[str] = None
     content: str
     message_type: MessageType = MessageType.TEXT
     parent_message_id: Optional[str] = None

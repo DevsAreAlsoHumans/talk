@@ -28,28 +28,40 @@
                 <div id="rooms-list">
                     <div class="section-heading">
                         <h2>Serveurs</h2>
-                        <button id="btn-create-server" class="icon-button" type="button" title="Créer un serveur">+</button>
+                        <div class="section-actions">
+                            <button id="btn-server-settings" class="settings-button" type="button" title="Paramètres du serveur">Paramètres</button>
+                            <button id="btn-create-server" class="icon-button" type="button" title="Créer un serveur">+</button>
+                        </div>
                     </div>
                     <select id="server-select" class="space-select">
                         <option value="">Sélectionner un serveur</option>
                     </select>
                     <div class="section-heading">
                         <h2>Salons du serveur</h2>
-                        <button id="btn-create-channel" class="icon-button" type="button" title="Créer un salon">+</button>
+                        <div class="section-actions">
+                            <button id="btn-channel-settings" class="settings-button" type="button" title="Paramètres du salon">Paramètres</button>
+                            <button id="btn-create-channel" class="icon-button" type="button" title="Créer un salon">+</button>
+                        </div>
                     </div>
                     <select id="channel-select" class="space-select" disabled>
                         <option value="">Sélectionner un salon</option>
                     </select>
                     <div class="section-heading">
                         <h2>Groupes</h2>
-                        <button id="btn-create-group" class="icon-button" type="button" title="Créer un groupe">+</button>
+                        <div class="section-actions">
+                            <button id="btn-group-settings" class="settings-button" type="button" title="Paramètres du groupe">Paramètres</button>
+                            <button id="btn-create-group" class="icon-button" type="button" title="Créer un groupe">+</button>
+                        </div>
                     </div>
                     <select id="group-select" class="space-select">
                         <option value="">Sélectionner un groupe</option>
                     </select>
                     <div class="section-heading">
                         <h2>Messages directs</h2>
-                        <button id="btn-create-direct" class="icon-button" type="button" title="Créer un message direct">+</button>
+                        <div class="section-actions">
+                            <button id="btn-direct-settings" class="settings-button" type="button" title="Paramètres du message direct">Paramètres</button>
+                            <button id="btn-create-direct" class="icon-button" type="button" title="Créer un message direct">+</button>
+                        </div>
                     </div>
                     <select id="direct-select" class="space-select">
                         <option value="">Sélectionner une conversation</option>
@@ -75,15 +87,10 @@
             <aside id="user-panel">
                 <h3>Utilisateur</h3>
                 <div id="user-info"></div>
+                <button id="btn-logout-panel" class="btn-logout-panel" type="button">Se déconnecter</button>
                 <div id="e2e-status">
                     <span class="status-indicator" id="e2e-indicator"></span>
                     <span>Chiffrement E2E</span>
-                </div>
-                <div id="member-management">
-                    <h3>Ajouter un membre</h3>
-                    <input type="text" id="member-identifier" placeholder="Nom ou email">
-                    <button id="btn-add-member" class="btn-primary" type="button">Ajouter</button>
-                    <p id="member-feedback"></p>
                 </div>
             </aside>
         </main>
@@ -98,13 +105,6 @@
                 <input type="text" id="room-name" required maxlength="100">
                 <label for="room-description">Description</label>
                 <textarea id="room-description" maxlength="500"></textarea>
-                <label for="room-type">Type</label>
-                <select id="room-type">
-                    <option value="server">Serveur</option>
-                    <option value="channel">Salon</option>
-                    <option value="group">Groupe</option>
-                    <option value="direct">Message direct</option>
-                </select>
                 <label id="parent-server-label" for="parent-server">Serveur parent du salon</label>
                 <select id="parent-server"></select>
                 <label id="member-identifiers-label" for="member-identifiers">Membres invités</label>
@@ -112,6 +112,18 @@
                 <button type="submit" class="btn-primary">Créer</button>
                 <button type="button" id="btn-cancel-room">Annuler</button>
             </form>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <h3 id="settings-title">Paramètres</h3>
+            <p id="settings-description"></p>
+            <label for="member-identifier">Ajouter un membre</label>
+            <input type="text" id="member-identifier" placeholder="Nom d'utilisateur ou email">
+            <button id="btn-add-member" class="btn-primary" type="button">Ajouter le membre</button>
+            <p id="member-feedback"></p>
+            <button id="btn-close-settings" type="button">Fermer</button>
         </div>
     </div>
 
@@ -134,7 +146,7 @@
             <label for="reg-password">Mot de passe</label>
             <input type="password" id="reg-password" required>
             <button type="submit">S'inscrire</button>
-            <p>Déjà un compte ? <a href="#" id="btn-show-login">Se connecter</a></p
+            <p>Déjà un compte ? <a href="#" id="btn-show-login">Se connecter</a></p>
         </form>
     </div>
 

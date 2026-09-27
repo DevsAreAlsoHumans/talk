@@ -10,6 +10,8 @@ let servers = [];
 let ws = null;
 let e2eEnabled = true;
 let accessToken = localStorage.getItem('talk_access_token');
+let creationType = 'server';
+let settingsRoomId = null;
 
 function authHeaders(headers = {}) {
     if (accessToken) {
@@ -25,6 +27,7 @@ const dom = {
     btnShowLogin: document.getElementById('btn-show-login'),
     btnShowRegister: document.getElementById('btn-show-register'),
     btnLogout: document.getElementById('btn-logout'),
+    btnLogoutPanel: document.getElementById('btn-logout-panel'),
     loginFormElement: document.getElementById('login-form-element'),
     registerFormElement: document.getElementById('register-form'),
     serverSelect: document.getElementById('server-select'),
@@ -40,8 +43,11 @@ const dom = {
     memberIdentifier: document.getElementById('member-identifier'),
     btnAddMember: document.getElementById('btn-add-member'),
     memberFeedback: document.getElementById('member-feedback'),
+    settingsModal: document.getElementById('settings-modal'),
+    settingsTitle: document.getElementById('settings-title'),
+    settingsDescription: document.getElementById('settings-description'),
+    btnCloseSettings: document.getElementById('btn-close-settings'),
     createRoomModal: document.getElementById('create-room-modal'),
-    roomType: document.getElementById('room-type'),
     createRoomTitle: document.getElementById('create-room-title'),
     parentServer: document.getElementById('parent-server'),
     parentServerLabel: document.getElementById('parent-server-label'),
@@ -271,6 +277,8 @@ async function joinRoom(roomId, roomName = null) {
 
     // Charger les messages
     await loadMessages();
+    dom.messageInput.disabled = false;
+    dom.btnSend.disabled = false;
 
     // Connecter WebSocket
     connectWebSocket(roomId);
@@ -312,13 +320,17 @@ function renderMessages(messages) {
             messageEl.textContent = message.content;
         } else {
             messageEl.className = 'message chat';
-            messageEl.innerHTML = `
-                <div class="author">${message.user_id}</div>
-                <div class="content" title="E2E: ${message.encrypted ? 'Oui' : 'Non'}">
-                    ${message.content}
-                </div>
-                <div class="time">${new Date(message.created_at).toLocaleTimeString()}</div>
-            `;
+            const author = document.createElement('div');
+            author.className = 'author';
+            author.textContent = message.author_username || 'Utilisateur';
+            const content = document.createElement('div');
+            content.className = 'content';
+            content.title = `E2E: ${message.encrypted ? 'Oui' : 'Non'}`;
+            content.textContent = message.encrypted ? decryptMessage(message.content) : message.content;
+            const time = document.createElement('div');
+            time.className = 'time';
+            time.textContent = new Date(message.created_at).toLocaleTimeString();
+            messageEl.append(author, content, time);
         }
 
         dom.messagesContainer.appendChild(messageEl);
@@ -353,8 +365,7 @@ function connectWebSocket(roomId) {
             if (data.type === 'joined_room') {
                 dom.messageInput.disabled = false;
                 dom.btnSend.disabled = false;
-            } else if (data.type === 'message_sent') {
-                // Le message a été envoyé, on pourrait actualiser
+            } else if (data.type === 'message') {
                 loadMessages();
             } else if (data.type === 'pong') {
                 // Ping/pong pour garder la connexion active
@@ -366,8 +377,6 @@ function connectWebSocket(roomId) {
 
     ws.onclose = () => {
         console.log('WebSocket déconnecté');
-        dom.messageInput.disabled = true;
-        dom.btnSend.disabled = true;
 
         // Essayer de se reconnecter après un délai
         setTimeout(() => {
@@ -382,7 +391,7 @@ function connectWebSocket(roomId) {
     };
 }
 
-function sendMessage() {
+async function sendMessage() {
     const content = dom.messageInput.value.trim();
     if (!content || !currentRoomId) return;
 
@@ -392,14 +401,23 @@ function sendMessage() {
         encrypted: e2eEnabled
     };
 
-    // Envoyer via WebSocket
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            action: 'send_message',
-            room_id: currentRoomId,
-            content: messageData.content,
-            encrypted: e2eEnabled
-        }));
+    dom.btnSend.disabled = true;
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/messages/`, {
+            method: 'POST',
+            headers: authHeaders({'Content-Type': 'application/json'}),
+            body: JSON.stringify(messageData)
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Message non envoyé');
+        }
+        await loadMessages();
+    } catch (error) {
+        console.error('Erreur d’envoi du message:', error);
+        alert(error.message);
+    } finally {
+        dom.btnSend.disabled = false;
     }
 
     dom.messageInput.value = '';
@@ -430,7 +448,7 @@ function encryptMessage(message) {
 
     // Dans une implémentation réelle, il faudrait un échange de clés
     // Pour l'exemple, on simule simplement le chiffrement
-    return btoa(message);
+    return btoa(String.fromCharCode(...new TextEncoder().encode(message)));
 }
 
 function decryptMessage(encryptedMessage) {
@@ -438,7 +456,8 @@ function decryptMessage(encryptedMessage) {
     if (!crypto || !e2eEnabled) return encryptedMessage;
 
     try {
-        return atob(encryptedMessage);
+        const bytes = Uint8Array.from(atob(encryptedMessage), character => character.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
     } catch (e) {
         return encryptedMessage;
     }
@@ -488,9 +507,13 @@ if (dom.btnLogout) {
     });
 }
 
+if (dom.btnLogoutPanel) {
+    dom.btnLogoutPanel.addEventListener('click', logout);
+}
+
 if (dom.btnAddMember) {
     dom.btnAddMember.addEventListener('click', async () => {
-        const targetRoomId = currentRoomId || currentServerId;
+        const targetRoomId = settingsRoomId;
         const identifier = dom.memberIdentifier.value.trim();
         if (!targetRoomId || !identifier) return;
         const response = await fetch(`${API_BASE_URL}/api/rooms/${targetRoomId}/members`, {
@@ -502,6 +525,30 @@ if (dom.btnAddMember) {
         dom.memberFeedback.textContent = response.ok ? result.message : (result.detail || 'Ajout impossible');
         if (response.ok) dom.memberIdentifier.value = '';
     });
+}
+
+function selectedSettingsTarget(type) {
+    if (type === 'server') return {id: currentServerId, kind: 'serveur'};
+    if (type === 'channel') return {id: dom.channelSelect.value, kind: 'salon'};
+    if (type === 'group') return {id: dom.groupSelect.value, kind: 'groupe'};
+    return {id: dom.directSelect.value, kind: 'message direct'};
+}
+
+function openSettings(type) {
+    const target = selectedSettingsTarget(type);
+    if (!target.id) {
+        alert(`Sélectionnez un ${target.kind} avant d'ouvrir ses paramètres.`);
+        return;
+    }
+    settingsRoomId = target.id;
+    dom.settingsTitle.textContent = `Paramètres du ${target.kind}`;
+    dom.settingsDescription.textContent = type === 'direct'
+        ? 'Un message direct ne peut pas recevoir de nouveau membre.'
+        : 'Seul le propriétaire de cet espace peut ajouter un membre.';
+    dom.memberIdentifier.value = '';
+    dom.memberFeedback.textContent = '';
+    dom.btnAddMember.disabled = type === 'direct';
+    dom.settingsModal.style.display = 'grid';
 }
 
 dom.serverSelect.addEventListener('change', async () => {
@@ -541,7 +588,7 @@ if (dom.createRoomForm) {
         e.preventDefault();
         const name = document.getElementById('room-name').value;
         const description = document.getElementById('room-description').value;
-        const roomType = document.getElementById('room-type').value;
+        const roomType = creationType;
         const parentServer = document.getElementById('parent-server').value || null;
         const memberIdentifiers = document.getElementById('member-identifiers').value
             .split(',')
@@ -600,7 +647,7 @@ function openCreateModal(type) {
         direct: 'Nouveau message direct'
     };
     dom.createRoomTitle.textContent = titles[type];
-    dom.roomType.value = type;
+    creationType = type;
     dom.parentServer.innerHTML = servers.map(server => `<option value="${server.id}">${server.name}</option>`).join('');
     dom.parentServer.style.display = type === 'channel' ? 'block' : 'none';
     dom.parentServerLabel.style.display = type === 'channel' ? 'block' : 'none';
@@ -612,6 +659,19 @@ function openCreateModal(type) {
 ['server', 'channel', 'group', 'direct'].forEach(type => {
     const button = document.getElementById(`btn-create-${type}`);
     if (button) button.addEventListener('click', () => openCreateModal(type));
+});
+
+[
+    ['server', 'btn-server-settings'],
+    ['channel', 'btn-channel-settings'],
+    ['group', 'btn-group-settings'],
+    ['direct', 'btn-direct-settings']
+].forEach(([type, buttonId]) => {
+    document.getElementById(buttonId).addEventListener('click', () => openSettings(type));
+});
+
+dom.btnCloseSettings.addEventListener('click', () => {
+    dom.settingsModal.style.display = 'none';
 });
 
 function closeCreateRoomModal() {
