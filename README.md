@@ -41,6 +41,48 @@ docker compose run --rm test   # lance les tests (unitaires + intégration)
 
 La **CI GitHub Actions** exécute les tests et le linter à chaque push / pull request.
 
+## Exécuter les tests
+
+```bash
+# Lancer les tests avec pytest directement
+pytest tests/ -v
+
+# Lancer les tests avec Docker Compose
+docker compose run --rm test
+
+# Lancer les tests avec couverture
+docker compose run --rm test pytest --cov=app --cov-report=term-missing
+
+# Lancer le test manuel inclus dans le dépôt
+python run_tests.py
+```
+
+La **CI GitHub Actions** exécute les tests et le linter à chaque push / pull request.
+
+## Déploiement
+
+```bash
+# Construire l'image Docker
+docker build -t talk-app:latest .
+
+# Lancer le conteneur
+docker run -d -p 8000:8000 talk-app:latest
+
+# Avec Docker Compose
+docker compose up -d
+```
+
+Le déploiement en production s'effectue via Docker ou Docker Compose. L'application écoute sur le port 8000 par défaut.
+
+### Déploiement sur plateforme cloud
+
+- **Docker Hub / GitHub Container Registry** : Pousser l'image vers un registry distant
+- **Railway / Render / Fly.io** : Utiliser le Dockerfile existant pour le déploiement
+- **Variables d'environnement** :
+  - `REDIS_HOST` : Hôte Redis (par défaut redis en Docker Compose)
+  - `REDIS_PORT` : Port Redis (par défaut 6379)
+  - `DEBUG` : Mode debug (true/false)
+
 ## Mode de travail sur ce dépôt
 
 - Travail **individuel** : chaque étudiant développe son projet sur **sa propre branche** (`etudiant/<nom>-<prenom>`).
