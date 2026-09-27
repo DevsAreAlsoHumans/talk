@@ -176,3 +176,52 @@ async def test_mark_notification_as_read_and_read_all() -> None:
 
         notifications_after = (await bob_client.get("/notifications")).json()
         assert all(notification["read"] for notification in notifications_after)
+
+
+async def test_delete_notification() -> None:
+    async with (
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as alice_client,
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as bob_client,
+    ):
+        bob = await _register(bob_client, "notifbob3")
+        await _register(alice_client, "notifalice3")
+
+        await alice_client.post(
+            "/friends/requests",
+            json={"username": "notifbob3", "discriminator": bob["discriminator"]},
+            headers=_csrf(alice_client),
+        )
+
+        notifications = (await bob_client.get("/notifications")).json()
+        notification_id = notifications[0]["id"]
+
+        delete_response = await bob_client.delete(
+            f"/notifications/{notification_id}", headers=_csrf(bob_client)
+        )
+        assert delete_response.status_code == 204
+
+        notifications_after = (await bob_client.get("/notifications")).json()
+        assert all(n["id"] != notification_id for n in notifications_after)
+
+
+async def test_cannot_delete_someone_elses_notification() -> None:
+    async with (
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as alice_client,
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as bob_client,
+    ):
+        bob = await _register(bob_client, "notifbob4")
+        await _register(alice_client, "notifalice4")
+
+        await alice_client.post(
+            "/friends/requests",
+            json={"username": "notifbob4", "discriminator": bob["discriminator"]},
+            headers=_csrf(alice_client),
+        )
+
+        notifications = (await bob_client.get("/notifications")).json()
+        notification_id = notifications[0]["id"]
+
+        response = await alice_client.delete(
+            f"/notifications/{notification_id}", headers=_csrf(alice_client)
+        )
+        assert response.status_code == 404

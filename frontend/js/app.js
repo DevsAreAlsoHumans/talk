@@ -287,7 +287,22 @@ function describeNotification({ type, payload }) {
 
 function renderNotification(notification, prepend) {
   const item = document.createElement("li");
-  item.textContent = describeNotification(notification);
+  const label = document.createElement("span");
+  label.textContent = describeNotification(notification);
+  item.appendChild(label);
+
+  const deleteButton = document.createElement("button");
+  deleteButton.textContent = "✕";
+  deleteButton.className = "notification-delete";
+  deleteButton.title = "Supprimer";
+  deleteButton.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await api.deleteNotification(notification.id);
+    item.remove();
+    updateNotificationsCount();
+  });
+  item.appendChild(deleteButton);
+
   item.dataset.notificationId = notification.id;
   if (!notification.read) item.style.fontWeight = "bold";
   item.addEventListener("click", async () => {

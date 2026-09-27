@@ -155,6 +155,14 @@ button {
   height: 100vh;
 }
 
+/* Une regle d'auteur passe toujours devant la feuille par defaut du
+   navigateur (meme specificite ou pas), donc "display: flex" ci-dessus
+   ignorerait sinon l'attribut [hidden] et affichertait l'ecran vide
+   avant la fin de la verification de session. */
+.app-shell[hidden] {
+  display: none;
+}
+
 .sidebar {
   width: 260px;
   flex-shrink: 0;
@@ -197,6 +205,9 @@ button {
 
 .totp-qr-canvas {
   display: block;
+  width: 100%;
+  max-width: 200px;
+  height: auto;
   margin: 0.5rem 0;
   border-radius: 4px;
 }
@@ -315,6 +326,10 @@ button {
 }
 
 .notifications-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.5rem;
   font-size: 0.8rem;
   border-radius: 4px;
@@ -324,6 +339,20 @@ button {
 
 .notifications-list li:hover {
   background: var(--bg-hover);
+}
+
+.notification-delete {
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  border-radius: 3px;
+}
+
+.notification-delete:hover {
+  background: var(--danger);
+  color: #fff;
 }
 
 /* ---------- Zone principale (salon actif) ---------- */

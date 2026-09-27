@@ -111,4 +111,5 @@ export const api = {
   markNotificationRead: (notificationId) =>
     request("POST", `/notifications/${notificationId}/read`),
   markAllNotificationsRead: () => request("POST", "/notifications/read-all"),
+  deleteNotification: (notificationId) => request("DELETE", `/notifications/${notificationId}`),
 };

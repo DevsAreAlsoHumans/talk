@@ -57,3 +57,26 @@ async def mark_all_as_read(user_id: str = Depends(get_current_user_id)) -> None:
     await db.notifications.update_many(
         {"user_id": user_id, "read": False}, {"$set": {"read": True}}
     )
+
+
+@router.delete(
+    "/{notification_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_csrf)],
+)
+async def delete_notification(
+    notification_id: str, user_id: str = Depends(get_current_user_id)
+) -> None:
+    """Supprime définitivement une notification de l'utilisateur courant."""
+    try:
+        object_id = ObjectId(notification_id)
+    except InvalidId as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Notification introuvable."
+        ) from exc
+
+    result = await db.notifications.delete_one({"_id": object_id, "user_id": user_id})
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Notification introuvable."
+        )
