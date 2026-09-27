@@ -142,6 +142,7 @@ class Browser {
 
 let alice;
 let bob;
+let server;
 let channel;
 let roomKey;
 
@@ -175,29 +176,64 @@ describe("identité publiée", () => {
   });
 });
 
-describe("canal et adhésion", () => {
-  it("crée un canal, y adhère, et expose la clé publique du membre", async () => {
+describe("serveur, canal et adhésion", () => {
+  it("crée un serveur puis un canal, sans membres sur le canal", async () => {
+    server = await alice.postJson("/servers", { name: "e2e" }, 201);
+    assert.equal(server.created_by, alice.user.id);
+    assert.equal(server.members.length, 1);
+
     channel = await alice.postJson(
-      "/channels",
+      `/servers/${server.id}/channels`,
       { name: "e2e", client_ref: globalThis.crypto.randomUUID() },
       201,
     );
-    assert.equal(channel.members.length, 1);
-    assert.equal(channel.members[0].id, alice.user.id);
+    // Le canal ne se décrit que par son serveur. Ni membres, ni propriétaire : la
+    // réponse ne doit pas laisser croire que le canal porte encore une liste.
+    assert.equal(channel.server_id, server.id);
+    assert.equal(channel.members, undefined);
+    assert.equal(channel.created_by, undefined);
 
     bob = new Browser();
     await bob.register(`e2e_bob_${Date.now()}`);
     await bob.publishIdentity();
 
-    const updated = await alice.postJson(`/channels/${channel.id}/members`, {
+    const updated = await alice.postJson(`/servers/${server.id}/members`, {
       user_id: bob.user.id,
     });
     assert.equal(updated.members.length, 2);
     // La clé publique du membre est exposée : sans elle, le navigateur ne
-    // pourrait pas emballer la clé de salon.
-    const invited = updated.members.find((member) => member.id === bob.user.id);
+    // pourrait pas emballer la clé de salon. Elle vient du serveur, désormais.
+    const invited = updated.members.find((member) => member.user_id === bob.user.id);
     assert.ok(invited.public_key_jwk, "La clé publique du membre doit être exposée.");
     assert.equal(invited.public_key_fingerprint, bob.identity.fingerprint);
+  });
+
+  it("liste les canaux du serveur, et les retrouve par la liste plate", async () => {
+    // La navigation passe par le serveur : c'est le contexte dont l'interface part.
+    const scoped = await alice.getJson(`/servers/${server.id}/channels`);
+    assert.equal(scoped.status, 200);
+    assert.deepEqual(
+      scoped.body.map((entry) => entry.id),
+      [channel.id],
+    );
+
+    // `GET /channels` reste le moyen, pour un navigateur, de retrouver un canal
+    // par sa `client_ref` sans savoir quel serveur l'avait créé : c'est ce que
+    // fait la reprise après une fermeture. La route est donc temporaire, mais
+    // consommée, et ce test la garde vivante.
+    const flat = await alice.getJson("/channels");
+    assert.equal(flat.status, 200);
+    assert.ok(
+      flat.body.some((entry) => entry.id === channel.id),
+      "La liste plate doit contenir les canaux du serveur.",
+    );
+  });
+
+  it("refuse la liste des canaux d'un serveur dont on n'est pas membre", async () => {
+    const stranger = new Browser();
+    await stranger.register(`e2e_scope_${Date.now()}`);
+    const response = await stranger.getJson(`/servers/${server.id}/channels`);
+    assert.equal(response.status, 403);
   });
 
   it("empêche un non-membre de lire le canal", async () => {
@@ -206,6 +242,21 @@ describe("canal et adhésion", () => {
     const response = await stranger.getJson(`/channels/${channel.id}`);
     assert.equal(response.status, 403);
   });
+
+  it("empêche un membre ordinaire de créer un canal dans le serveur", async () => {
+    const carol = new Browser();
+    await carol.register(`e2e_creator_${Date.now()}`);
+    await carol.publishIdentity();
+    await alice.postJson(`/servers/${server.id}/members`, { user_id: carol.user.id });
+
+    // Le membre ordinaire du serveur ne peut pas composer le serveur : seul son
+    // créateur le fait. `postJson` vérifie déjà le statut attendu.
+    await carol.postJson(
+      `/servers/${server.id}/channels`,
+      { name: "intrus", client_ref: globalThis.crypto.randomUUID() },
+      403,
+    );
+  });
 });
 
 describe("distribution de la clé de salon", () => {
@@ -213,8 +264,9 @@ describe("distribution de la clé de salon", () => {
     const generated = await generateRoomKey();
     roomKey = generated.key;
     try {
-      const view = await bob.getJson(`/channels/${channel.id}`);
-      const member = view.body.members.find((entry) => entry.id === bob.user.id);
+      // La clé publique du destinataire vient du serveur, et plus du canal.
+      const view = await bob.getJson(`/servers/${server.id}`);
+      const member = view.body.members.find((entry) => entry.user_id === bob.user.id);
       const wrapped = await wrapRoomKey(generated.raw, await importPublicKey(member.public_key_jwk));
       // 256 octets : la taille que le serveur impose pour RSA-2048.
       assert.equal(wrapped.byteLength, 256);
@@ -247,12 +299,12 @@ describe("distribution de la clé de salon", () => {
     const carol = new Browser();
     await carol.register(`e2e_carol_${Date.now()}`);
     await carol.publishIdentity();
-    await alice.postJson(`/channels/${channel.id}/members`, { user_id: carol.user.id });
+    await alice.postJson(`/servers/${server.id}/members`, { user_id: carol.user.id });
 
     const rogue = await generateRoomKey();
     try {
-      const member = (await carol.getJson(`/channels/${channel.id}`)).body.members.find(
-        (entry) => entry.id === bob.user.id,
+      const member = (await carol.getJson(`/servers/${server.id}`)).body.members.find(
+        (entry) => entry.user_id === bob.user.id,
       );
       const wrapped = await wrapRoomKey(rogue.raw, await importPublicKey(member.public_key_jwk));
       await carol.postJson(

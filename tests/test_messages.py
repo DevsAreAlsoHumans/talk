@@ -26,11 +26,17 @@ from starlette.websockets import WebSocketDisconnect
 from app.deps import POLICY_VIOLATION
 from tests.conftest import (
     TEST_ORIGIN,
+    add_server_member,
     ciphertext_b64,
     create_channel,
+    create_server,
+    current_user_id,
     iv_b64,
+    login_user,
     register_user,
+    remove_server_member,
     unique_username,
+    user_id_of,
 )
 
 
@@ -76,7 +82,7 @@ def test_envoyer_un_message_le_retrouve_dans_l_historique(client: TestClient) ->
     # Le serveur ne fait que restituer le ciphertext : il ne l'a pas ouvert.
     assert message["ciphertext"] == ciphertext_b64()
     assert message["iv"] == iv_b64()
-    assert message["sender_id"] == channel["members"][0]["id"]
+    assert message["sender_id"] == current_user_id(client)
     assert message["client_id"]
 
 
@@ -109,6 +115,73 @@ def test_un_websocket_refuse_un_canal_inexistant(client: TestClient) -> None:
         with open_channel_socket(client, uuid.uuid4().hex[:24]) as socket:
             socket.receive_json()
     assert caught.value.code == 4404
+
+
+def test_un_membre_du_serveur_peut_ouvrir_le_websocket(client: TestClient) -> None:
+    """La connexion suit l'appartenance au serveur, et n'est pas réservée au créateur.
+
+    Un canal n'a plus de propriétaire : rien ne justifierait que seul son
+    créateur puisse y émettre des messages. Ce qui autorise est l'appartenance au
+    serveur parent, ce qui est vérifié par le même chemin qu'en HTTP.
+    """
+    owner = register_user(client, "alice")
+    server = create_server(client)
+    channel = create_channel(client, "general", server_id=str(server["id"]))
+    client.cookies.clear()
+    invitee = register_user(client, "bob")
+    invitee_id = user_id_of(client, invitee)
+    client.cookies.clear()
+    login_user(client, owner)
+    add_server_member(client, str(server["id"]), invitee_id)
+
+    client.cookies.clear()
+    login_user(client, invitee)
+    with open_channel_socket(client, channel["id"]) as socket:
+        send_frame(socket, channel["id"])
+        assert socket.receive_json()["type"] == "ack"
+
+
+def test_un_websocket_refuse_un_membre_retire_du_serveur(client: TestClient) -> None:
+    """Après un retrait, l'ancienne connexion ne peut plus être rouverte.
+
+    Le retrait est vérifié à l'ouverture, pas en continu : une connexion déjà
+    ouverte n'est pas coupée. Une fermeture forcée demanderait de revérifier
+    l'appartenance à chaque trame, donc de payer une lecture de base par message —
+    ce qui n'a pas lieu d'être tant qu'aucune rotation de clé n'est en jeu.
+    """
+    owner = register_user(client, "alice")
+    server = create_server(client)
+    channel = create_channel(client, "general", server_id=str(server["id"]))
+    client.cookies.clear()
+    invitee = register_user(client, "bob")
+    invitee_id = user_id_of(client, invitee)
+    client.cookies.clear()
+    login_user(client, owner)
+    add_server_member(client, str(server["id"]), invitee_id)
+
+    # Le refus qui suit n'a de sens que si l'adhésion a réellement eu lieu. On
+    # l'établit par le même chemin que le refus — le socket du canal — avant de
+    # retirer : sans cette ouverture réussie, un 4403 après le retrait
+    # prouverait seulement que l'utilisateur n'a jamais été membre, ce que le
+    # test constate aussi en cas d'adhésion silencieusement ratée.
+    client.cookies.clear()
+    login_user(client, invitee)
+    with open_channel_socket(client, channel["id"]) as socket:
+        send_frame(socket, channel["id"])
+        assert socket.receive_json()["type"] == "ack"
+
+    # Le retrait passe par le helper, qui vérifie le 200 : un retrait qui n'aurait
+    # pas eu lieu laisserait le socket ouvert, et le test passerait à vide.
+    client.cookies.clear()
+    login_user(client, owner)
+    remove_server_member(client, str(server["id"]), invitee_id)
+
+    client.cookies.clear()
+    login_user(client, invitee)
+    with pytest.raises(WebSocketDisconnect) as caught:
+        with open_channel_socket(client, channel["id"]) as socket:
+            socket.receive_json()
+    assert caught.value.code == 4403
 
 
 def test_un_websocket_exige_une_session(client: TestClient) -> None:

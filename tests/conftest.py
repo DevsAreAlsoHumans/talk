@@ -27,6 +27,7 @@ os.environ.setdefault("ENV", "development")
 os.environ.setdefault("APP_ORIGINS", "http://testserver,https://testserver,http://localhost:8000")
 
 import pytest
+from bson import ObjectId
 from fastapi.testclient import TestClient
 from pymongo import MongoClient
 
@@ -43,8 +44,15 @@ def unique_username(prefix: str = "user") -> str:
 
 
 def sync_database() -> MongoClient:
-    """Client synchrone : suffisant pour nettoyer et inspecter la base."""
-    return MongoClient(get_settings().mongo_url, serverSelectionTimeoutMS=10000)
+    """Client synchrone : suffisant pour nettoyer et inspecter la base.
+
+    `tz_aware=True` comme le client de l'application (`app/db.py`) : la base
+    stocke de l'UTC, et un datetime sans fuseau ne se compare pas à un datetime
+    avec fuseau — la première comparaison lève un `TypeError`. Observer la même
+    réalité que l'application évite qu'un test valide un horodatage que le code ne
+    verra jamais tel quel.
+    """
+    return MongoClient(get_settings().mongo_url, serverSelectionTimeoutMS=10000, tz_aware=True)
 
 
 def purge_database() -> None:
@@ -56,6 +64,7 @@ def purge_database() -> None:
         database.channels.delete_many({})
         database.channel_keys.delete_many({})
         database.messages.delete_many({})
+        database.servers.delete_many({})
     finally:
         mongo.close()
 
@@ -198,13 +207,101 @@ def user_id_of(client: TestClient, username: str) -> str:
     return str(document["_id"])
 
 
-def create_channel(client: TestClient, name: str = "general") -> dict[str, object]:
-    """Crée un canal et renvoie sa représentation."""
+def current_user_id(client: TestClient) -> str:
+    """Identifiant de l'utilisateur auquel la session courante appartient.
+
+    Passe par `/auth/me` plutôt que par la base : la plupart des tests ont besoin
+    de « moi » parce que c'est le créateur du serveur et donc le seul habilité à
+    distribuer une clé de salon. Lire l'identifiant depuis la session les dispense
+    de connaître le nom sous lequel ils se sont inscrits.
+    """
+    response = client.get("/auth/me")
+    assert response.status_code == 200, response.text
+    return str(response.json()["id"])
+
+
+def create_channel(
+    client: TestClient,
+    name: str = "general",
+    server_id: str | None = None,
+) -> dict[str, object]:
+    """Crée un canal et renvoie sa représentation.
+
+    Un canal naît dans un serveur, et seul le créateur de ce serveur peut en
+    créer un. `server_id` omis, on crée donc un serveur au passage : l'appelant
+    est alors son créateur, ce qui rend l'opération possible sans que le test ait
+    à connaître la règle. Les tests qui vérifient la règle eux-mêmes passent un
+    `server_id` explicite, ou refusent la route sans cet appel.
+
+    Une clé publique est publiée avant l'appel : `POST /servers/{id}/channels`
+    l'exige, puisque c'est au moment de créer le salon que son auteur aura une clé
+    à emballer.
+    """
+    if server_id is None:
+        server_id = str(create_server(client)["id"])
     publish_public_key(client)
     response = client.post(
-        "/channels",
+        f"/servers/{server_id}/channels",
         json={"name": name, "client_ref": str(uuid.uuid4())},
         headers=csrf_headers(client),
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def add_server_member(
+    client: TestClient, server_id: str, user_id: str, expected_status: int = 200
+) -> None:
+    """Ajoute un membre à un serveur via l'API, et vérifie le statut attendu.
+
+    N'est pas un raccourci anodin : l'adhésion a des règles qu'un test doit
+    souvent éprouver — refus d'un membre ordinaire, refus d'un tiers, refus de
+    l'auto-adhésion. Passer par l'API plutôt que par la base garde ces refus
+    dans le périmètre du test, au lieu de les court-circuiter.
+
+    La réponse n'est pas renvoyée : un test qui a besoin de la liste des membres
+    relit le serveur par `GET /servers/{id}`, ce qui est la source de vérité de
+    toute façon.
+    """
+    response = client.post(
+        f"/servers/{server_id}/members",
+        json={"user_id": user_id},
+        headers=csrf_headers(client),
+    )
+    assert response.status_code == expected_status, response.text
+
+
+def remove_server_member(
+    client: TestClient, server_id: str, user_id: str, expected_status: int = 200
+) -> None:
+    """Retire un membre d'un serveur via l'API. Voir `add_server_member`."""
+    response = client.delete(
+        f"/servers/{server_id}/members/{user_id}",
+        headers=csrf_headers(client),
+    )
+    assert response.status_code == expected_status, response.text
+
+
+def create_server(client: TestClient, name: str = "general") -> dict[str, object]:
+    """Crée un serveur et renvoie sa représentation.
+
+    Aucune clé publique n'est publiée avant l'appel, contrairement à
+    `create_channel` : `POST /servers` n'en exige pas. C'est volontaire, pour que
+    les tests de création de serveur valident la règle réelle de la route au lieu
+    d'un contournement.
+    """
+    response = client.post("/servers", json={"name": name}, headers=csrf_headers(client))
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def server_document(server_id: str) -> dict[str, object]:
+    """Document Mongo brut d'un serveur, pour vérifier ce qui est réellement stocké."""
+    mongo = sync_database()
+    try:
+        servers = mongo[get_settings().mongo_db_name].servers
+        document = servers.find_one({"_id": ObjectId(server_id)})
+    finally:
+        mongo.close()
+    assert document is not None, f"Serveur introuvable : {server_id}"
+    return document
