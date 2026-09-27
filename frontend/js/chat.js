@@ -103,6 +103,8 @@ function cacheElements() {
   elements.serverCreateInput = document.getElementById("server-name");
   elements.channelTarget = document.getElementById("channel-target");
   elements.serverHint = document.getElementById("server-hint");
+  elements.addServerMemberInput = document.getElementById("add-server-member-username");
+  elements.addMemberForm = document.getElementById("add-member-form");
   elements.addMemberInput = document.getElementById("member-username");
   elements.removeMemberInput = document.getElementById("remove-member-username");
   elements.channelTitle = document.getElementById("channel-title");
@@ -540,6 +542,38 @@ function leaveCurrentChannel() {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Adhère un membre au serveur courant, désigné par son nom d'utilisateur.
+ *
+ * C'est le premier des deux gestes : il écrit dans `servers.members`, et rien
+ * d'autre. Aucun contenu n'est transmis ici — le membre rejoint une liste, et il
+ * ne lira aucun message tant que le créateur ne lui aura pas distribué la clé de
+ * salon, ce que fait `addMember` ci-dessous. Confondre les deux laisserait croire
+ * qu'inviter quelqu'un lui donne accès aux messages, ce qui n'est pas vrai.
+ *
+ * Le nom est normalisé comme à l'inscription : sans cela, « Carol » ne
+ * retrouverait pas « carol » et l'échec serait sans explication. La résolution,
+ * elle, reste au serveur : c'est lui qui sait si ce nom existe, et l'interface
+ * n'a rien à deviner.
+ */
+async function addServerMember(username) {
+  const server = currentServer();
+  if (!server) {
+    showError("Sélectionnez un serveur avant d'ajouter un membre.");
+    return;
+  }
+  const cible = username.trim().toLowerCase();
+  if (!cible) {
+    showError("Indiquez le nom d'utilisateur du membre à ajouter.");
+    return;
+  }
+  await expectJson(await postJson(`/servers/${server.id}/members`, { username: cible }));
+  // La liste des membres est relue par la source de vérité : le serveur, et non
+  // un ajout local qui pourrait diverger de ce qu'il a réellement écrit.
+  await refreshServers();
+  setStatus(`${username.trim()} a été ajouté au serveur.`);
+}
+
+/**
  * Adhère un membre du serveur courant à un canal, en lui transmettant la clé.
  *
  * Attention au nom : ce formulaire n'adhère personne. L'appartenance au serveur
@@ -552,7 +586,14 @@ async function addMember(username) {
   const channel = currentChannel();
   const server = currentServer();
   const member = server?.members.find((candidate) => candidate.username === username);
-  if (!channel || !member) {
+  if (!channel) {
+    // Le formulaire est masqué sans canal, donc ce refus ne devrait pas
+    // s'atteindre à la souris. Il reste dit, pour qu'un appel programmatique ne
+    // se termine pas sur une exception sans explication.
+    showError("Sélectionnez un canal avant de transmettre une clé.");
+    return;
+  }
+  if (!member) {
     showError(`${username} ne fait pas partie du serveur courant.`);
     return;
   }
@@ -589,15 +630,20 @@ async function addMember(username) {
  * de clé lui sont retirées. Le canal lui-même n'est pas supprimé.
  */
 async function removeMember(username) {
-  const channel = currentChannel();
   const server = currentServer();
   const member = server?.members.find((candidate) => candidate.username === username);
-  if (!channel || !member) {
+  if (!server || !member) {
+    showError(`${username} ne fait pas partie du serveur courant.`);
     return;
   }
   await expectJson(await deleteJson(`/servers/${server.id}/members/${member.user_id}`));
+  // Le retrait ne dépend pas du salon affiché : le membre sort de tous les canaux
+  // du serveur. Le canal courant n'est donc resélectionné que s'il y en avait un.
+  const channel = currentChannel();
   await refreshServers();
-  await selectChannel(channel.id);
+  if (channel) {
+    await selectChannel(channel.id);
+  }
 }
 
 /** Canal sélectionné, ou `null` si l'utilisateur n'en a sélectionné aucun. */
@@ -777,6 +823,22 @@ function wireEvents() {
     }
   });
 
+  elements.addServerMemberInput
+    .closest("form")
+    .addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const username = elements.addServerMemberInput.value.trim();
+      if (!username) {
+        return;
+      }
+      elements.addServerMemberInput.value = "";
+      try {
+        await addServerMember(username);
+      } catch (error) {
+        showError(error.message);
+      }
+    });
+
   elements.addMemberInput.closest("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const username = elements.addMemberInput.value.trim();
@@ -850,24 +912,24 @@ function renderChannels() {
 
 function renderChannelHeader(channel) {
   elements.channelTitle.textContent = channel ? channel.name : "Aucun canal sélectionné";
-  elements.members.replaceChildren();
-  if (!channel) {
-    elements.memberActions.hidden = true;
-    return;
-  }
   // L'appartenance et l'administration appartiennent au serveur, pas au canal :
   // c'est le serveur courant qui fournit la liste des membres, et c'est son
   // créateur qui peut administrer. Le serveur revalide sur chaque requête ; ceci
   // ne fait qu'éviter de proposer des actions qui seraient refusées.
+  //
+  // Ce rendu ne dépend pas du canal sélectionné, et c'est délibéré : l'adhésion
+  // au serveur ne connaît pas les salons. Exiger un canal ici interdirait de
+  // composer le serveur tant qu'on n'a pas ouvert de salon, alors qu'un serveur
+  // sans canal a précisément besoin de membres.
   const server = currentServer();
   elements.memberActions.hidden = !server || server.created_by !== state.user.id;
-  if (!server) {
-    return;
-  }
-  // Un membre sans clé publique ne peut pas encore recevoir de clé de salon :
-  // l'interface le signale plutôt que de laisser une invitation échouer sans
-  // explication.
-  for (const member of server.members) {
+  // La transmission de clé, elle, dépend du salon : sans canal courant, il n'y a
+  // pas de clé à distribuer. Le formulaire est donc masqué plutôt que visible et
+  // inopérant.
+  elements.addMemberForm.hidden = !channel;
+
+  elements.members.replaceChildren();
+  for (const member of server?.members ?? []) {
     const item = document.createElement("li");
     item.className = "member-item";
     item.textContent = member.username;

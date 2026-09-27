@@ -43,6 +43,7 @@ from tests.conftest import (
     remove_server_member,
     server_document,
     sync_database,
+    unique_username,
     user_id_of,
     wrapped_key_b64,
 )
@@ -516,13 +517,12 @@ def test_ajouter_un_membre(client: TestClient) -> None:
     cree = create_server(client)
     client.cookies.clear()
     invitee = register_user(client, "bob")
-    invitee_id = user_id_of(client, "bob")
 
     client.cookies.clear()
     login_user(client, owner)
     response = client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": invitee_id},
+        json={"username": invitee},
         headers=csrf_headers(client),
     )
 
@@ -549,7 +549,7 @@ def test_le_membre_ajoute_est_ecrit_dans_la_une_des_documents(client: TestClient
 
     client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": bob_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
 
@@ -572,14 +572,13 @@ def test_reinviter_un_membre_ne_le_duplique_pas(client: TestClient) -> None:
     cree = create_server(client)
     client.cookies.clear()
     register_user(client, "bob")
-    bob_id = user_id_of(client, "bob")
     client.cookies.clear()
     login_user(client, owner)
 
     for _ in range(2):
         response = client.post(
             f"/servers/{cree['id']}/members",
-            json={"user_id": bob_id},
+            json={"username": "bob"},
             headers=csrf_headers(client),
         )
         assert response.status_code == 200, response.text
@@ -594,21 +593,19 @@ def test_un_membre_ordinaire_ne_peut_pas_ajouter_de_membre(client: TestClient) -
     cree = create_server(client)
     client.cookies.clear()
     invitee = register_user(client, "bob")
-    invitee_id = user_id_of(client, "bob")
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(cree["id"]), invitee_id)
+    add_server_member(client, str(cree["id"]), invitee)
 
     # Un membre ordinaire qui essaie d'inviter de son propre chef : composer le
     # serveur ne lui appartient pas.
     client.cookies.clear()
     register_user(client, "carol")
-    intruder_id = user_id_of(client, "carol")
     client.cookies.clear()
     login_user(client, invitee)
     response = client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": intruder_id},
+        json={"username": "carol"},
         headers=csrf_headers(client),
     )
 
@@ -628,14 +625,40 @@ def test_un_non_membre_ne_peut_pas_ajouter_de_membre(client: TestClient) -> None
     cree = create_server(client)
     client.cookies.clear()
     register_user(client, "bob")
-    bob_id = user_id_of(client, "bob")
 
     response = client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": bob_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
     assert response.status_code == 403, response.text
+
+
+def test_le_corps_ne_peut_pas_fournir_de_user_id(client: TestClient) -> None:
+    """Un `user_id` glissé dans le corps est refusé, et rien n'est créé.
+
+    Le corps ne se négocie pas en `username` *et* en `user_id` : ce serait rendre
+    l'identifiant une désignation alternative, que l'appelant pourrait faire
+    diverger du nom. `extra="forbid"` ferme la porte, et l'adhésion se fait par la
+    seule désignation que l'interface possède.
+    """
+    register_user(client, "alice")
+    cree = create_server(client)
+    client.cookies.clear()
+    register_user(client, "bob")
+    bob_id = user_id_of(client, "bob")
+    client.cookies.clear()
+    login_user(client, "alice")
+
+    response = client.post(
+        f"/servers/{cree['id']}/members",
+        json={"username": "bob", "user_id": bob_id},
+        headers=csrf_headers(client),
+    )
+
+    assert response.status_code == 422, response.text
+    # Le refus n'a rien changé : `bob` n'est pas devenu membre.
+    assert len(server_document(str(cree["id"]))["members"]) == 1
 
 
 def test_ajouter_un_utilisateur_inexistant_renvoie_404(client: TestClient) -> None:
@@ -643,7 +666,7 @@ def test_ajouter_un_utilisateur_inexistant_renvoie_404(client: TestClient) -> No
     cree = create_server(client)
     response = client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": dummy_object_id()},
+        json={"username": unique_username()},
         headers=csrf_headers(client),
     )
     assert response.status_code == 404, response.text
@@ -655,7 +678,7 @@ def test_un_membre_ne_peut_pas_se_ajouter_lui_meme(client: TestClient) -> None:
     cree = create_server(client)
     response = client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": user_id_of(client, owner)},
+        json={"username": owner},
         headers=csrf_headers(client),
     )
     assert response.status_code == 409, response.text
@@ -673,13 +696,12 @@ def test_le_corps_ne_peut_pas_fournir_le_createur(client: TestClient) -> None:
     cree = create_server(client)
     client.cookies.clear()
     register_user(client, "bob")
-    bob_id = user_id_of(client, "bob")
     client.cookies.clear()
     login_user(client, "bob")
 
     forged = client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": bob_id, "created_by": alice_id},
+        json={"username": "bob", "created_by": alice_id},
         headers=csrf_headers(client),
     )
 
@@ -698,7 +720,7 @@ def test_retirer_un_membre(client: TestClient) -> None:
     login_user(client, owner)
     client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": invitee_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
 
@@ -723,7 +745,7 @@ def test_un_membre_ordinaire_ne_peut_pas_retirer_de_membre(client: TestClient) -
     login_user(client, owner)
     client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": invitee_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
 
@@ -753,12 +775,11 @@ def test_le_createur_ne_peut_pas_se_retirer_lui_meme(client: TestClient) -> None
     cree = create_server(client)
     client.cookies.clear()
     register_user(client, "bob")
-    bob_id = user_id_of(client, "bob")
     client.cookies.clear()
     login_user(client, owner)
     client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": bob_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
 
@@ -809,7 +830,7 @@ def test_retirer_un_membre_supprime_ses_envelopes(client: TestClient) -> None:
     login_user(client, owner)
     client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": invitee_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
     depose = client.post(
@@ -891,7 +912,7 @@ def test_un_membre_retire_ne_recouvre_aucun_acces(client: TestClient) -> None:
     login_user(client, owner)
     client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": invitee_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
     client.post(
@@ -935,7 +956,7 @@ def test_un_membre_retire_ne_recouvre_aucun_acces(client: TestClient) -> None:
     mutations = {
         "ajout de membre": client.post(
             f"/servers/{cree['id']}/members",
-            json={"user_id": third_id},
+            json={"username": "carol"},
             headers=headers,
         ),
         "dépôt d'enveloppe": client.post(
@@ -967,7 +988,7 @@ def test_un_membre_retire_ne_recouvre_aucun_acces(client: TestClient) -> None:
     assert (
         client.post(
             f"/servers/{cree['id']}/members",
-            json={"user_id": third_id},
+            json={"username": "carol"},
             headers=entete_valide,
         ).status_code
         == 200
@@ -1000,7 +1021,7 @@ def test_un_retrait_porte_sur_tous_les_canaux_du_serveur(client: TestClient) -> 
     login_user(client, owner)
     client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": invitee_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
 
@@ -1043,7 +1064,7 @@ def test_un_membre_non_admis_ne_vit_plus_apres_un_retrait(client: TestClient) ->
     invitee_id = user_id_of(client, "bob")
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(cree["id"]), invitee_id)
+    add_server_member(client, str(cree["id"]), invitee)
     depose = client.post(
         f"/channels/{canal['id']}/keys",
         json={"user_id": invitee_id, "wrapped_key": wrapped_key_b64()},
@@ -1065,7 +1086,7 @@ def test_un_membre_non_admis_ne_vit_plus_apres_un_retrait(client: TestClient) ->
     # Réadmission, puis contrôle : l'accès est revenu, l'enveloppe non.
     readmis = client.post(
         f"/servers/{cree['id']}/members",
-        json={"user_id": invitee_id},
+        json={"username": "bob"},
         headers=csrf_headers(client),
     )
     assert readmis.status_code == 200, readmis.text

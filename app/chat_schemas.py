@@ -27,6 +27,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.schemas import normalize_username
+
 # 4 000 caractères côté client. Le pire cas en UTF-8 (caractères hors du plan
 # multilingue de base) est de 4 octets par caractère, plus 16 octets de balise
 # d'authentification, ce qui reste très en deçà de la limite serveur.
@@ -253,11 +255,44 @@ class ChannelOut(BaseModel):
 
 
 class MemberRefIn(BaseModel):
-    """Corps d'ajout d'un membre à un serveur."""
+    """Corps d'ajout d'un membre à un serveur.
+
+    Le corps ne contient qu'un `username`, et c'est délibéré. L'interface ne
+    connaît qu'un nom : c'est ce que l'utilisateur sait écrire, et c'est ce que
+    l'inscription produit. Le `user_id` interne n'est exposé nulle part à un tiers
+    — `/auth/me` ne renvoie que le sien — donc un client n'a matériellement aucun
+    `user_id` à envoyer, et l'exiger rendait la route inutilisable depuis
+    l'interface.
+
+    Le `username` n'est donc pas une désignation du membre, c'est une **résolution
+    que le serveur effectue** : `get_user_by_username` fait foi, et l'appelant ne
+    peut pas inventer une identité. Exposer à la place une route de recherche
+    aurait donné le même service en laissant énumérer les comptes existants ; ici,
+    seule une tentative d'adhésion répond, et elle est déjà réservée au créateur.
+
+    Ni `user_id` ni `created_by` ne sont acceptés : `extra="forbid"` refuse le
+    premier, qui ferait de l'identifiant une désignation falsifiable, et le
+    second, qui déciderait qui administre. L'identité de l'appelant vient de la
+    session, comme partout ailleurs.
+
+    Le motif du nom n'est pas validé, à l'instar de `LoginIn` : un identifiant
+    malformé doit répondre « introuvable » comme un identifiant inconnu, et non
+    révéler par un 422 qu'un compte existe. La longueur est néanmoins bornée à
+    celle d'un nom réellement enregistrable, pour qu'un corps arbitrairement long
+    n'atteigne jamais la base.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    user_id: str
+    username: str = Field(min_length=1, max_length=32)
+
+    @field_validator("username")
+    @classmethod
+    def _normalize_username(cls, value: str) -> str:
+        # Même normalisation que l'inscription et la connexion : sans elle,
+        # « Carol » ne retrouverait pas « carol », et l'adhésion échouerait sur une
+        # simple différence de casse ou d'espace.
+        return normalize_username(value)
 
 
 class ServerCreateIn(BaseModel):

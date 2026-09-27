@@ -129,10 +129,9 @@ def test_un_membre_du_serveur_peut_ouvrir_le_websocket(client: TestClient) -> No
     channel = create_channel(client, "general", server_id=str(server["id"]))
     client.cookies.clear()
     invitee = register_user(client, "bob")
-    invitee_id = user_id_of(client, invitee)
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(server["id"]), invitee_id)
+    add_server_member(client, str(server["id"]), invitee)
 
     client.cookies.clear()
     login_user(client, invitee)
@@ -157,7 +156,7 @@ def test_un_websocket_refuse_un_membre_retire_du_serveur(client: TestClient) -> 
     invitee_id = user_id_of(client, invitee)
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(server["id"]), invitee_id)
+    add_server_member(client, str(server["id"]), invitee)
 
     # Le refus qui suit n'a de sens que si l'adhésion a réellement eu lieu. On
     # l'établit par le même chemin que le refus — le socket du canal — avant de

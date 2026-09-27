@@ -198,7 +198,9 @@ describe("serveur, canal et adhésion", () => {
     await bob.publishIdentity();
 
     const updated = await alice.postJson(`/servers/${server.id}/members`, {
-      user_id: bob.user.id,
+      // L'invité est désigné par son nom : c'est la seule chose que l'interface
+      // connaît, et la route résout le `user_id` toute seule.
+      username: bob.user.username,
     });
     assert.equal(updated.members.length, 2);
     // La clé publique du membre est exposée : sans elle, le navigateur ne
@@ -247,7 +249,7 @@ describe("serveur, canal et adhésion", () => {
     const carol = new Browser();
     await carol.register(`e2e_creator_${Date.now()}`);
     await carol.publishIdentity();
-    await alice.postJson(`/servers/${server.id}/members`, { user_id: carol.user.id });
+    await alice.postJson(`/servers/${server.id}/members`, { username: carol.user.username });
 
     // Le membre ordinaire du serveur ne peut pas composer le serveur : seul son
     // créateur le fait. `postJson` vérifie déjà le statut attendu.
@@ -299,7 +301,7 @@ describe("distribution de la clé de salon", () => {
     const carol = new Browser();
     await carol.register(`e2e_carol_${Date.now()}`);
     await carol.publishIdentity();
-    await alice.postJson(`/servers/${server.id}/members`, { user_id: carol.user.id });
+    await alice.postJson(`/servers/${server.id}/members`, { username: carol.user.username });
 
     const rogue = await generateRoomKey();
     try {

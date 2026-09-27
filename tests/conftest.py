@@ -250,7 +250,7 @@ def create_channel(
 
 
 def add_server_member(
-    client: TestClient, server_id: str, user_id: str, expected_status: int = 200
+    client: TestClient, server_id: str, username: str, expected_status: int = 200
 ) -> None:
     """Ajoute un membre à un serveur via l'API, et vérifie le statut attendu.
 
@@ -259,13 +259,18 @@ def add_server_member(
     l'auto-adhésion. Passer par l'API plutôt que par la base garde ces refus
     dans le périmètre du test, au lieu de les court-circuiter.
 
+    Le membre est désigné par son nom, comme le fait l'interface : la route
+    résout le `username` en `user_id` elle-même. Un test qui passe par
+    l'identifiant devrait maintenir une valeur que rien ne lui demande, sans rien
+    gagner sur le contrat.
+
     La réponse n'est pas renvoyée : un test qui a besoin de la liste des membres
     relit le serveur par `GET /servers/{id}`, ce qui est la source de vérité de
     toute façon.
     """
     response = client.post(
         f"/servers/{server_id}/members",
-        json={"user_id": user_id},
+        json={"username": username},
         headers=csrf_headers(client),
     )
     assert response.status_code == expected_status, response.text

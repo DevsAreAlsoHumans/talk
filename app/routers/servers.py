@@ -106,6 +106,13 @@ async def add_server_member(
 ) -> ServerOut:
     """Ajoute un membre au serveur. Réservé au créateur.
 
+    Le membre est désigné par son `username`, que le serveur résout en `user_id`.
+    Résoudre côté serveur n'est pas un détail : l'interface ne connaît aucun
+    `user_id` tiers — `/auth/me` ne renvoie que le sien — donc lui demander un
+    identifiant aurait rendu la route inutilisable depuis l'écran d'adhésion.
+    Corollaire : cette route est aussi le seul endroit où un compte peut être
+    sondé, et elle est fermée aux tiers.
+
     Ajouter quelqu'un ne lui donne pas accès au contenu : il lui faudra ensuite
     une enveloppe de clé de salon par canal, que le créateur produit dans son
     navigateur. Le serveur ne peut pas le faire à sa place.
@@ -115,13 +122,21 @@ async def add_server_member(
     plus de siège à pourvoir — un membre ordinaire ne peut pas inviter, donc
     s'il n'y a que le créateur, il n'y a rien à inviter.
     """
-    target_id = to_object_id(payload.user_id)
-    if target_id is None:
+    # Le motif du nom est volontairement non validé par le schéma : un nom
+    # inexistant et un nom malformé doivent répondre la même chose, pour ne pas
+    # distinguer « personne ne s'appelle ainsi » de « personne ne peut
+    # s'appeler ainsi ».
+    target = await store.get_user_by_username(payload.username)
+    # La résolution se fait par le nom, mais c'est `get_user_by_id` qui confirme
+    # l'appelant : c'est le seul des deux qui écarte un compte désactivé. Un nom
+    # qui résout vers un compte désactivé est donc « introuvable » comme un nom
+    # inconnu — distinguer les deux révélerait l'existence d'un compte que
+    # l'administrateur a choisi de retirer.
+    if target is None or await store.get_user_by_id(target["_id"]) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Utilisateur introuvable.")
+    target_id = target["_id"]
     if target_id == user["_id"]:
         raise HTTPException(status.HTTP_409_CONFLICT, "Vous êtes déjà membre de ce serveur.")
-    if await store.get_user_by_id(target_id) is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Utilisateur introuvable.")
 
     # `add_server_member` est idempotent et filtre sur `members.user_id` : un
     # doublon ne crée pas de second sous-document. Le résultat n'est pas

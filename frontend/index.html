@@ -173,6 +173,20 @@
             <summary>Membres et distribution des clés</summary>
             <ul class="member-list" id="member-list"></ul>
             <div class="member-actions" id="member-actions">
+              <form id="add-server-member-form" class="chat-form" novalidate>
+                <label class="auth-label" for="add-server-member-username">Ajouter au serveur</label>
+                <input
+                  class="auth-input"
+                  id="add-server-member-username"
+                  name="username"
+                  type="text"
+                  maxlength="32"
+                  autocomplete="off"
+                  placeholder="nom_du_membre"
+                  required
+                />
+                <button class="auth-button" type="submit">Ajouter</button>
+              </form>
               <form id="add-member-form" class="chat-form" novalidate>
                 <label class="auth-label" for="member-username">Transmettre la clé à</label>
                 <input

@@ -129,7 +129,7 @@ clé, il pourrait encore déchiffrer ce qui lui parviendrait.
 | `GET /servers/{id}` | Détail d'un serveur, avec l'ancienneté d'adhésion et la clé publique de chaque membre. |
 | `GET /servers/{id}/channels` | Canaux du serveur. Membres du serveur uniquement. |
 | `POST /servers/{id}/channels` | Crée un canal dans le serveur. Exige une clé publique déjà publiée (409 sinon). **Créateur du serveur uniquement.** |
-| `POST /servers/{id}/members` | Ajoute un membre par identifiant. **Créateur du serveur uniquement.** |
+| `POST /servers/{id}/members` | Ajoute un membre par nom d'utilisateur. Le serveur résout le nom ; un nom inconnu est un 404. **Créateur du serveur uniquement.** |
 | `DELETE /servers/{id}/members/{user_id}` | Retire un membre, et ses enveloppes sur tous les canaux du serveur. **Créateur du serveur uniquement.** |
 
 ### Serveurs

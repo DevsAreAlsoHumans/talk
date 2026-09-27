@@ -174,7 +174,7 @@ def test_un_membre_du_serveur_ne_peut_pas_creer_un_canal(client: TestClient) -> 
     invitee = register_user(client, unique_username())
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(serveur["id"]), user_id_of(client, invitee))
+    add_server_member(client, str(serveur["id"]), invitee)
 
     # Le membre ordinaire a une clé publique : il n'échoue donc pas sur ce garde,
     # et le 403 qu'il reçoit ne peut venir que de l'autorité.
@@ -248,7 +248,7 @@ def test_lister_les_canaux_d_un_serveur(client: TestClient) -> None:
     membre = register_user(client, unique_username())
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(serveur["id"]), user_id_of(client, membre))
+    add_server_member(client, str(serveur["id"]), membre)
     client.cookies.clear()
     login_user(client, membre)
     assert client.get(f"/servers/{serveur['id']}/channels").status_code == 200
@@ -281,7 +281,7 @@ def test_lister_les_canaux_d_un_serveur_vide(client: TestClient) -> None:
     membre = register_user(client, unique_username())
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(serveur["id"]), user_id_of(client, membre))
+    add_server_member(client, str(serveur["id"]), membre)
     client.cookies.clear()
     login_user(client, membre)
     assert client.get(f"/servers/{serveur['id']}/channels").json() == []
@@ -338,7 +338,7 @@ def test_un_canal_est_lisible_par_les_membres_du_serveur(client: TestClient) -> 
     invitee = register_user(client, unique_username())
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(serveur["id"]), user_id_of(client, invitee))
+    add_server_member(client, str(serveur["id"]), invitee)
 
     client.cookies.clear()
     login_user(client, invitee)
@@ -381,7 +381,7 @@ def test_un_membre_ordinaire_ne_peut_pas_deposer_d_enveloppe(client: TestClient)
     invitee_id = user_id_of(client, invitee)
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(serveur["id"]), invitee_id)
+    add_server_member(client, str(serveur["id"]), invitee)
 
     # Le membre qui a la clé de salon veut la redistribuer, à lui-même comme au
     # créateur. Ni pour l'un ni pour l'autre : c'est l'acte du créateur.
@@ -417,10 +417,9 @@ def test_un_membre_ne_peut_pas_preempter_l_enveloppe_d_un_autre(client: TestClie
     invitee_id = user_id_of(client, invitee)
     client.cookies.clear()
     intruder = register_user(client, unique_username())
-    intruder_id = user_id_of(client, intruder)
     client.cookies.clear()
     login_user(client, owner)
-    for target in (invitee_id, intruder_id):
+    for target in (invitee, intruder):
         add_server_member(client, str(serveur["id"]), target)
 
     # Le membre ordinaire tente la préemption, pour le compte d'un autre membre.
@@ -465,7 +464,7 @@ def test_un_non_membre_du_serveur_ne_peut_pas_deposer_d_enveloppe(client: TestCl
     invitee_id = user_id_of(client, invitee)
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(serveur["id"]), invitee_id)
+    add_server_member(client, str(serveur["id"]), invitee)
 
     client.cookies.clear()
     outsider = register_user(client, unique_username())
@@ -499,7 +498,7 @@ def test_un_membre_peut_lire_son_propre_enveloppe(client: TestClient) -> None:
     invitee_id = user_id_of(client, invitee)
     client.cookies.clear()
     login_user(client, owner)
-    add_server_member(client, str(serveur["id"]), invitee_id)
+    add_server_member(client, str(serveur["id"]), invitee)
     client.post(
         f"/channels/{canal['id']}/keys",
         json={"user_id": invitee_id, "wrapped_key": wrapped_key_b64()},
