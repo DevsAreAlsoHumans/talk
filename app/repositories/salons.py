@@ -153,6 +153,11 @@ def list_member_ids(redis: Redis, salon_id: str) -> list[str]:
     return sorted(redis.smembers(_members_key(salon_id)))
 
 
+def list_salon_ids(redis: Redis, user_id: str) -> list[str]:
+    """Salons dont l'utilisateur est membre (pour verifier un partage de salon)."""
+    return sorted(redis.smembers(_user_salons_key(user_id)))
+
+
 # --- Canaux ---------------------------------------------------------------
 
 

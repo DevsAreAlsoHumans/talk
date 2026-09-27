@@ -6,7 +6,7 @@ Le serveur ne detient jamais de secret capable de dechiffrer un message :
 
 Modele Redis :
 - user:keys:<user_id>            hash {public_key, version, created_at}
-- channel:<channel_id>:keys      hash user_id -> JSON {version, wrapped_key}
+- channel:<channel_id>:keys      hash user_id destinataire -> JSON {version, wrapped_key, from}
 """
 
 import json
@@ -49,12 +49,18 @@ def get_public_key(redis: Redis, user_id: str) -> dict | None:
     }
 
 
-def put_channel_key(redis: Redis, channel_id: str, user_id: str, wrapped_key: str) -> dict:
-    """Cle de canal chiffree pour un destinataire ; version locale, pas de collision."""
-    current = get_channel_key(redis, channel_id, user_id)
+def put_channel_key(
+    redis: Redis, channel_id: str, target_id: str, from_id: str, wrapped_key: str
+) -> dict:
+    """Depose la cle de canal chiffree de `from_id` pour le destinataire `target_id`.
+
+    Le champ `from` est indispensable : seul lui permet au destinataire de
+    savoir avec quelle cle publique il doit dechiffrer.
+    """
+    current = get_channel_key(redis, channel_id, target_id)
     version = 1 if current is None else int(current["version"]) + 1
-    payload = {"version": version, "wrapped_key": wrapped_key}
-    redis.hset(_channel_keys_key(channel_id), user_id, json.dumps(payload))
+    payload = {"version": version, "wrapped_key": wrapped_key, "from": from_id}
+    redis.hset(_channel_keys_key(channel_id), target_id, json.dumps(payload))
     return payload
 
 
@@ -68,7 +74,11 @@ def get_channel_key(redis: Redis, channel_id: str, user_id: str) -> dict | None:
         return None
     if not isinstance(data, dict):
         return None
-    return {"version": int(data.get("version", 0)), "wrapped_key": data.get("wrapped_key", "")}
+    return {
+        "version": int(data.get("version", 0)),
+        "wrapped_key": data.get("wrapped_key", ""),
+        "from_user_id": data.get("from", ""),
+    }
 
 
 def list_channel_keys(redis: Redis, channel: dict) -> dict[str, dict]:
@@ -79,13 +89,13 @@ def list_channel_keys(redis: Redis, channel: dict) -> dict[str, dict]:
     """
     channel_id = channel["id"]
     keys: dict[str, dict] = {}
-    for user_id in salons.list_member_ids(redis, channel["salon_id"]):
+    for target_id in salons.list_member_ids(redis, channel["salon_id"]):
         if (
             channel["kind"] == salons.KIND_PRIVATE
-            and not salons.is_channel_member(redis, channel_id, user_id)
+            and not salons.is_channel_member(redis, channel_id, target_id)
         ):
             continue
-        entry = get_channel_key(redis, channel_id, user_id)
+        entry = get_channel_key(redis, channel_id, target_id)
         if entry is not None:
-            keys[user_id] = entry
+            keys[target_id] = entry
     return keys

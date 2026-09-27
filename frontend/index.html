@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>talk — messagerie chiffrée</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Écran d'authentification -->
+  <main id="auth-screen" class="auth" hidden>
+    <form id="auth-form" class="card" autocomplete="on" novalidate>
+      <h1>talk</h1>
+      <p class="muted">Messagerie chiffrée de bout en bout.</p>
+
+      <label for="username">Pseudo</label>
+      <input id="username" name="username" type="text" minlength="3" maxlength="32"
+             pattern="[a-z0-9_]+" required autocomplete="username" spellcheck="false">
+
+      <label for="password">Mot de passe</label>
+      <input id="password" name="password" type="password" minlength="12" maxlength="128"
+             required autocomplete="current-password">
+
+      <div class="row">
+        <button type="submit" data-action="login">Se connecter</button>
+        <button type="button" class="ghost" data-action="register">Créer un compte</button>
+      </div>
+      <p id="auth-error" class="error" role="alert" hidden></p>
+    </form>
+  </main>
+
+  <!-- Application -->
+  <div id="app-screen" class="app" hidden>
+    <aside class="sidebar">
+      <header class="sidebar-head">
+        <strong>talk</strong>
+        <span id="me-username" class="muted"></span>
+      </header>
+      <button id="new-salon" class="ghost block" type="button">+ Nouveau salon</button>
+      <ul id="salon-list" class="list" aria-label="Salons"></ul>
+      <footer class="sidebar-foot">
+        <span id="fingerprint" class="muted small"></span>
+        <button id="logout" class="ghost block" type="button">Se déconnecter</button>
+      </footer>
+    </aside>
+
+    <section class="workspace">
+      <header class="channel-head">
+        <h2 id="channel-title">Aucun salon</h2>
+        <p id="channel-topic" class="muted small"></p>
+        <span id="presence" class="badge" hidden>en direct</span>
+      </header>
+
+      <ol id="message-list" class="messages" aria-live="polite" aria-label="Messages"></ol>
+
+      <form id="composer" class="composer" hidden>
+        <label for="composer-input" class="visually-hidden">Message</label>
+        <input id="composer-input" type="text" maxlength="4000" autocomplete="off"
+               placeholder="Écrire un message… (chiffré avant envoi)">
+        <button type="submit">Envoyer</button>
+      </form>
+      <p id="composer-warning" class="warning" hidden></p>
+    </section>
+  </div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

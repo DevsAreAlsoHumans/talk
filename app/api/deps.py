@@ -96,6 +96,11 @@ def channel_access(
 
 def require_moderator_role(
     channel: dict = Depends(channel_access),
-    role: str = Depends(salon_role),
+    redis: Redis = Depends(get_redis),
+    user: dict = Depends(current_user),
 ) -> str:
+    """Comme salon_role, mais le salon est deduit du canal (routes /channels/...)."""
+    role = salons.get_role(redis, channel["salon_id"], user["id"])
+    if role is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Canal introuvable.")
     return _require_min_role(role, ROLE_MODERATOR)

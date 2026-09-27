@@ -7,9 +7,15 @@ destinataire recoit la cle chiffree avec sa propre cle publique.
 from fastapi import APIRouter, Depends, HTTPException, status
 from redis import Redis
 
-from app.api.deps import channel_access, current_user, require_csrf, salon_role
+from app.api.deps import (
+    channel_access,
+    current_user,
+    require_csrf,
+    require_moderator_role,
+)
 from app.db import get_redis
 from app.repositories import keys, salons, users
+from app.repositories.salons import ROLE_MODERATOR, ROLE_RANK
 from app.schemas_chat import (
     ChannelKeyIn,
     ChannelKeyOut,
@@ -42,7 +48,7 @@ def read_public_key(
     shared = any(
         salons.get_role(redis, salon_id, user_id) is not None
         and salons.get_role(redis, salon_id, user["id"]) is not None
-        for salon_id in redis.smembers(f"user:salons:{user['id']}")
+        for salon_id in salons.list_salon_ids(redis, user["id"])
     )
     if not shared:
         raise HTTPException(
@@ -71,9 +77,28 @@ def publish_channel_key(
     channel: dict = Depends(channel_access),
     redis: Redis = Depends(get_redis),
     user: dict = Depends(current_user),
+    role: str = Depends(require_moderator_role),
 ) -> ChannelKeyOut:
-    """Depose la cle de canal chiffree pour soi-meme (rotation incluse)."""
-    return ChannelKeyOut(**keys.put_channel_key(redis, channel_id, user["id"], payload.wrapped_key))
+    """Depose une cle de canal chiffree dans le slot d'un destinataire.
+
+    Ecrire le slot d'un tiers est reserve aux moderateurs du salon. Sans cette
+    limite, un membre malveillant remplacerait la cle d'un autre afin de lire
+    ses messages : le serveur ne voyant que du chiffre, il ne peut pas l'en
+    empecher lui-meme.
+    """
+    target_id = payload.user_id or user["id"]
+    if target_id != user["id"]:
+        if ROLE_RANK[role] < ROLE_RANK[ROLE_MODERATOR]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Seul un moderateur peut distribuer la cle d'un autre membre.",
+            )
+        if salons.get_role(redis, channel["salon_id"], target_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Membre du salon introuvable."
+            )
+    stored = keys.put_channel_key(redis, channel_id, target_id, user["id"], payload.wrapped_key)
+    return ChannelKeyOut(**stored)
 
 
 @router.get("/channels/{channel_id}/key", response_model=ChannelKeyOut)
@@ -96,9 +121,8 @@ def read_channel_keys(
     channel_id: str,
     channel: dict = Depends(channel_access),
     redis: Redis = Depends(get_redis),
-    _role: str = Depends(salon_role),
 ) -> ChannelKeysOut:
-    """Toutes les cles de canal distribuees : sert a added un membre ouune rotation."""
+    """Toutes les cles de canal distribuees : sert a ajouter un membre ou une rotation."""
     return ChannelKeysOut(
         keys={
             user_id: ChannelKeyOut(**entry)

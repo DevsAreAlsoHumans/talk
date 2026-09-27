@@ -9,6 +9,7 @@ from app.api.messages import router as messages_router
 from app.api.salons import router as salons_router
 from app.config import get_settings
 from app.security.headers import SecurityHeadersMiddleware
+from app.web import mount_static, router as web_router
 from app.ws import router as ws_router
 
 
@@ -25,14 +26,16 @@ def create_app() -> FastAPI:
             CORSMiddleware,
             allow_origins=settings.cors_origins,
             allow_credentials=True,
-            allow_methods=["GET", "POST", "PATCH", "DELETE"],
+            allow_methods=["GET", "POST", "PATCH", "DELETE", "PUT"],
             allow_headers=["Content-Type", "X-CSRF-Token"],
         )
     app.include_router(auth_router)
     app.include_router(salons_router)
     app.include_router(keys_router)
     app.include_router(messages_router)
+    app.include_router(web_router)
     app.include_router(ws_router)
+    mount_static(app)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict[str, str]:

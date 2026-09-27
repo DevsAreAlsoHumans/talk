@@ -70,7 +70,9 @@ def test_channel_key_publish_and_read(client: TestClient, salon, registered) -> 
         headers=registered,
     )
     assert published.status_code == 200
-    assert published.json()["version"] == 1
+    body = published.json()
+    assert body["version"] == 1
+    assert body["from_user_id"] == client.get("/auth/me").json()["id"]
     stored = client.get(f"/channels/{salon['channel_id']}/key")
     assert stored.json()["wrapped_key"] == wrapped
 
@@ -87,6 +89,51 @@ def test_channel_key_rotation(client: TestClient, salon, registered) -> None:
         headers=registered,
     )
     assert rotated.json()["version"] == 2
+
+
+def test_moderator_can_write_another_member_slot(
+    client: TestClient, salon, registered, other_account
+) -> None:
+    target = other_account["user"]["id"]
+    client.post(
+        f"/salons/{salon['id']}/members", json={"username": "invitee"}, headers=registered
+    )
+    offered = client.put(
+        f"/channels/{salon['channel_id']}/key",
+        json={"wrapped_key": "a1" * 60, "user_id": target},
+        headers=registered,
+    )
+    assert offered.status_code == 200
+    assert client.get(f"/channels/{salon['channel_id']}/keys").json()["keys"][target][
+        "from_user_id"
+    ] == client.get("/auth/me").json()["id"]
+
+
+def test_member_cannot_overwrite_another_slot(
+    client: TestClient, salon, registered, other_account
+) -> None:
+    """Un membre simple ne peut pas deposer la cle d'un tiers."""
+    guest = other_account["client"]
+    client.post(
+        f"/salons/{salon['id']}/members", json={"username": "invitee"}, headers=registered
+    )
+    forbidden = guest.put(
+        f"/channels/{salon['channel_id']}/key",
+        json={"wrapped_key": "a1" * 60, "user_id": client.get("/auth/me").json()["id"]},
+        headers=other_account["headers"],
+    )
+    assert forbidden.status_code == 403
+
+
+def test_cannot_write_slot_of_non_member(
+    client: TestClient, salon, registered, other_account
+) -> None:
+    response = client.put(
+        f"/channels/{salon['channel_id']}/key",
+        json={"wrapped_key": "a1" * 60, "user_id": "f" * 32},
+        headers=registered,
+    )
+    assert response.status_code == 404
 
 
 def test_channel_keys_list_excludes_others_when_private(

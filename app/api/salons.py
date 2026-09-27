@@ -323,7 +323,6 @@ def remove_channel_member(
 def list_channel_members(
     channel: dict = Depends(channel_access),
     redis: Redis = Depends(get_redis),
-    _role: str = Depends(salon_role),
 ) -> MemberList:
     members = []
     for user_id in salons.list_channel_member_ids(redis, channel["id"]):

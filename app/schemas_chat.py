@@ -86,14 +86,20 @@ class PublicKeyOut(BaseModel):
 
 
 class ChannelKeyIn(BaseModel):
+    """`user_id` absent = je depose ma propre cle de canal."""
+
     model_config = StrictModel
     wrapped_key: WrappedKey
+    user_id: Annotated[
+        str, StringConstraints(min_length=8, max_length=64, pattern=r"^[a-f0-9]+$")
+    ] | None = None
 
 
 class ChannelKeyOut(BaseModel):
     model_config = StrictModel
     version: int
     wrapped_key: str
+    from_user_id: str
 
 
 class ChannelKeysOut(BaseModel):
