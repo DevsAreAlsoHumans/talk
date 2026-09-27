@@ -1,12 +1,15 @@
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 
 from app.db.mongo import db, find_user_by_tag
 from app.db.redis_client import redis_client
+from app.models.attachment import AttachmentPublic
 from app.models.room import (
     GroupRoomCreate,
     MemberRoleUpdate,
@@ -21,10 +24,12 @@ from app.models.user import PeerPublic
 from app.security.sessions import get_current_user_id, require_csrf
 from app.services.notifications import create_notification
 from app.services.realtime import room_channel
+from app.services.storage import blob_path, save_blob
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
 _ROLE_RANK = {"member": 0, "admin": 1, "owner": 2}
+_MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024
 
 
 def _to_dm_room_public(room: dict[str, Any], peer_document: dict[str, Any]) -> RoomPublic:
@@ -53,13 +58,24 @@ def _to_group_room_public(
     return RoomPublic(id=str(room["_id"]), type="group", name=room["name"], members=members)
 
 
-def _to_message_public(document: dict[str, Any]) -> MessagePublic:
+def _to_attachment_public(document: dict[str, Any]) -> AttachmentPublic:
+    return AttachmentPublic(
+        id=document["_id"], size=document["size"], sha256=document["sha256"], iv=document["iv"]
+    )
+
+
+def _to_message_public(
+    document: dict[str, Any], attachment_document: dict[str, Any] | None = None
+) -> MessagePublic:
     return MessagePublic(
         id=str(document["_id"]),
         room_id=document["room_id"],
         sender_id=document["sender_id"],
         ciphertext=document["ciphertext"],
         iv=document["iv"],
+        attachment=_to_attachment_public(attachment_document)
+        if attachment_document is not None
+        else None,
         created_at=document["created_at"],
     )
 
@@ -307,7 +323,15 @@ async def list_messages(
 
     cursor = db.messages.find({"room_id": room_id}).sort("created_at", 1)
     documents = await cursor.to_list(length=200)
-    return [_to_message_public(document) for document in documents]
+
+    attachment_ids = [d["attachment_id"] for d in documents if d.get("attachment_id")]
+    attachments = await db.attachments.find({"_id": {"$in": attachment_ids}}).to_list(length=None)
+    attachments_by_id = {attachment["_id"]: attachment for attachment in attachments}
+
+    return [
+        _to_message_public(document, attachments_by_id.get(document.get("attachment_id")))
+        for document in documents
+    ]
 
 
 @router.post(
@@ -322,17 +346,29 @@ async def send_message(
     """Stocke un message chiffré et le publie en temps réel aux membres connectés."""
     room = await _get_membership_or_404(room_id, user_id)
 
+    attachment_document = None
+    if payload.attachment_id is not None:
+        attachment_document = await db.attachments.find_one(
+            {"_id": payload.attachment_id, "room_id": room_id}
+        )
+        if attachment_document is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pièce jointe invalide pour ce salon.",
+            )
+
     document: dict[str, Any] = {
         "room_id": room_id,
         "sender_id": user_id,
         "ciphertext": payload.ciphertext,
         "iv": payload.iv,
+        "attachment_id": payload.attachment_id,
         "created_at": datetime.now(UTC),
     }
     result = await db.messages.insert_one(document)
     document["_id"] = result.inserted_id
 
-    message = _to_message_public(document)
+    message = _to_message_public(document, attachment_document)
     await redis_client.publish(room_channel(room_id), message.model_dump_json())
 
     for member_id in room["member_ids"]:
@@ -342,3 +378,53 @@ async def send_message(
             )
 
     return message
+
+
+@router.post(
+    "/{room_id}/attachments", response_model=AttachmentPublic, dependencies=[Depends(require_csrf)]
+)
+async def upload_attachment(
+    room_id: str,
+    iv: str = Form(...),
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+) -> AttachmentPublic:
+    """Upload d'une pièce jointe déjà chiffrée (le serveur ne voit que le ciphertext)."""
+    await _get_membership_or_404(room_id, user_id)
+
+    data = await file.read()
+    if len(data) > _MAX_ATTACHMENT_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Fichier trop volumineux (20 Mo maximum).",
+        )
+
+    blob_id = save_blob(data)
+    sha256 = hashlib.sha256(data).hexdigest()
+    document = {
+        "_id": blob_id,
+        "room_id": room_id,
+        "size": len(data),
+        "sha256": sha256,
+        "iv": iv,
+        "uploader_id": user_id,
+        "created_at": datetime.now(UTC),
+    }
+    await db.attachments.insert_one(document)
+    return _to_attachment_public(document)
+
+
+@router.get("/{room_id}/attachments/{attachment_id}")
+async def download_attachment(
+    room_id: str, attachment_id: str, user_id: str = Depends(get_current_user_id)
+) -> FileResponse:
+    """Télécharge le blob chiffré d'une pièce jointe (réservé aux membres du salon)."""
+    await _get_membership_or_404(room_id, user_id)
+
+    document = await db.attachments.find_one({"_id": attachment_id, "room_id": room_id})
+    path = blob_path(attachment_id) if document is not None else None
+    if document is None or path is None or not path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Pièce jointe introuvable."
+        )
+    return FileResponse(path, media_type="application/octet-stream")

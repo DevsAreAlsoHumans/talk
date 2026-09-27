@@ -32,12 +32,9 @@ async function request(method, path, body) {
   return response.json();
 }
 
-async function uploadAvatar(file) {
+async function uploadMultipart(path, formData) {
   const csrfToken = getCookie("csrf_token");
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const response = await fetch("/users/me/avatar/upload", {
+  const response = await fetch(path, {
     method: "POST",
     headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {},
     body: formData,
@@ -49,6 +46,27 @@ async function uploadAvatar(file) {
     throw new Error(errorBody.detail || response.statusText);
   }
   return response.json();
+}
+
+function uploadAvatar(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return uploadMultipart("/users/me/avatar/upload", formData);
+}
+
+function uploadAttachment(roomId, ciphertextBlob, iv) {
+  const formData = new FormData();
+  formData.append("iv", iv);
+  formData.append("file", ciphertextBlob, "blob");
+  return uploadMultipart(`/rooms/${roomId}/attachments`, formData);
+}
+
+async function downloadAttachment(roomId, attachmentId) {
+  const response = await fetch(`/rooms/${roomId}/attachments/${attachmentId}`, {
+    credentials: "include",
+  });
+  if (!response.ok) throw new Error("Impossible de télécharger la pièce jointe.");
+  return response.arrayBuffer();
 }
 
 export const api = {
@@ -70,8 +88,14 @@ export const api = {
   openDm: (username, discriminator) => request("POST", "/rooms/dm", { username, discriminator }),
   listRooms: () => request("GET", "/rooms"),
   listMessages: (roomId) => request("GET", `/rooms/${roomId}/messages`),
-  sendMessage: (roomId, ciphertext, iv) =>
-    request("POST", `/rooms/${roomId}/messages`, { ciphertext, iv }),
+  sendMessage: (roomId, ciphertext, iv, attachmentId) =>
+    request("POST", `/rooms/${roomId}/messages`, {
+      ciphertext,
+      iv,
+      attachment_id: attachmentId || null,
+    }),
+  uploadAttachment,
+  downloadAttachment,
   listNotifications: () => request("GET", "/notifications"),
   markNotificationRead: (notificationId) =>
     request("POST", `/notifications/${notificationId}/read`),

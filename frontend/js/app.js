@@ -133,18 +133,42 @@ async function openRoom(room) {
 
 async function renderMessage(message) {
   const item = document.createElement("li");
+  const author = message.sender_id === currentUser.id ? "Moi" : "Eux";
   try {
-    const plaintext = await cryptoUtil.decryptMessage(
-      currentRoom.sharedKey,
-      message.ciphertext,
-      message.iv
-    );
-    item.textContent =
-      message.sender_id === currentUser.id ? `Moi : ${plaintext}` : `Eux : ${plaintext}`;
+    const plaintext = message.ciphertext
+      ? await cryptoUtil.decryptMessage(currentRoom.sharedKey, message.ciphertext, message.iv)
+      : "";
+    item.textContent = plaintext ? `${author} : ${plaintext}` : `${author} :`;
   } catch {
     item.textContent = "[message illisible]";
   }
+
+  if (message.attachment) {
+    const downloadButton = document.createElement("button");
+    downloadButton.textContent = `Pièce jointe chiffrée (${message.attachment.size} octets)`;
+    downloadButton.addEventListener("click", () => downloadAndDecryptAttachment(message));
+    item.appendChild(downloadButton);
+  }
+
   messagesList.appendChild(item);
+}
+
+async function downloadAndDecryptAttachment(message) {
+  const ciphertextBuffer = await api.downloadAttachment(currentRoom.id, message.attachment.id);
+  const plainBuffer = await cryptoUtil.decryptBytes(
+    currentRoom.sharedKey,
+    ciphertextBuffer,
+    message.attachment.iv
+  );
+  // Le nom/type d'origine n'est jamais transmis en clair au serveur (limitation assumée) :
+  // le fichier est téléchargé sous un nom générique.
+  const blob = new Blob([plainBuffer]);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "piece-jointe";
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function renderNotification(notification, prepend) {
@@ -312,11 +336,24 @@ sendForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!currentRoom) return;
   const form = new FormData(event.target);
-  const text = form.get("text");
+  const text = form.get("text") || "";
+  const file = form.get("file");
   event.target.reset();
 
+  let attachmentId = null;
+  if (file && file.size > 0) {
+    const fileBuffer = await file.arrayBuffer();
+    const encryptedFile = await cryptoUtil.encryptBytes(currentRoom.sharedKey, fileBuffer);
+    const attachment = await api.uploadAttachment(
+      currentRoom.id,
+      new Blob([encryptedFile.ciphertext]),
+      encryptedFile.iv
+    );
+    attachmentId = attachment.id;
+  }
+
   const { ciphertext, iv } = await cryptoUtil.encryptMessage(currentRoom.sharedKey, text);
-  const message = await api.sendMessage(currentRoom.id, ciphertext, iv);
+  const message = await api.sendMessage(currentRoom.id, ciphertext, iv, attachmentId);
   await renderMessage(message);
 });
 

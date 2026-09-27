@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.models.attachment import AttachmentPublic
 from app.models.user import PeerPublic
 
 
@@ -53,6 +54,7 @@ class MessageCreate(BaseModel):
 
     ciphertext: str
     iv: str
+    attachment_id: str | None = None
 
 
 class MessagePublic(BaseModel):
@@ -63,4 +65,5 @@ class MessagePublic(BaseModel):
     sender_id: str
     ciphertext: str
     iv: str
+    attachment: AttachmentPublic | None = None
     created_at: datetime

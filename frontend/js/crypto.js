@@ -41,6 +41,17 @@ export async function decryptMessage(key, ciphertextBase64, ivBase64) {
   return new TextDecoder().decode(plaintextBuffer);
 }
 
+export async function encryptBytes(key, plainBuffer) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertextBuffer = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plainBuffer);
+  return { ciphertext: ciphertextBuffer, iv: arrayBufferToBase64(iv) };
+}
+
+export async function decryptBytes(key, ciphertextBuffer, ivBase64) {
+  const iv = base64ToArrayBuffer(ivBase64);
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertextBuffer);
+}
+
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = "";
