@@ -12,6 +12,7 @@ let e2eEnabled = true;
 let accessToken = localStorage.getItem('talk_access_token');
 let creationType = 'server';
 let settingsRoomId = null;
+const spacesById = new Map();
 
 function authHeaders(headers = {}) {
     if (accessToken) {
@@ -41,6 +42,7 @@ const dom = {
     userInfo: document.getElementById('user-info'),
     e2eIndicator: document.getElementById('e2e-indicator'),
     memberIdentifier: document.getElementById('member-identifier'),
+    memberSuggestions: document.getElementById('member-suggestions'),
     btnAddMember: document.getElementById('btn-add-member'),
     memberFeedback: document.getElementById('member-feedback'),
     settingsModal: document.getElementById('settings-modal'),
@@ -48,6 +50,8 @@ const dom = {
     settingsDescription: document.getElementById('settings-description'),
     settingsMemberList: document.getElementById('settings-member-list'),
     btnCloseSettings: document.getElementById('btn-close-settings'),
+    memberActions: document.getElementById('member-actions'),
+    btnHideDirect: document.getElementById('btn-hide-direct'),
     createRoomModal: document.getElementById('create-room-modal'),
     createRoomTitle: document.getElementById('create-room-title'),
     parentServer: document.getElementById('parent-server'),
@@ -240,6 +244,7 @@ async function loadRooms() {
 function renderSpaceSelect(rooms, selectElement, placeholder) {
     selectElement.innerHTML = `<option value="">${placeholder}</option>`;
     rooms.forEach(room => {
+        spacesById.set(room.id, room);
         const option = document.createElement('option');
         option.value = room.id;
         option.textContent = room.name;
@@ -264,6 +269,7 @@ function updateChannelCreationState() {
     const canCreate = Boolean(server && currentUser && server.created_by === currentUser.id);
     const button = document.getElementById('btn-create-channel');
     button.disabled = !canCreate;
+    button.style.display = canCreate ? 'inline-block' : 'none';
     button.title = canCreate ? 'Créer un salon' : 'Seul le propriétaire du serveur peut créer un salon';
 }
 
@@ -542,18 +548,37 @@ function openSettings(type) {
         return;
     }
     settingsRoomId = target.id;
+    const space = spacesById.get(target.id);
     dom.settingsTitle.textContent = `Paramètres du ${target.kind}`;
     dom.settingsDescription.textContent = type === 'direct'
         ? 'Un message direct ne peut pas recevoir de nouveau membre.'
         : 'Seul le propriétaire de cet espace peut ajouter un membre.';
     dom.memberIdentifier.value = '';
     dom.memberFeedback.textContent = '';
-    dom.btnAddMember.disabled = type === 'direct';
-    loadSettingsMembers(target.id, type);
+    const canManage = Boolean(space && currentUser && space.created_by === currentUser.id && type !== 'direct');
+    dom.memberActions.style.display = canManage ? 'block' : 'none';
+    dom.btnHideDirect.style.display = type === 'direct' ? 'block' : 'none';
+    loadSettingsMembers(target.id, type, canManage);
     dom.settingsModal.style.display = 'grid';
 }
 
-async function loadSettingsMembers(roomId, type) {
+async function hideDirectConversation() {
+    if (!settingsRoomId) return;
+    const response = await fetch(`${API_BASE_URL}/api/rooms/${settingsRoomId}`, {
+        method: 'DELETE',
+        headers: authHeaders()
+    });
+    const result = await response.json();
+    dom.memberFeedback.textContent = response.ok ? result.message : (result.detail || 'Suppression impossible');
+    if (response.ok) {
+        dom.settingsModal.style.display = 'none';
+        currentRoomId = null;
+        await loadRooms();
+        dom.messagesContainer.innerHTML = '<p class="placeholder">Sélectionnez une conversation</p>';
+    }
+}
+
+async function loadSettingsMembers(roomId, type, canManage) {
     const response = await fetch(`${API_BASE_URL}/api/rooms/${roomId}/members`, {
         headers: authHeaders()
     });
@@ -572,19 +597,19 @@ async function loadSettingsMembers(roomId, type) {
         const name = document.createElement('span');
         name.textContent = `${member.username} (${member.email})`;
         item.appendChild(name);
-        if (type !== 'direct' && member.id !== currentUser.id) {
+        if (canManage && member.id !== currentUser.id) {
             const removeButton = document.createElement('button');
             removeButton.type = 'button';
             removeButton.className = 'member-remove';
             removeButton.textContent = 'Supprimer';
-            removeButton.addEventListener('click', () => removeMember(roomId, member.id, type));
+            removeButton.addEventListener('click', () => removeMember(roomId, member.id, type, canManage));
             item.appendChild(removeButton);
         }
         dom.settingsMemberList.appendChild(item);
     });
 }
 
-async function removeMember(roomId, memberId, type) {
+async function removeMember(roomId, memberId, type, canManage) {
     const response = await fetch(`${API_BASE_URL}/api/rooms/${roomId}/members/${memberId}`, {
         method: 'DELETE',
         headers: authHeaders()
@@ -592,10 +617,34 @@ async function removeMember(roomId, memberId, type) {
     const result = await response.json();
     dom.memberFeedback.textContent = response.ok ? result.message : (result.detail || 'Suppression impossible');
     if (response.ok) {
-        await loadSettingsMembers(roomId, type);
+        await loadSettingsMembers(roomId, type, canManage);
         await loadRooms();
     }
 }
+
+let memberSearchTimer;
+dom.memberIdentifier.addEventListener('input', () => {
+    clearTimeout(memberSearchTimer);
+    const query = dom.memberIdentifier.value.trim();
+    if (query.length < 2) {
+        dom.memberSuggestions.innerHTML = '';
+        return;
+    }
+    memberSearchTimer = setTimeout(async () => {
+        const response = await fetch(`${API_BASE_URL}/api/auth/users/search?query=${encodeURIComponent(query)}`, {
+            headers: authHeaders()
+        });
+        if (!response.ok) return;
+        const users = await response.json();
+        dom.memberSuggestions.innerHTML = '';
+        users.forEach(user => {
+            const option = document.createElement('option');
+            option.value = user.username;
+            option.label = user.email;
+            dom.memberSuggestions.appendChild(option);
+        });
+    }, 180);
+});
 
 dom.serverSelect.addEventListener('change', async () => {
     currentServerId = dom.serverSelect.value || null;
@@ -719,6 +768,8 @@ function openCreateModal(type) {
 dom.btnCloseSettings.addEventListener('click', () => {
     dom.settingsModal.style.display = 'none';
 });
+
+dom.btnHideDirect.addEventListener('click', hideDirectConversation);
 
 function closeCreateRoomModal() {
     dom.createRoomModal.style.display = 'none';

@@ -129,3 +129,21 @@ async def get_current_user(token: str = Depends(oauth2_scheme), redis: Redis = D
 async def get_csrf_token():
     """Génère un token CSRF."""
     return {"csrf_token": SecurityUtils.generate_csrf_token()}
+
+
+@router.get("/users/search")
+async def search_users(query: str = "", token: str = Depends(oauth2_scheme), redis: Redis = Depends(get_redis)):
+    """Recherche des utilisateurs pour les invitations d'espaces."""
+    current_user_id = SecurityUtils.extract_user_id_from_token(token)
+    normalized_query = query.strip().lower()
+    results = []
+    async for key in redis.scan_iter(match="user:user_*"):
+        user = await get_json(redis, key)
+        if not user or user["id"] == current_user_id:
+            continue
+        if normalized_query and normalized_query not in user["username"].lower() and normalized_query not in user["email"].lower():
+            continue
+        results.append({"id": user["id"], "username": user["username"], "email": user["email"]})
+        if len(results) >= 8:
+            break
+    return results

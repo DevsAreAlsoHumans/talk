@@ -463,6 +463,21 @@ button {
     color: var(--ink);
 }
 
+.btn-danger {
+    width: 100%;
+    margin-top: 12px;
+    border: 1px solid #efc0b7;
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #fff7f5;
+    color: var(--coral-dark);
+    font-weight: 700;
+}
+
+.btn-danger:hover {
+    background: #fee9e4;
+}
+
 .status-indicator {
     width: 9px;
     height: 9px;

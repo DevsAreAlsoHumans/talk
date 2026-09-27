@@ -21,6 +21,7 @@ USER_NAME_KEY = "user:username:{}"
 TYPE_KEY = "rooms:{}"
 CHANNELS_KEY = "server:{}:channels"
 MESSAGE_IDS_KEY = "room:{}:messages"
+HIDDEN_DIRECTS_KEY = "user:{}:hidden_directs"
 
 
 async def get_current_user_id(token: str = Depends(oauth2_scheme)) -> str:
@@ -70,7 +71,7 @@ async def rooms_from_index(redis: Redis, index: str, user_id: str) -> list[dict]
     for room_id in room_ids:
         if await redis.sismember(MEMBERS_KEY.format(room_id), user_id):
             room = await get_json(redis, ROOM_KEY.format(room_id))
-            if room:
+            if room and not (room["room_type"] == RoomType.DIRECT.value and await redis.sismember(HIDDEN_DIRECTS_KEY.format(user_id), room_id)):
                 rooms.append(room)
     return rooms
 
@@ -126,6 +127,18 @@ async def create_room(room_data: RoomCreate, token: str = Depends(oauth2_scheme)
     for member_id in member_ids:
         if not await redis.exists(USER_KEY.format(member_id)):
             raise HTTPException(status_code=404, detail="Un membre invité est introuvable")
+    if room_data.room_type == RoomType.DIRECT:
+        target_ids = member_ids | {user_id}
+        for existing_id in await redis.smembers(TYPE_KEY.format(RoomType.DIRECT.value)):
+            existing = await get_json(redis, ROOM_KEY.format(existing_id))
+            existing_members = await redis.smembers(MEMBERS_KEY.format(existing_id))
+            if existing and existing_members == target_ids:
+                async with redis.pipeline(transaction=True) as pipeline:
+                    pipeline.srem(HIDDEN_DIRECTS_KEY.format(user_id), existing_id)
+                    for member_id in target_ids:
+                        pipeline.srem(HIDDEN_DIRECTS_KEY.format(member_id), existing_id)
+                    await pipeline.execute()
+                return existing
     room_id = f"room_{secrets.token_urlsafe(8)}"
     members = member_ids | {user_id}
     room = {
@@ -168,6 +181,9 @@ async def update_room(room_id: str, room_data: RoomCreate, token: str = Depends(
 async def delete_room(room_id: str, token: str = Depends(oauth2_scheme), redis: Redis = Depends(get_redis)):
     user_id = await get_current_user_id(token)
     room = await require_member(redis, room_id, user_id)
+    if room["room_type"] == RoomType.DIRECT.value:
+        await redis.sadd(HIDDEN_DIRECTS_KEY.format(user_id), room_id)
+        return {"message": "Conversation supprimée de votre liste"}
     if room["created_by"] != user_id:
         raise HTTPException(status_code=403, detail="Non autorisé")
     message_ids = await redis.zrange(MESSAGE_IDS_KEY.format(room_id), 0, -1)

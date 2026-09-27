@@ -121,9 +121,13 @@
             <p id="settings-description"></p>
             <h4>Membres</h4>
             <ul id="settings-member-list"></ul>
-            <label for="member-identifier">Ajouter un membre</label>
-            <input type="text" id="member-identifier" placeholder="Nom d'utilisateur ou email">
-            <button id="btn-add-member" class="btn-primary" type="button">Ajouter le membre</button>
+            <div id="member-actions">
+                <label for="member-identifier">Ajouter un membre</label>
+                <input type="text" id="member-identifier" list="member-suggestions" placeholder="Nom d'utilisateur ou email" autocomplete="off">
+                <datalist id="member-suggestions"></datalist>
+                <button id="btn-add-member" class="btn-primary" type="button">Ajouter le membre</button>
+            </div>
+            <button id="btn-hide-direct" class="btn-danger" type="button">Supprimer cette conversation</button>
             <p id="member-feedback"></p>
             <button id="btn-close-settings" type="button">Fermer</button>
         </div>
