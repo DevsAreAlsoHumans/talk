@@ -1,0 +1,32 @@
+[project]
+name = "talk"
+version = "0.1.0"
+description = "Chat chiffre de bout en bout — croisement entre Discord et Telegram WebApp"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "redis==5.2.1",
+    "python-multipart==0.0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "httpx==0.28.1",
+    "pytest-asyncio==0.25.0",
+    "ruff==0.8.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

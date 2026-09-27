@@ -1,0 +1,40 @@
+name: talk
+
+services:
+  app:
+    build: .
+    image: talk-app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET doit etre defini}
+      DEBUG: "false"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  test:
+    build: .
+    image: talk-app
+    command: sh -c "ruff check . && pytest"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SESSION_SECRET: test-secret
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - test
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
