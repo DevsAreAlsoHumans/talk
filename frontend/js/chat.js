@@ -54,7 +54,15 @@ const UNDECIPHERABLE = "⟦message indéchiffrable⟧";
 const state = {
   user: null,
   channels: [],
+  servers: [],
+  serverById: new Map(),
+  // Cléée par `user_id` : c'est le champ qu'expose un membre de serveur, et non
+  // `id`. Aucun canal ne porte de membres, donc c'est le serveur qui alimente cette
+  // table, pour tous ses canaux.
   membersById: new Map(),
+  // Le serveur sélectionné est le contexte de toute l'interface : c'est lui qui
+  // fournit la liste des canaux, les membres, et la cible d'une création.
+  currentServerId: null,
   currentChannelId: null,
   roomKey: null,
   socket: null,
@@ -77,6 +85,7 @@ export async function initChat(user) {
   try {
     await ensureIdentity();
     await redrivePendingRooms();
+    await refreshServers();
     await refreshChannels();
   } catch (error) {
     showError(error.message);
@@ -85,10 +94,14 @@ export async function initChat(user) {
 
 function cacheElements() {
   elements.channels = document.getElementById("channel-list");
+  elements.servers = document.getElementById("server-list");
   elements.messages = document.getElementById("message-list");
   elements.composer = document.getElementById("message-form");
   elements.composerInput = document.getElementById("message-input");
   elements.createInput = document.getElementById("channel-name");
+  elements.createButton = document.querySelector("#create-channel-form button[type=submit]");
+  elements.channelTarget = document.getElementById("channel-target");
+  elements.serverHint = document.getElementById("server-hint");
   elements.addMemberInput = document.getElementById("member-username");
   elements.removeMemberInput = document.getElementById("remove-member-username");
   elements.channelTitle = document.getElementById("channel-title");
@@ -163,10 +176,10 @@ async function readPublishedKey() {
 /**
  * Rattache les canaux dont la clé n'a pas encore été déposée.
  *
- * Une clé en attente signifie qu'un `POST /channels` a peut-être abouti sans que
- * le navigateur ait eu le temps de déposer la première enveloppe. On retrouve
- * le canal par sa référence locale — unique par créateur, garantie par un index
- * MongoDB — puis on rattache la clé et on la distribue.
+ * Une clé en attente signifie qu'un `POST /servers/{server_id}/channels` a peut-être
+ * abouti sans que le navigateur ait eu le temps de déposer la première enveloppe.
+ * On retrouve le canal par sa référence locale — unique par serveur, garantie par
+ * un index MongoDB — puis on rattache la clé et on la distribue.
  *
  * Si le canal n'existe pas, la création n'a jamais abouti : la clé est alors
  * supprimée. Aucun canal n'est recréé automatiquement, car le serveur n'a jamais
@@ -203,17 +216,136 @@ async function attachRoomKey(roomId, channelId) {
 /* Canaux                                                              */
 /* ------------------------------------------------------------------ */
 
-async function refreshChannels() {
-  state.channels = await expectJson(await getJson("/channels"));
-  for (const channel of state.channels) {
-    for (const member of channel.members) {
-      state.membersById.set(member.id, member);
+/**
+ * Charge les serveurs de l'utilisateur, et par eux la composition d'un canal.
+ *
+ * L'appartenance est une donnée de serveur : c'est le seul endroit où figure la
+ * liste des membres, avec leur clé publique. La table `membersById` sert donc à
+ * afficher le nom d'un expéditeur et à lui distribuer une clé de salon, et elle
+ * est reconstruite à partir des serveurs, jamais des canaux.
+ */
+async function refreshServers() {
+  state.servers = await expectJson(await getJson("/servers"));
+  state.serverById = new Map(state.servers.map((server) => [server.id, server]));
+  state.membersById = new Map();
+  for (const server of state.servers) {
+    for (const member of server.members) {
+      state.membersById.set(member.user_id, member);
     }
   }
+  // Un serveur peut avoir disparu entre deux chargements : l'utilisateur a pu
+  // en être retiré depuis une autre session. Le contexte est alors relâché, plutôt
+  // que de continuer à viser un serveur devenu inaccessible.
+  if (state.currentServerId && !state.serverById.has(state.currentServerId)) {
+    leaveCurrentChannel();
+    state.currentServerId = null;
+    state.currentChannelId = null;
+  }
+  renderServers();
+}
+
+/**
+ * Affiche les serveurs de l'utilisateur.
+ *
+ * Aucun serveur n'est présélectionné, même lorsqu'il n'y en a qu'un : la
+ * navigation part d'un serveur, et le choisir fait partie de l'usage. La liste ne
+ * contient que les serveurs de l'utilisateur, `GET /servers` étant lui-même
+ * filtré, et l'absence de serveur se dit explicitement plutôt que de laisser une
+ * barre latérale muette.
+ */
+function renderServers() {
+  if (!elements.servers) {
+    return;
+  }
+  elements.servers.replaceChildren();
+  if (state.servers.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "chat-empty";
+    empty.textContent = "Aucun serveur.";
+    elements.servers.append(empty);
+  }
+  for (const server of state.servers) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "server-button";
+    if (server.id === state.currentServerId) {
+      button.classList.add("server-button-active");
+      button.setAttribute("aria-current", "true");
+    }
+    button.textContent = server.name;
+    button.addEventListener("click", () => {
+      selectServer(server.id).catch((error) => showError(error.message));
+    });
+    elements.servers.append(button);
+  }
+  renderCreateTarget();
   renderChannels();
 }
 
-async function createChannel(name) {
+/** Rend explicite le serveur dans lequel un nouveau canal sera créé. */
+function renderCreateTarget() {
+  const server = currentServer();
+  if (elements.channelTarget) {
+    elements.channelTarget.textContent = server
+      ? `Nouveau canal dans « ${server.name} »`
+      : "Aucun serveur sélectionné.";
+  }
+  if (elements.createButton) {
+    elements.createButton.disabled = !server;
+  }
+  if (elements.serverHint) {
+    elements.serverHint.hidden = state.servers.length !== 0;
+  }
+}
+
+/**
+ * Fait d'un serveur le contexte courant, puis charge ses canaux.
+ *
+ * Changer de serveur quitte le canal affiché : un canal n'appartient qu'à un seul
+ * serveur, et laisser une conversation ouverte sous une autre liste de canaux
+ * l'afficherait hors de son contexte.
+ */
+async function selectServer(serverId) {
+  if (!state.serverById.has(serverId)) {
+    return;
+  }
+  if (state.currentServerId !== serverId) {
+    leaveCurrentChannel();
+    state.currentServerId = serverId;
+    state.currentChannelId = null;
+  }
+  await refreshChannels();
+}
+
+function currentServer() {
+  return state.serverById.get(state.currentServerId) || null;
+}
+
+/**
+ * Charge les canaux du serveur courant.
+ *
+ * La liste est celle du serveur sélectionné et non une liste plate tous serveurs
+ * confondus : la navigation part d'un serveur, elle en suit un. `GET /channels`
+ * reste consommé par la reprise après fermeture de navigateur, qui cherche un
+ * canal par sa `client_ref` sans connaître son serveur.
+ */
+async function refreshChannels() {
+  const server = currentServer();
+  state.channels = server
+    ? await expectJson(await getJson(`/servers/${server.id}/channels`))
+    : [];
+  renderChannels();
+}
+
+/**
+ * Crée un canal dans le serveur courant.
+ *
+ * Le serveur vient du contexte, donc d'un choix explicite de l'utilisateur dans
+ * la liste des serveurs. Cela ne dispense pas le serveur de tout valider : l'API
+ * recalcule l'appartenance et le droit de création à partir de la session, si
+ * bien qu'un `server_id` falsifié depuis la console se heurte à un 403.
+ */
+async function createChannel(name, serverId) {
   const clientRef = globalThis.crypto.randomUUID();
   const roomId = pendingRoomId(clientRef);
 
@@ -224,7 +356,7 @@ async function createChannel(name) {
 
   try {
     const channel = await expectJson(
-      await postJson("/channels", { name, client_ref: clientRef }),
+      await postJson(`/servers/${serverId}/channels`, { name, client_ref: clientRef }),
     );
     await attachRoomKey(roomId, channel.id);
     await ensureSelfEnvelope(channel.id);
@@ -280,9 +412,6 @@ async function selectChannel(channelId) {
   state.roomKey = null;
 
   const channel = state.channels.find((candidate) => candidate.id === channelId);
-  for (const member of channel?.members || []) {
-    state.membersById.set(member.id, member);
-  }
   renderChannelHeader(channel);
 
   stopKeyPolling();
@@ -345,6 +474,16 @@ function stopKeyPolling() {
   }
 }
 
+/**
+ * Quitte le canal courant et efface tout ce qui s'y rapporte.
+ *
+ * C'est le seul endroit où l'état d'un canal est abandonné, et il est appelé
+ * par `selectChannel` comme par `selectServer`. La clé de salon et le message
+ * d'attente sont donc remis à zéro ici : sans cela, un changement de serveur
+ * laisserait en mémoire la clé du canal quitté, et un statut qui lui
+ * appartenait. `selectChannel` fixe son propre statut juste après, donc rien ne
+ * manque.
+ */
 function leaveCurrentChannel() {
   if (state.socket) {
     state.socket.close();
@@ -352,25 +491,36 @@ function leaveCurrentChannel() {
   }
   stopKeyPolling();
   clearMessages();
+  state.roomKey = null;
+  setStatus("");
 }
 
 /* ------------------------------------------------------------------ */
 /* Membres                                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Adhère un membre du serveur courant à un canal, en lui transmettant la clé.
+ *
+ * Attention au nom : ce formulaire n'adhère personne. L'appartenance au serveur
+ * se décide à l'échelle du serveur, et le serveur en refuse la modification à
+ * quiconque n'en est pas le créateur. Ce que fait ce formulaire, c'est
+ * distribuer la clé de salon à un membre déjà présent, ce qui est la seconde
+ * moitié de l'adhésion et la seule moitié qui dépend de la cryptographie.
+ */
 async function addMember(username) {
-  const channelId = state.currentChannelId;
-  const channel = state.channels.find((candidate) => candidate.id === channelId);
-  const member = channel?.members.find((candidate) => candidate.username === username);
-  if (!channelId || !member) {
-    showError("Ce membre ne fait pas partie du canal sélectionné.");
+  const channel = currentChannel();
+  const server = currentServer();
+  const member = server?.members.find((candidate) => candidate.username === username);
+  if (!channel || !member) {
+    showError(`${username} ne fait pas partie du serveur courant.`);
     return;
   }
   if (!member.public_key_jwk) {
     showError(`${username} n'a pas encore de clé publique : la demande est en attente.`);
     return;
   }
-  const key = await loadRoomKey(channelRoomId(channelId));
+  const key = await loadRoomKey(channelRoomId(channel.id));
   if (!key) {
     showError("La clé de salon n'est pas disponible dans ce navigateur.");
     return;
@@ -380,8 +530,8 @@ async function addMember(username) {
   try {
     const wrapped = await wrapRoomKey(raw, await importPublicKey(member.public_key_jwk));
     await expectJson(
-      await postJson(`/channels/${channelId}/keys`, {
-        user_id: member.id,
+      await postJson(`/channels/${channel.id}/keys`, {
+        user_id: member.user_id,
         wrapped_key: toBase64(wrapped),
       }),
     );
@@ -391,15 +541,28 @@ async function addMember(username) {
   }
 }
 
+/**
+ * Retire un membre du serveur, ce qui le retire de tous ses canaux.
+ *
+ * L'effet est plus large que le canal affiché : le membre perd l'accès à
+ * l'historique et au temps réel de tous les canaux du serveur, et ses enveloppes
+ * de clé lui sont retirées. Le canal lui-même n'est pas supprimé.
+ */
 async function removeMember(username) {
-  const channel = state.channels.find((candidate) => candidate.id === state.currentChannelId);
-  const member = channel?.members.find((candidate) => candidate.username === username);
-  if (!member) {
+  const channel = currentChannel();
+  const server = currentServer();
+  const member = server?.members.find((candidate) => candidate.username === username);
+  if (!channel || !member) {
     return;
   }
-  await expectJson(await deleteJson(`/channels/${channel.id}/members/${member.id}`));
-  await refreshChannels();
+  await expectJson(await deleteJson(`/servers/${server.id}/members/${member.user_id}`));
+  await refreshServers();
   await selectChannel(channel.id);
+}
+
+/** Canal sélectionné, ou `null` si l'utilisateur n'en a sélectionné aucun. */
+function currentChannel() {
+  return state.channels.find((candidate) => candidate.id === state.currentChannelId) || null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -548,12 +711,13 @@ function wireEvents() {
   document.getElementById("create-channel-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = elements.createInput.value.trim();
-    if (!name) {
+    const serverId = state.currentServerId;
+    if (!name || !serverId) {
       return;
     }
     elements.createInput.value = "";
     try {
-      await createChannel(name);
+      await createChannel(name, serverId);
     } catch (error) {
       showError(error.message);
     }
@@ -601,24 +765,32 @@ function renderChannels() {
   if (state.channels.length === 0) {
     const empty = document.createElement("p");
     empty.className = "chat-empty";
-    empty.textContent = "Aucun canal. Créez-en un pour commencer.";
+    empty.textContent = currentServer()
+      ? "Aucun canal dans ce serveur."
+      : "Sélectionnez un serveur pour voir ses canaux.";
     elements.channels.append(empty);
-    return;
-  }
-  for (const channel of state.channels) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "channel-button";
-    if (channel.id === state.currentChannelId) {
-      button.classList.add("channel-button-active");
-      button.setAttribute("aria-current", "true");
+  } else {
+    for (const channel of state.channels) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "channel-button";
+      if (channel.id === state.currentChannelId) {
+        button.classList.add("channel-button-active");
+        button.setAttribute("aria-current", "true");
+      }
+      button.textContent = channel.name;
+      button.addEventListener("click", () => {
+        selectChannel(channel.id).catch((error) => showError(error.message));
+      });
+      elements.channels.append(button);
     }
-    button.textContent = channel.name;
-    button.addEventListener("click", () => {
-      selectChannel(channel.id).catch((error) => showError(error.message));
-    });
-    elements.channels.append(button);
   }
+  // L'en-tête et la liste des membres sont remis à jour dans les deux cas, y
+  // compris quand la liste est vide : revenir ici après un changement de serveur
+  // doit effacer le canal précédent, pas le laisser à l'écran avec les membres de
+  // son ancien serveur. `currentChannel()` vaut `null` dès qu'aucun canal du
+  // serveur courant n'est sélectionné, et `renderChannelHeader(null)` est
+  // précisément l'état neutre — d'où l'appel inconditionnel.
   renderMembers();
 }
 
@@ -629,13 +801,19 @@ function renderChannelHeader(channel) {
     elements.memberActions.hidden = true;
     return;
   }
-  // Seuls le créateur peut administrer le canal. Le serveur le vérifie sur chaque
-  // requête : ceci ne fait qu'éviter de proposer des actions qui seraient refusées.
-  elements.memberActions.hidden = channel.created_by !== state.user.id;
+  // L'appartenance et l'administration appartiennent au serveur, pas au canal :
+  // c'est le serveur courant qui fournit la liste des membres, et c'est son
+  // créateur qui peut administrer. Le serveur revalide sur chaque requête ; ceci
+  // ne fait qu'éviter de proposer des actions qui seraient refusées.
+  const server = currentServer();
+  elements.memberActions.hidden = !server || server.created_by !== state.user.id;
+  if (!server) {
+    return;
+  }
   // Un membre sans clé publique ne peut pas encore recevoir de clé de salon :
   // l'interface le signale plutôt que de laisser une invitation échouer sans
   // explication.
-  for (const member of channel.members) {
+  for (const member of server.members) {
     const item = document.createElement("li");
     item.className = "member-item";
     item.textContent = member.username;
@@ -653,8 +831,7 @@ function renderChannelHeader(channel) {
 }
 
 function renderMembers() {
-  const channel = state.channels.find((candidate) => candidate.id === state.currentChannelId);
-  renderChannelHeader(channel);
+  renderChannelHeader(currentChannel());
 }
 
 function appendMessageRow(text, author, messageId, pending) {

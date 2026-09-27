@@ -98,10 +98,14 @@
 
       <section id="chat-section" class="chat" hidden>
         <aside class="chat-sidebar">
+          <h2 class="chat-heading">Serveurs</h2>
+          <ul class="server-list" id="server-list"></ul>
+
           <h2 class="chat-heading">Canaux</h2>
           <ul class="channel-list" id="channel-list"></ul>
 
           <form id="create-channel-form" class="chat-form" novalidate>
+            <p class="auth-hint" id="channel-target">Aucun serveur sélectionné.</p>
             <label class="auth-label" for="channel-name">Nouveau canal</label>
             <input
               class="auth-input"
@@ -113,6 +117,10 @@
               placeholder="general"
               required
             />
+            <p class="auth-hint" id="server-hint" hidden>
+              Vous ne faites partie d'aucun serveur. Un canal appartient à un serveur : il en faut un
+              avant d'en créer.
+            </p>
             <button class="auth-button" type="submit">Créer</button>
           </form>
         </aside>

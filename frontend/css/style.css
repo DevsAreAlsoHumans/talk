@@ -178,6 +178,7 @@ body {
   font-size: 1.05rem;
 }
 
+.server-list,
 .channel-list,
 .member-list,
 .message-list {
@@ -186,6 +187,9 @@ body {
   list-style: none;
 }
 
+/* Un serveur se lit comme un canal, en plus marqué : c'est le contexte, et le
+   bouton actif doit se distinguer d'un simple survol. */
+.server-button,
 .channel-button {
   display: block;
   width: 100%;
@@ -200,8 +204,15 @@ body {
   cursor: pointer;
 }
 
+.server-button:hover,
 .channel-button:hover {
   background-color: #262935;
+}
+
+.server-button-active {
+  border-color: var(--accent);
+  background-color: #262935;
+  font-weight: 600;
 }
 
 .channel-button-active {
