@@ -54,7 +54,6 @@ class RoomType(str, Enum):
 class RoomCreate(BaseModel):
     """Schéma pour créer un salon."""
     name: str
-    description: Optional[str] = None
     room_type: RoomType = RoomType.CHANNEL
     is_private: bool = False
     parent_server: Optional[str] = None
@@ -83,14 +82,12 @@ class MemberAdd(BaseModel):
 class RoomUpdate(BaseModel):
     """Champs modifiables par le propriétaire d'un espace."""
     name: str = Field(min_length=1, max_length=100)
-    description: Optional[str] = None
 
 
 class Room(BaseModel):
     """Modèle salon/canal."""
     id: str
     name: str
-    description: Optional[str] = None
     room_type: RoomType
     is_private: bool = False
     parent_server: Optional[str] = None
@@ -103,7 +100,6 @@ class RoomResponse(BaseModel):
     """Réponse API salon."""
     id: str
     name: str
-    description: Optional[str] = None
     room_type: RoomType
     is_private: bool = False
     parent_server: Optional[str] = None

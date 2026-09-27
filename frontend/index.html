@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Talk - Chat chiffré de bout en bout</title>
     <link rel="stylesheet" href="/style.css">
-    <meta name="description" content="Application de messagerie chiffrée de bout en bout, type Discord/Telegram">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;">
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
     <meta http-equiv="X-Frame-Options" content="DENY">
@@ -103,8 +102,6 @@
             <form id="create-room-form">
                 <label for="room-name">Nom du salon</label>
                 <input type="text" id="room-name" required maxlength="100">
-                <label for="room-description">Description</label>
-                <textarea id="room-description" maxlength="500"></textarea>
                 <label id="parent-server-label" for="parent-server">Serveur parent du salon</label>
                 <select id="parent-server"></select>
                 <label id="member-identifiers-label" for="member-identifiers">Membres invités</label>
@@ -118,12 +115,10 @@
     <div id="settings-modal" class="modal" style="display:none;">
         <div class="modal-content">
             <h3 id="settings-title">Paramètres</h3>
-            <p id="settings-description"></p>
+            <p id="settings-hint"></p>
             <div id="space-editing">
                 <label for="settings-name">Nom</label>
                 <input type="text" id="settings-name" maxlength="100">
-                <label for="settings-description-input">Description</label>
-                <textarea id="settings-description-input" maxlength="500"></textarea>
                 <button id="btn-save-space" class="btn-primary" type="button">Enregistrer</button>
             </div>
             <h4>Membres</h4>

@@ -418,7 +418,7 @@ button {
     font-size: 0.75rem;
 }
 
-#settings-description {
+#settings-hint {
     margin-bottom: 18px;
     color: var(--muted);
     font-size: 0.85rem;

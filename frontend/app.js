@@ -47,10 +47,9 @@ const dom = {
     memberFeedback: document.getElementById('member-feedback'),
     settingsModal: document.getElementById('settings-modal'),
     settingsTitle: document.getElementById('settings-title'),
-    settingsDescription: document.getElementById('settings-description'),
+    settingsHint: document.getElementById('settings-hint'),
     spaceEditing: document.getElementById('space-editing'),
     settingsName: document.getElementById('settings-name'),
-    settingsDescriptionInput: document.getElementById('settings-description-input'),
     btnSaveSpace: document.getElementById('btn-save-space'),
     settingsMemberList: document.getElementById('settings-member-list'),
     btnCloseSettings: document.getElementById('btn-close-settings'),
@@ -258,6 +257,9 @@ async function loadRooms() {
             if (currentServerId) {
                 dom.serverSelect.value = currentServerId;
                 await loadChannels(currentServerId);
+            } else {
+                dom.channelSelect.innerHTML = '<option value="">Sélectionner un salon</option>';
+                dom.channelSelect.disabled = true;
             }
             updateChannelCreationState();
         }
@@ -595,7 +597,7 @@ function openSettings(type) {
     settingsRoomId = target.id;
     const space = spacesById.get(target.id);
     dom.settingsTitle.textContent = `Paramètres du ${target.kind}`;
-    dom.settingsDescription.textContent = type === 'direct'
+    dom.settingsHint.textContent = type === 'direct'
         ? 'Un message direct ne peut pas recevoir de nouveau membre.'
         : 'Seul le propriétaire de cet espace peut ajouter un membre.';
     dom.memberIdentifier.value = '';
@@ -603,7 +605,6 @@ function openSettings(type) {
     const canManage = Boolean(space && currentUser && space.created_by === currentUser.id && type !== 'direct');
     dom.spaceEditing.style.display = canManage ? 'block' : 'none';
     dom.settingsName.value = space ? space.name : '';
-    dom.settingsDescriptionInput.value = space ? (space.description || '') : '';
     dom.memberActions.style.display = canManage ? 'block' : 'none';
     dom.btnHideDirect.style.display = type === 'direct' ? 'block' : 'none';
     loadSettingsMembers(target.id, type, canManage);
@@ -616,8 +617,7 @@ dom.btnSaveSpace.addEventListener('click', async () => {
         method: 'PUT',
         headers: authHeaders({'Content-Type': 'application/json'}),
         body: JSON.stringify({
-            name: dom.settingsName.value.trim(),
-            description: dom.settingsDescriptionInput.value.trim() || null
+            name: dom.settingsName.value.trim()
         })
     });
     const result = await response.json();
@@ -714,6 +714,8 @@ dom.memberIdentifier.addEventListener('input', () => {
 
 dom.serverSelect.addEventListener('change', async () => {
     currentServerId = dom.serverSelect.value || null;
+    dom.groupSelect.value = '';
+    dom.directSelect.value = '';
     clearConversation(currentServerId ? 'Sélectionnez un salon' : 'Sélectionnez un serveur');
     dom.channelSelect.value = '';
     dom.channelSelect.disabled = !currentServerId;
@@ -733,6 +735,8 @@ dom.channelSelect.addEventListener('change', () => {
         clearConversation('Sélectionnez un salon');
         return;
     }
+    dom.groupSelect.value = '';
+    dom.directSelect.value = '';
     if (roomId) {
         const name = dom.channelSelect.options[dom.channelSelect.selectedIndex].textContent;
         joinRoom(roomId, name);
@@ -745,6 +749,11 @@ dom.groupSelect.addEventListener('change', () => {
         clearConversation('Sélectionnez un groupe');
         return;
     }
+    currentServerId = null;
+    dom.serverSelect.value = '';
+    dom.directSelect.value = '';
+    dom.channelSelect.innerHTML = '<option value="">Sélectionner un salon</option>';
+    dom.channelSelect.disabled = true;
     if (roomId) joinRoom(roomId, dom.groupSelect.options[dom.groupSelect.selectedIndex].textContent);
 });
 
@@ -754,6 +763,11 @@ dom.directSelect.addEventListener('change', () => {
         clearConversation('Sélectionnez une conversation');
         return;
     }
+    currentServerId = null;
+    dom.serverSelect.value = '';
+    dom.groupSelect.value = '';
+    dom.channelSelect.innerHTML = '<option value="">Sélectionner un salon</option>';
+    dom.channelSelect.disabled = true;
     if (roomId) joinRoom(roomId, dom.directSelect.options[dom.directSelect.selectedIndex].textContent);
 });
 
@@ -762,7 +776,6 @@ if (dom.createRoomForm) {
     dom.createRoomForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const name = document.getElementById('room-name').value;
-        const description = document.getElementById('room-description').value;
         const roomType = creationType;
         const parentServer = document.getElementById('parent-server').value || null;
         const memberIdentifiers = document.getElementById('member-identifiers').value
@@ -779,7 +792,6 @@ if (dom.createRoomForm) {
                 }),
                 body: JSON.stringify({
                     name,
-                    description,
                     room_type: roomType,
                     parent_server: parentServer,
                     member_identifiers: memberIdentifiers,

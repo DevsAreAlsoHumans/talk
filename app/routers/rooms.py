@@ -144,7 +144,6 @@ async def create_room(room_data: RoomCreate, token: str = Depends(oauth2_scheme)
     room = {
         "id": room_id,
         "name": room_data.name,
-        "description": room_data.description,
         "room_type": room_data.room_type.value,
         "is_private": room_data.is_private or room_data.room_type in (RoomType.GROUP, RoomType.DIRECT),
         "parent_server": room_data.parent_server,
@@ -168,7 +167,7 @@ async def update_room(room_id: str, room_data: RoomUpdate, token: str = Depends(
     room = await require_member(redis, room_id, user_id)
     if room["created_by"] != user_id:
         raise HTTPException(status_code=403, detail="Non autorisé")
-    room.update({"name": room_data.name, "description": room_data.description})
+    room.update({"name": room_data.name})
     await set_json(redis, ROOM_KEY.format(room_id), room)
     return room
 

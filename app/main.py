@@ -29,7 +29,6 @@ def create_app() -> FastAPI:
     """Crée l'application FastAPI."""
     app = FastAPI(
         title=settings.APP_NAME,
-        description="Chat chiffré de bout en bout - SDV DEV 2026",
         version="1.0.0",
         lifespan=lifespan,
     )

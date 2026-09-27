@@ -11,7 +11,7 @@ Sujet d'examen `SDV DEV 2026`.
 | Couche | Technologie |
 |--------|-------------|
 | Backend | Python + FastAPI |
-| Stockage | Redis ou MongoDB |
+| Stockage | Redis |
 | Frontend | HTML + CSS + JavaScript vanilla |
 | Temps réel | WebSocket / polling court |
 | CI | GitHub Actions |
@@ -20,7 +20,11 @@ Sujet d'examen `SDV DEV 2026`.
 ## Fonctionnalités
 
 - Authentification (inscription, connexion, sessions sécurisées, mots de passe hachés).
-- Salons et canaux de discussion multi-utilisateurs, proche d'un serveur Discord.
+- Serveurs racines et salons associés ; un salon ne peut pas exister sans serveur parent.
+- Groupes et messages directs séparés des serveurs et salons.
+- Gestion des membres dans les paramètres, avec droits réservés au propriétaire.
+- Masquage individuel des messages directs et réutilisation de la conversation lors d'une recréation.
+- Renommage des espaces par leur propriétaire.
 - Messages chiffrés de bout en bout, **jamais stockés en clair**.
 - Mise à jour en temps réel ou quasi temps réel.
 - Interface web légère et utilisable, style webapp.
@@ -58,6 +62,18 @@ python run_tests.py
 ```
 
 La **CI GitHub Actions** exécute les tests et le linter à chaque push / pull request.
+
+## Utiliser l'interface
+
+Ouvrir `http://localhost:8000` après le démarrage Docker. Les sélecteurs sont indépendants :
+
+- Sélectionner un serveur affiche ses salons dans le sélecteur dédié.
+- Sélectionner un salon affiche le titre `Serveur / Salon`.
+- Sélectionner un groupe ou un message direct efface le contexte serveur précédent.
+- Désélectionner un espace vide la conversation.
+- Les paramètres permettent au propriétaire de renommer l'espace et de gérer ses membres.
+
+Le compte de démonstration local est `Admin` avec le mot de passe `admin` lorsque `SEED_ADMIN=true`.
 
 ## Déploiement
 

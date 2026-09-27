@@ -13,6 +13,8 @@ Ce document decrit l'installation, les tests et le deploiement de l'application 
 - Port HTTP de l'application : `8000`
 - Port Redis : `6379`
 
+Les espaces sont stockés dans Redis par type : serveurs, salons, groupes et messages directs. Les salons sont toujours rattachés à un serveur. Les messages directs sont masqués individuellement lors d'une suppression et réapparaissent lors d'une recréation avec le même utilisateur.
+
 ## 2. Prerequis
 
 ### Installation recommandee
@@ -231,19 +233,15 @@ Reponse attendue :
 {"status":"healthy","service":"talk"}
 ```
 
-L'API est alors accessible a l'adresse :
+L'interface et l'API sont alors accessibles a l'adresse :
 
 ```text
 http://localhost:8000
 ```
 
-Le backend actuel ne monte pas automatiquement `frontend/` comme fichiers statiques. Pour tester l'interface frontend localement, lancer un serveur statique dans un second terminal :
+FastAPI sert directement `frontend/index.html`, `frontend/app.js` et `frontend/style.css` à la racine. Aucun second serveur statique n'est nécessaire avec Docker Compose.
 
-```bash
-python3 -m http.server 8080 --directory frontend
-```
-
-Ouvrir ensuite `http://localhost:8080`. En production, servir `frontend/` avec le reverse proxy HTTPS et conserver l'API sur le port 8000.
+Après connexion, sélectionner un serveur charge ses salons. Le titre d'un salon suit le format `Serveur / Salon`; les groupes et messages directs restent indépendants. La zone de conversation est vidée lorsqu'aucun espace n'est sélectionné.
 
 ## 8. Mise a jour d'une version deja deployee
 

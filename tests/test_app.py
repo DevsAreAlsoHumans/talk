@@ -138,7 +138,6 @@ class TestRooms:
         server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Test Room",
-            "description": "Salon de test",
             "room_type": RoomType.CHANNEL.value,
             "is_private": False,
             "parent_server": server_id,
@@ -155,7 +154,6 @@ class TestRooms:
         server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Room to Update",
-            "description": "Original description",
             "room_type": RoomType.CHANNEL.value,
             "is_private": False,
             "parent_server": server_id,
@@ -167,7 +165,6 @@ class TestRooms:
         # Mettre à jour
         update_data = {
             "name": "Updated Room",
-            "description": "Updated description",
             "room_type": RoomType.CHANNEL.value,
             "is_private": False,
             "parent_server": server_id,
@@ -182,7 +179,6 @@ class TestRooms:
         server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Room to Delete",
-            "description": "Salon à supprimer",
             "room_type": RoomType.CHANNEL.value,
             "is_private": False,
             "parent_server": server_id,
@@ -210,7 +206,6 @@ class TestMessages:
         server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Test Room for Messages",
-            "description": "Salon pour tests de messages",
             "room_type": RoomType.CHANNEL.value,
             "is_private": False,
             "parent_server": server_id,
@@ -236,7 +231,6 @@ class TestMessages:
         server_id = create_test_server(client, auth_header)
         room_data = {
             "name": "Messages Room",
-            "description": "Salon pour les messages",
             "room_type": RoomType.CHANNEL.value,
             "is_private": False,
             "parent_server": server_id,
