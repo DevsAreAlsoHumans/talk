@@ -75,3 +75,5 @@ Cmt sera organisée la base de données :
 - Compte / User (id_compte, identifiant, n° téléphone, email (facultatif), mdp_hashé, date_création) //il faut  
 - Conversation (id_conversation, id_user, date_création, date_dernier_message) // chaque conversation doit être unique et donc pouvoir être retrouvée avec son id
 - messages (id_user, id_message, text_message, date_message) //date_message contient l'heure du message
+
+PS : commande à lancer pour lancer le programme : python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
