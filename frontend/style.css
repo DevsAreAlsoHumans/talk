@@ -422,6 +422,38 @@ button {
     font-size: 0.85rem;
 }
 
+#settings-member-list {
+    display: grid;
+    gap: 8px;
+    max-height: 210px;
+    margin: 0 0 18px;
+    overflow-y: auto;
+    list-style: none;
+}
+
+#settings-member-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 9px 10px;
+    color: var(--ink);
+    font-size: 0.78rem;
+}
+
+.member-remove {
+    flex: 0 0 auto;
+    border: 1px solid #efc0b7;
+    border-radius: 6px;
+    padding: 5px 8px;
+    background: #fff7f5;
+    color: var(--coral-dark);
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
 #btn-close-settings {
     margin-top: 12px;
     border: 1px solid var(--line);

@@ -46,6 +46,7 @@ const dom = {
     settingsModal: document.getElementById('settings-modal'),
     settingsTitle: document.getElementById('settings-title'),
     settingsDescription: document.getElementById('settings-description'),
+    settingsMemberList: document.getElementById('settings-member-list'),
     btnCloseSettings: document.getElementById('btn-close-settings'),
     createRoomModal: document.getElementById('create-room-modal'),
     createRoomTitle: document.getElementById('create-room-title'),
@@ -548,7 +549,52 @@ function openSettings(type) {
     dom.memberIdentifier.value = '';
     dom.memberFeedback.textContent = '';
     dom.btnAddMember.disabled = type === 'direct';
+    loadSettingsMembers(target.id, type);
     dom.settingsModal.style.display = 'grid';
+}
+
+async function loadSettingsMembers(roomId, type) {
+    const response = await fetch(`${API_BASE_URL}/api/rooms/${roomId}/members`, {
+        headers: authHeaders()
+    });
+    if (!response.ok) {
+        dom.settingsMemberList.innerHTML = '<li>Liste inaccessible</li>';
+        return;
+    }
+    const members = await response.json();
+    dom.settingsMemberList.innerHTML = '';
+    if (members.length === 0) {
+        dom.settingsMemberList.innerHTML = '<li>Aucun membre</li>';
+        return;
+    }
+    members.forEach(member => {
+        const item = document.createElement('li');
+        const name = document.createElement('span');
+        name.textContent = `${member.username} (${member.email})`;
+        item.appendChild(name);
+        if (type !== 'direct' && member.id !== currentUser.id) {
+            const removeButton = document.createElement('button');
+            removeButton.type = 'button';
+            removeButton.className = 'member-remove';
+            removeButton.textContent = 'Supprimer';
+            removeButton.addEventListener('click', () => removeMember(roomId, member.id, type));
+            item.appendChild(removeButton);
+        }
+        dom.settingsMemberList.appendChild(item);
+    });
+}
+
+async function removeMember(roomId, memberId, type) {
+    const response = await fetch(`${API_BASE_URL}/api/rooms/${roomId}/members/${memberId}`, {
+        method: 'DELETE',
+        headers: authHeaders()
+    });
+    const result = await response.json();
+    dom.memberFeedback.textContent = response.ok ? result.message : (result.detail || 'Suppression impossible');
+    if (response.ok) {
+        await loadSettingsMembers(roomId, type);
+        await loadRooms();
+    }
 }
 
 dom.serverSelect.addEventListener('change', async () => {

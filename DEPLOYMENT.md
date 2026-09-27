@@ -69,7 +69,7 @@ Variables disponibles :
 | `SEED_ADMIN` | `false` | Cree le compte de demonstration au demarrage |
 | `HOST` | `0.0.0.0` | Adresse d'ecoute |
 | `PORT` | `8000` | Port HTTP |
-| `REDIS_HOST` | `redis` | Hote Redis dans Compose |
+| `REDIS_HOST` | `127.0.0.1` | Hote Redis local ; Compose utilise `redis` |
 | `REDIS_PORT` | `6379` | Port Redis |
 | `REDIS_DB` | `0` | Numero de base Redis |
 | `REDIS_PASSWORD` | vide | Mot de passe Redis |

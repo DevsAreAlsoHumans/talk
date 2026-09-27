@@ -209,6 +209,26 @@ async def list_room_members(room_id: str, token: str = Depends(oauth2_scheme), r
     return members
 
 
+@router.delete("/{room_id}/members/{member_id}")
+async def remove_room_member(room_id: str, member_id: str, token: str = Depends(oauth2_scheme), redis: Redis = Depends(get_redis)):
+    user_id = await get_current_user_id(token)
+    room = await require_member(redis, room_id, user_id)
+    if room["room_type"] == RoomType.DIRECT.value:
+        raise HTTPException(status_code=400, detail="Un message direct ne gère pas de membres")
+    if room["created_by"] != user_id:
+        raise HTTPException(status_code=403, detail="Seul le propriétaire peut supprimer un membre")
+    if member_id == room["created_by"]:
+        raise HTTPException(status_code=400, detail="Le propriétaire ne peut pas être supprimé")
+    target_room_id = room["parent_server"] if room["room_type"] == RoomType.CHANNEL.value else room_id
+    removed = await redis.srem(MEMBERS_KEY.format(target_room_id), member_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Membre introuvable dans cet espace")
+    target_room = await require_room(redis, target_room_id)
+    target_room["member_count"] = max(0, target_room.get("member_count", 1) - 1)
+    await set_json(redis, ROOM_KEY.format(target_room_id), target_room)
+    return {"message": "Membre supprimé", "user_id": member_id}
+
+
 @router.post("/{room_id}/join")
 async def join_room(room_id: str, token: str = Depends(oauth2_scheme), redis: Redis = Depends(get_redis)):
     user_id = await get_current_user_id(token)
