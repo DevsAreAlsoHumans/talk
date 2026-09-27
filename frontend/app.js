@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const el = {
+  const el = { //chargement des données du formulaire dans la constante el
     message: document.getElementById("auth-message"),
     loginForm: document.getElementById("login-form"),
     registerForm: document.getElementById("register-form"),
@@ -13,25 +13,25 @@
     registerPassword: document.getElementById("register-password"),
   };
 
-  let showLogin = true;
+  let showLogin = true;  
 
-  function setVisible() {
-    el.loginForm.hidden = !showLogin;
-    el.registerForm.hidden = showLogin;
-    el.toggleMode.textContent = showLogin
+  function setVisible() { // sert à cacher l'un des deux formulaires
+    el.loginForm.hidden = !showLogin; // cache le formulaire de connexion pour n'avoir que celui d'inscription
+    el.registerForm.hidden = showLogin; //cache le formulaire d'inscription pour n'avoir que celui de connexion
+    el.toggleMode.textContent = showLogin //on change le nom du toggleMode en fonction de la réponse choisie plus haut
       ? "Créer un compte"
       : "J'ai déjà un compte";
   }
 
-  el.toggleMode.addEventListener("click", () => {
+  el.toggleMode.addEventListener("click", () => { //si on clique sur le toggleMode, on change ce qui est affiché
     showLogin = !showLogin;
-    hideMessage();
+    hideMessage(); //avite qu'un message d'erreur de la tentative précédente ne reste affiché au dessus du formulaire lorsqu'on le réouvre
     setVisible();
   });
 
   function showMessage(text, type) {
-    el.message.textContent = text;
-    el.message.className = `auth-message ${type}`;
+    el.message.textContent = text; // on ne met pas innerHTML car le message du serveur ne peut pas être interprété commme du HTML donc on met textContent
+    el.message.className = `auth-message ${type}`; // type = error ou success ce qui fera varier la couleur du texte dans le CSS
     el.message.hidden = false;
   }
 
@@ -42,8 +42,8 @@
 
   function setSending(form, sending) {
     const button = form.querySelector("button[type='submit']");
-    button.disabled = sending;
-    button.textContent = sending ? "Envoi…" : button.dataset.label || button.textContent;
+    button.disabled = sending; // pour empêcher l'envoi de 2 requêtes d'inscription en cas de double clic
+    button.textContent = sending ? "Envoi…" : button.dataset.label || button.textContent; // chge le texte du bouton en Envoi après avoir cliqué pour indiquer que le bouton a déjà été pressé
   }
 
   function toJson(form) {

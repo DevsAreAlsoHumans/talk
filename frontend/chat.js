@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  console.log("%c[talk] chat.js v2 chargé", "color:#8d6ff2;font-weight:bold");
+  console.log("%c[talk] chat.js v2 chargé", "color:#8d6ff2;font-weight:bold"); // à supprimer
 
   const el = {
     logoutBtn: document.getElementById("logout-btn"),
@@ -36,14 +36,14 @@
   const state = {
     me: null,
     conversations: [],
-    activeId: null,
-    channelKeys: new Map(),
+    activeId: null, // la conversation ouverte
+    channelKeys: new Map(), // id de la conversation -> clé AES déchiffrée = cache mémoire des clés déjà déchiffrées
     lastLoadedMessageId: null,
     pollTimer: null,
-    groupSelection: new Map(),
+    groupSelection: new Map(), // les utilisateurs sélectionnés pour une discussion de groupe
   };
 
-  function readCookie(name) {
+  function readCookie(name) { //lit un cookie
     const match = document.cookie.match(
       new RegExp("(?:^|; )" + name.replace(/([.$?*|{}()[\]\\/+^])/g, "\\$1") + "=([^;]*)")
     );
@@ -56,20 +56,20 @@
 
   async function api(path, options = {}) {
     const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-    const method = options.method || "GET";
-    if (method !== "GET") {
-      headers["X-CSRF-Token"] = csrfToken();
+    const method = options.method || "GET"; // détermine la méthode HTTP
+    if (method !== "GET") { // dans le cas où la méthode HTTP n'est pas GET
+      headers["X-CSRF-Token"] = csrfToken(); //ajoute le token CSRF lu dans le cookie
     }
-    const response = await fetch(path, {
+    const response = await fetch(path, { //lance l'appel HTTP et attend la réponse
       method,
       headers,
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: options.body ? JSON.stringify(options.body) : undefined, //passe le corps en JSON et l'ignore s'il n'y en a pas
     });
-    if (response.status === 401) {
+    if (response.status === 401) { // détecte la session expirée et par conséquent recharge la page
       window.location.href = "/";
       throw new Error("non authentifié");
     }
-    const data = await response.json().catch(() => ({}));
+    const data = await response.json().catch(() => ({})); // lis le JSON et le remplace par {} dans le cas où ce n'est pas du JSON 
     if (!response.ok) {
       throw new Error(data.detail || "Erreur serveur.");
     }
@@ -81,7 +81,7 @@
     el.chatStatus.className = "chat-status" + (kind ? " " + kind : "");
   }
 
-  function formatDate(value) {
+  function formatDate(value) { // retourne la date
     if (!value) return "";
     const date = new Date(value);
     const now = new Date();
@@ -124,20 +124,20 @@
     updateModifyButton();
   }
 
-  function renderSidebar() {
+  function renderSidebar() { // reconstruit le HTML de la barre de l'historique des discussions
     el.conversationList.textContent = "";
-    if (state.conversations.length === 0) {
-      const empty = document.createElement("p");
-      empty.className = "sidebar-empty";
+    if (state.conversations.length === 0) { // dans le cas où pas de conversations, affiche un message d'aide et s'arrête
+      const empty = document.createElement("p"); 
+      empty.className = "sidebar-empty"; 
       empty.textContent = "Aucune conversation. Recherchez un utilisateur pour commencer.";
       el.conversationList.appendChild(empty);
       return;
     }
-    state.conversations.forEach((conversation) => {
-      const button = document.createElement("button");
-      button.type = "button";
+    state.conversations.forEach((conversation) => { // pour parcourir chq conversation de la liste
+      const button = document.createElement("button"); // créé le bouton de la conversation
+      button.type = "button"; // pour éviter le submit
       button.className = "conversation-item" + (conversation.id === state.activeId ? " active" : "");
-      const name = document.createElement("span");
+      const name = document.createElement("span"); // créé le conteneur nom
       name.className = "conversation-name";
       name.textContent = conversationTitle(conversation);
       if (conversation.type === "group") {
@@ -151,78 +151,76 @@
       const time = document.createElement("span");
       time.className = "conversation-time";
       time.textContent = formatDate(conversation.last_message_at);
-      button.appendChild(name);
-      button.appendChild(time);
-      button.addEventListener("click", () => selectConversation(conversation.id));
-      if (conversation.id === state.activeId) {
-        button.disabled = false;
-      }
+      button.appendChild(name); // assemble nom dans le bouton
+      button.appendChild(time); // assemble l'heure dans le bouton
+      button.addEventListener("click", () => selectConversation(conversation.id)); // on ouvre la conversation qd on clique sur le bouton
+
       el.conversationList.appendChild(button);
     });
   }
 
-  async function getChannelKey(conversationId) {
-    if (state.channelKeys.has(conversationId)) {
-      return state.channelKeys.get(conversationId);
+  async function getChannelKey(conversationId) { // récupère la clé AES d'une conversation en la mettant dans le cache
+    if (state.channelKeys.has(conversationId)) { // vérifie si la clé est en mémoire et si oui la renvoie
+      return state.channelKeys.get(conversationId); // dans le cas où oui, renvoie la clé 
     }
-    const identity = await ensureIdentityKey();
-    const { wrapped } = await api("/api/conversations/" + conversationId + "/keys");
-    const key = await window.talkCrypto.unwrapChannelKey(
+    const identity = await ensureIdentityKey(); // dans le cas non : récupère l'identité RSA et republie la clé publique 
+    const { wrapped } = await api("/api/conversations/" + conversationId + "/keys"); // récupère la clé chiffrée
+    const key = await window.talkCrypto.unwrapChannelKey( // déchiffre la clé publique avec la clé privée
       wrapped,
       identity.privateKey
     );
-    state.channelKeys.set(conversationId, key);
+    state.channelKeys.set(conversationId, key); //met la clé en cache
     return key;
   }
 
-  async function selectConversation(conversationId) {
+  async function selectConversation(conversationId) { // sert à ouvrir une conversation
     state.activeId = conversationId;
     state.lastLoadedMessageId = null;
     el.messageList.textContent = "";
-    renderSidebar();
-    updateModifyButton();
-    const conversation = state.conversations.find((c) => c.id === conversationId);
+    renderSidebar(); // afin de mettre en évidence la conversation sélectionnée
+    updateModifyButton(); // modifie le bouton "modifier" sous le type de conversation
+    const conversation = state.conversations.find((c) => c.id === conversationId); //retrouve la conversation et écrit son titre dans l'en-tête
     if (conversation) {
       el.chatTitle.textContent = conversationTitle(conversation);
     }
     try {
-      const channelKey = await getChannelKey(conversationId);
+      const channelKey = await getChannelKey(conversationId); // récupère la clé de salon
       el.messageInput.disabled = false;
       el.sendBtn.disabled = false;
       el.messageInput.focus();
       await refreshMessages();
     } catch (err) {
       setStatus("Impossible de déchiffrer cette conversation.", "error");
-      el.messageInput.disabled = true;
-      el.sendBtn.disabled = true;
+      el.messageInput.disabled = true; //autorise la saisie seulemt si la clé a été récupérée
+      el.sendBtn.disabled = true; // active le bouton d'envoi
     }
   }
 
-  async function refreshMessages() {
-    if (!state.activeId) return;
+  async function refreshMessages() { // pour refresh les messages de la conversation et les déchiffrer
+    if (!state.activeId) return; //s'arrête s'il n'y a aucune conv ouverte
     const messages = await api(
       "/api/conversations/" + state.activeId + "/messages"
-    );
-    const lastId = messages.length ? messages[messages.length - 1].id : null;
+    ); // récupère la liste des messages chiffrés
+    const lastId = messages.length ? messages[messages.length - 1].id : null; // identifie le dernier message, null si la liste est vide
     if (lastId === state.lastLoadedMessageId && el.messageList.childElementCount > 0) {
       return;
     }
-    const channelKey = await getChannelKey(state.activeId);
-    el.messageList.textContent = "";
-    for (const message of messages) {
-      try {
-        const text = await window.talkCrypto.decryptMessage(
+    const channelKey = await getChannelKey(state.activeId); // récupère la clé de salon pour pouvoir déchiffrer
+    el.messageList.textContent = ""; //vide l'affichage avant de le reconstruire
+    for (const message of messages) { // pour parcourir les mesages
+      try { // pour tenter le déchiffrement de ts les messages
+        const text = await window.talkCrypto.decryptMessage( // déchiffre le message localement en AES-GCM (mode de chiffrement symétrique assurant confidentialité, l'intégrité et l'authenticité des données)
           message.iv,
           message.ciphertext,
           channelKey
         );
-        appendMessage(message, text);
-      } catch (_err) {
-        appendMessage(message, "🔒 Message indéchiffrable", true);
+        appendMessage(message, text); // affiche le message déchiffré
+      } catch (_err) { // isole l'échec de ce seul message
+        appendMessage(message, "🔒 Message indéchiffrable", true); // affiche un cadena en remplacement du message
       }
     }
-    state.lastLoadedMessageId = lastId;
-    el.messageList.scrollTop = el.messageList.scrollHeight;
+    state.lastLoadedMessageId = lastId; // mémorise le dernier id pour le prochain rafraîchissement
+    el.messageList.scrollTop = el.messageList.scrollHeight; // fait défiler jusqu'au message le plus récent
   }
 
   function appendMessage(message, text, undecryptable = false) {
