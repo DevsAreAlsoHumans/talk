@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     app_name: str = "talk"
     debug: bool = False
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
 
     redis_url: str = Field(default="redis://localhost:6379/0")
@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = 60 * 60 * 24 * 7
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
+    csrf_ttl_seconds: int = 60 * 60 * 12
+
+    # Anti bruteforce
+    rate_limit_login_max: int = 10
+    rate_limit_login_window: int = 300
+    rate_limit_register_max: int = 5
+    rate_limit_register_window: int = 3600
 
     cors_origins: list[str] = Field(default_factory=list)
 
