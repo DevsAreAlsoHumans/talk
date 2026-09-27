@@ -119,12 +119,15 @@ async def test_rotation_must_cover_exact_current_members() -> None:
         assert complete_response.json()["key_epoch"] == 1
 
 
-async def test_plain_member_cannot_rotate_key() -> None:
+async def test_plain_member_can_rotate_key() -> None:
+    """Un simple membre peut faire tourner la clé lui-même (ex: nouvel arrivant
+    sur #général qui n'a pas encore d'accès admin) — seule la composition
+    exacte des membres est vérifiée, pas le rôle de l'auteur de la rotation."""
     async with (
         AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as owner,
         AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as member,
     ):
-        await _register(owner, "keyowner3")
+        owner_user = await _register(owner, "keyowner3")
         member_user = await _register(member, "keymember3")
 
         room = (
@@ -142,15 +145,50 @@ async def test_plain_member_cannot_rotate_key() -> None:
                 "wrapper_public_key": "member-pubkey",
                 "entries": [
                     {
+                        "member_id": owner_user["id"],
+                        "wrapped_key": "wrapped-owner",
+                        "wrapped_key_iv": "iv",
+                    },
+                    {
                         "member_id": member_user["id"],
+                        "wrapped_key": "wrapped-member",
+                        "wrapped_key_iv": "iv",
+                    },
+                ],
+            },
+            headers=_csrf(member),
+        )
+        assert response.status_code == 200
+        assert response.json()["key_epoch"] == 1
+
+
+async def test_non_member_cannot_rotate_key() -> None:
+    async with (
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as owner,
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as outsider,
+    ):
+        owner_user = await _register(owner, "keyowner3b")
+        await _register(outsider, "keyoutsider3b")
+
+        room = (
+            await owner.post("/rooms/groups", json={"name": "Groupe clé 3b"}, headers=_csrf(owner))
+        ).json()
+
+        response = await outsider.post(
+            f"/rooms/{room['id']}/keys",
+            json={
+                "wrapper_public_key": "outsider-pubkey",
+                "entries": [
+                    {
+                        "member_id": owner_user["id"],
                         "wrapped_key": "wrapped",
                         "wrapped_key_iv": "iv",
                     }
                 ],
             },
-            headers=_csrf(member),
+            headers=_csrf(outsider),
         )
-        assert response.status_code == 403
+        assert response.status_code == 404
 
 
 async def test_removed_member_cannot_list_group_keys() -> None:

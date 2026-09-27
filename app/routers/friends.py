@@ -6,7 +6,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, status
 from pymongo.errors import DuplicateKeyError
 
-from app.db.mongo import db, find_user_by_tag
+from app.db.mongo import db, find_user_by_tag, get_user_label
 from app.models.friendship import (
     FriendPublic,
     FriendRequestCreate,
@@ -90,7 +90,11 @@ async def send_friend_request(
                 {"_id": existing["_id"]},
                 {"$set": {"status": "accepted", "resolved_at": datetime.now(UTC)}},
             )
-            await create_notification(peer_id, "friend_accepted", {"peer_id": user_id})
+            await create_notification(
+                peer_id,
+                "friend_accepted",
+                {"peer_id": user_id, "peer_label": await get_user_label(user_id)},
+            )
             return FriendRequestResult(status="accepted", peer=PeerPublic.from_document(peer))
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Demande déjà envoyée.")
 
@@ -110,7 +114,13 @@ async def send_friend_request(
         ) from exc
 
     await create_notification(
-        peer_id, "friend_request", {"request_id": str(result.inserted_id), "from_user_id": user_id}
+        peer_id,
+        "friend_request",
+        {
+            "request_id": str(result.inserted_id),
+            "from_user_id": user_id,
+            "from_label": await get_user_label(user_id),
+        },
     )
     return FriendRequestResult(status="pending", peer=PeerPublic.from_document(peer))
 
@@ -167,7 +177,11 @@ async def accept_friend_request(
         {"_id": request_doc["_id"]}, {"$set": {"status": "accepted", "resolved_at": resolved_at}}
     )
     peer = await db.users.find_one({"_id": ObjectId(request_doc["requester_id"])})
-    await create_notification(request_doc["requester_id"], "friend_accepted", {"peer_id": user_id})
+    await create_notification(
+        request_doc["requester_id"],
+        "friend_accepted",
+        {"peer_id": user_id, "peer_label": await get_user_label(user_id)},
+    )
     return FriendPublic(peer=PeerPublic.from_document(peer), since=resolved_at)
 
 

@@ -2,121 +2,102 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Talk</title>
     <link rel="stylesheet" href="/static/css/style.css" />
   </head>
   <body>
     <main>
-      <h1>Talk</h1>
-
-      <section id="auth-view">
-        <div class="auth-forms">
-          <form id="register-form">
-            <h2>Inscription</h2>
-            <input name="username" placeholder="Pseudo" required minlength="3" />
-            <input name="email" type="email" placeholder="Email" required />
-            <input name="password" type="password" placeholder="Mot de passe" required />
-            <button type="submit">S'inscrire</button>
-          </form>
-
-          <form id="login-form">
-            <h2>Connexion</h2>
-            <input name="email" type="email" placeholder="Email" required />
-            <input name="password" type="password" placeholder="Mot de passe" required />
-            <button type="submit">Se connecter</button>
-            <button type="button" id="forgot-password-link">Mot de passe oublié ?</button>
-          </form>
-        </div>
-        <p id="auth-error" class="error"></p>
-      </section>
-
-      <section id="totp-view" hidden>
-        <h2>Code de vérification</h2>
-        <form id="totp-login-form">
-          <input name="code" placeholder="Code à 6 chiffres" pattern="\d{6}" required />
-          <button type="submit">Valider</button>
-        </form>
-        <p id="totp-error" class="error"></p>
-      </section>
-
-      <section id="forgot-password-view" hidden>
-        <h2>Mot de passe oublié</h2>
-        <form id="forgot-password-form">
-          <input name="email" type="email" placeholder="Email" required />
-          <button type="submit">Envoyer le lien de réinitialisation</button>
-        </form>
-        <p id="forgot-password-message"></p>
-      </section>
-
-      <section id="reset-password-view" hidden>
-        <h2>Nouveau mot de passe</h2>
-        <form id="reset-password-form">
-          <input name="password" type="password" placeholder="Nouveau mot de passe" required />
-          <button type="submit">Réinitialiser</button>
-        </form>
-        <p id="reset-password-message"></p>
-      </section>
-
-      <section id="chat-view" hidden>
-        <header>
-          <img id="current-avatar" alt="Avatar" width="48" height="48" />
-          <span id="current-user"></span>
-          <button id="logout-button">Se déconnecter</button>
-        </header>
-
-        <div id="notifications">
-          <button id="notifications-toggle">Notifications (<span id="notifications-count">0</span>)</button>
-          <ul id="notifications-list" hidden></ul>
-        </div>
-
-        <div id="totp-setup">
-          <button id="totp-setup-button">Activer la 2FA</button>
-          <div id="totp-setup-details" hidden>
-            <p>Secret : <code id="totp-secret"></code></p>
-            <p>URI : <code id="totp-uri"></code></p>
-            <form id="totp-confirm-form">
-              <input name="code" placeholder="Code à 6 chiffres" pattern="\d{6}" required />
-              <button type="submit">Confirmer l'activation</button>
-            </form>
+      <section id="chat-view" class="app-shell" hidden>
+        <aside class="sidebar">
+          <div class="sidebar-header">
+            <span class="brand">Talk</span>
           </div>
-          <p id="totp-setup-message"></p>
-        </div>
 
-        <form id="avatar-form">
-          <input name="seed" placeholder="Seed Dicebear (ex: alice)" />
-          <button type="submit">Utiliser cette seed</button>
-          <input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
-          <button type="submit" data-action="upload">Uploader une image</button>
-        </form>
+          <details class="sidebar-panel">
+            <summary>Nouveau DM</summary>
+            <form id="open-dm-form">
+              <input name="tag" placeholder="pseudo#0000" pattern="^.+#\d{4}$" required />
+              <button type="submit" class="btn-primary">Ouvrir le DM</button>
+            </form>
+          </details>
 
-        <form id="open-dm-form">
-          <input name="username" placeholder="Pseudo du destinataire" required />
-          <input name="discriminator" placeholder="0000" pattern="\d{4}" required />
-          <button type="submit">Ouvrir le DM</button>
-        </form>
+          <details class="sidebar-panel">
+            <summary>Nouveau groupe</summary>
+            <form id="create-group-form">
+              <input name="name" placeholder="Nom du groupe" required />
+              <button type="submit" class="btn-primary">Créer</button>
+            </form>
+          </details>
 
-        <form id="create-group-form">
-          <input name="name" placeholder="Nom du groupe" required />
-          <button type="submit">Créer un groupe</button>
-        </form>
+          <ul id="room-list" class="room-list"></ul>
 
-        <ul id="room-list"></ul>
+          <details class="sidebar-panel">
+            <summary>Paramètres du compte</summary>
 
-        <div id="active-room">
-          <p id="active-room-label">Choisis ou crée un salon.</p>
+            <form id="avatar-form" class="settings-form">
+              <p class="settings-label">Avatar</p>
+              <input name="seed" placeholder="Seed Dicebear (ex: alice)" />
+              <button type="submit" class="btn-secondary">Utiliser cette seed</button>
+              <input name="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+              <button type="submit" data-action="upload" class="btn-secondary">
+                Uploader une image
+              </button>
+            </form>
 
-          <form id="add-group-member-form" hidden>
-            <input name="username" placeholder="Pseudo à ajouter" required />
-            <input name="discriminator" placeholder="0000" pattern="\d{4}" required />
-            <button type="submit">Ajouter au groupe</button>
+            <div id="totp-setup" class="settings-form">
+              <p class="settings-label">Double authentification</p>
+              <button id="totp-setup-button" class="btn-secondary">Activer la 2FA</button>
+              <div id="totp-setup-details" hidden>
+                <p class="hint">
+                  Ajoute ce compte dans une application d'authentification (Google
+                  Authenticator, Authy...), puis confirme avec le code généré.
+                </p>
+                <canvas id="totp-qr-canvas" class="totp-qr-canvas"></canvas>
+                <div class="totp-secret-box">
+                  <code id="totp-secret"></code>
+                  <button type="button" id="totp-copy-secret" class="btn-secondary">Copier</button>
+                </div>
+                <button type="button" id="totp-copy-uri" class="btn-link">
+                  Copier le lien d'import
+                </button>
+                <form id="totp-confirm-form">
+                  <input name="code" placeholder="Code à 6 chiffres" pattern="\d{6}" required />
+                  <button type="submit" class="btn-primary">Confirmer l'activation</button>
+                </form>
+              </div>
+              <p id="totp-setup-message" class="hint"></p>
+            </div>
+          </details>
+
+          <div class="sidebar-footer">
+            <img id="current-avatar" class="avatar" alt="Avatar" width="32" height="32" />
+            <span id="current-user" class="username"></span>
+            <button id="notifications-toggle" class="icon-button" title="Notifications">
+              🔔<span id="notifications-count" class="badge">0</span>
+            </button>
+            <button id="logout-button" class="icon-button" title="Se déconnecter">⏻</button>
+          </div>
+          <ul id="notifications-list" class="notifications-list" hidden></ul>
+        </aside>
+
+        <div class="main-content">
+          <header class="channel-header">
+            <p id="active-room-label">Choisis ou crée un salon.</p>
+          </header>
+
+          <form id="add-group-member-form" class="inline-form" hidden>
+            <input name="tag" placeholder="pseudo#0000" pattern="^.+#\d{4}$" required />
+            <button type="submit" class="btn-secondary">Ajouter au groupe</button>
           </form>
-          <ul id="group-members-list"></ul>
+          <ul id="group-members-list" class="group-members-list"></ul>
 
-          <ul id="messages"></ul>
-          <form id="send-form" hidden>
+          <ul id="messages" class="messages-list"></ul>
+
+          <form id="send-form" class="message-composer" hidden>
             <input name="text" placeholder="Message..." autocomplete="off" />
-            <input name="file" type="file" />
-            <button type="submit">Envoyer</button>
+            <input name="file" type="file" class="file-input" />
+            <button type="submit" class="btn-primary">Envoyer</button>
           </form>
         </div>
       </section>

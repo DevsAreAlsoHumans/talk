@@ -234,11 +234,14 @@ async def forgot_password(payload: ForgotPasswordRequest) -> None:
         str(document["_id"]),
         ex=_PASSWORD_RESET_TTL_SECONDS,
     )
+    reset_link = f"{settings.app_base_url}/login?reset_token={token}"
     await asyncio.to_thread(
         send_mail,
         document["email"],
         "Reinitialisation de mot de passe",
-        f"Jeton de reinitialisation (valide 30 minutes) : {token}",
+        "Lien de reinitialisation (valide 30 minutes) : "
+        f"{reset_link}\n\n"
+        f"Si le lien ne fonctionne pas, colle ce jeton dans le formulaire : {token}",
     )
 
 

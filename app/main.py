@@ -37,5 +37,17 @@ def health() -> dict[str, str]:
 
 @app.get("/")
 def index() -> FileResponse:
-    """Sert la page unique du frontend."""
+    """Sert l'application (salons/messages), pour les utilisateurs déjà connectés."""
     return FileResponse("frontend/index.html")
+
+
+@app.get("/login")
+def login_page() -> FileResponse:
+    """Page de connexion, séparée de l'inscription."""
+    return FileResponse("frontend/login.html")
+
+
+@app.get("/register")
+def register_page() -> FileResponse:
+    """Page d'inscription, séparée de la connexion."""
+    return FileResponse("frontend/register.html")

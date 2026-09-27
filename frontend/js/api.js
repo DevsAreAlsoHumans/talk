@@ -54,9 +54,10 @@ function uploadAvatar(file) {
   return uploadMultipart("/users/me/avatar/upload", formData);
 }
 
-function uploadAttachment(roomId, ciphertextBlob, iv) {
+function uploadAttachment(roomId, ciphertextBlob, iv, contentType) {
   const formData = new FormData();
   formData.append("iv", iv);
+  if (contentType) formData.append("content_type", contentType);
   formData.append("file", ciphertextBlob, "blob");
   return uploadMultipart(`/rooms/${roomId}/attachments`, formData);
 }
@@ -87,6 +88,7 @@ export const api = {
   uploadAvatar,
   openDm: (username, discriminator) => request("POST", "/rooms/dm", { username, discriminator }),
   createGroupRoom: (name) => request("POST", "/rooms/groups", { name }),
+  joinGeneral: () => request("POST", "/rooms/general/join"),
   addRoomMember: (roomId, username, discriminator) =>
     request("POST", `/rooms/${roomId}/members`, { username, discriminator }),
   removeRoomMember: (roomId, memberId) =>

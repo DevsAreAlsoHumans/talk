@@ -1,15 +1,20 @@
 import { api } from "./api.js";
 import * as cryptoUtil from "./crypto.js";
-import { loadKeyPair, saveKeyPair } from "./idb.js";
+import { ensureKeyPair, publishPublicKeyIfNeeded } from "./keys.js";
 import { connectNotificationsSocket, connectRoomSocket } from "./ws.js";
+import { drawQrToCanvas } from "./qrcode.js";
 
-const authView = document.getElementById("auth-view");
-const totpView = document.getElementById("totp-view");
-const forgotPasswordView = document.getElementById("forgot-password-view");
-const resetPasswordView = document.getElementById("reset-password-view");
+// Découpe un champ unique "pseudo#0000" saisi par l'utilisateur en
+// {username, discriminator}, utilisé partout où on cible un autre compte.
+function parseTag(value) {
+  const separatorIndex = value.lastIndexOf("#");
+  return {
+    username: value.slice(0, separatorIndex),
+    discriminator: value.slice(separatorIndex + 1),
+  };
+}
+
 const chatView = document.getElementById("chat-view");
-const authError = document.getElementById("auth-error");
-const totpError = document.getElementById("totp-error");
 const currentUserLabel = document.getElementById("current-user");
 const currentAvatar = document.getElementById("current-avatar");
 const roomList = document.getElementById("room-list");
@@ -21,51 +26,21 @@ const sendForm = document.getElementById("send-form");
 const notificationsCount = document.getElementById("notifications-count");
 const notificationsList = document.getElementById("notifications-list");
 
-let keyPair = null;
 let currentUser = null;
-// DM   : { type: "dm", id, sharedKey }
+// DM     : { type: "dm", id, sharedKey }
 // Groupe : { type: "group", id, room, keysByEpoch: Map<epoch, CryptoKey>, currentEpoch }
 let currentRoom = null;
 let socket = null;
 let notificationsSocket = null;
-let pendingTotpToken = null;
 
-function hideAllViews() {
-  authView.hidden = true;
-  totpView.hidden = true;
-  forgotPasswordView.hidden = true;
-  resetPasswordView.hidden = true;
-  chatView.hidden = true;
-}
-
-async function ensureKeyPair() {
-  if (keyPair) return keyPair;
-  const stored = await loadKeyPair();
-  if (stored) {
-    keyPair = stored;
-    return keyPair;
-  }
-  keyPair = await cryptoUtil.generateKeyPair();
-  await saveKeyPair(keyPair);
-  return keyPair;
-}
-
-// Limitation assumée : une clé E2E est liée à ce navigateur/IndexedDB. Se
-// reconnecter depuis un autre appareil générerait une clé différente et
-// casserait le déchiffrement des messages envoyés vers l'ancienne clé
-// (pas de gestion multi-appareil dans ce projet).
-async function publishPublicKeyIfNeeded(user) {
-  const pair = await ensureKeyPair();
-  if (user.public_key) return;
-  const publicKeyRaw = await cryptoUtil.exportPublicKeyRaw(pair.publicKey);
-  await api.setPublicKey(publicKeyRaw);
+function goToLogin() {
+  window.location.href = "/login";
 }
 
 function showChatView(user) {
   currentUser = user;
-  currentUserLabel.textContent = `Connecté en tant que ${user.username}#${user.discriminator}`;
+  currentUserLabel.textContent = `${user.username}#${user.discriminator}`;
   currentAvatar.src = user.avatar ? user.avatar.url : "";
-  hideAllViews();
   chatView.hidden = false;
   loadRooms();
   loadNotifications();
@@ -73,19 +48,6 @@ function showChatView(user) {
     renderNotification(notification, /* prepend= */ true);
     updateNotificationsCount();
   });
-}
-
-function showAuthView() {
-  currentUser = null;
-  hideAllViews();
-  authView.hidden = false;
-}
-
-function showTotpView(pendingToken) {
-  pendingTotpToken = pendingToken;
-  totpError.textContent = "";
-  hideAllViews();
-  totpView.hidden = false;
 }
 
 async function loadRooms() {
@@ -114,7 +76,7 @@ async function rotateGroupKeyFor(room) {
     );
   }
 
-  const pair = await ensureKeyPair();
+  const pair = await ensureKeyPair(currentUser.id);
   const newRoomKey = await cryptoUtil.generateRoomKey();
   const myPublicKeyRaw = await cryptoUtil.exportPublicKeyRaw(pair.publicKey);
 
@@ -191,7 +153,7 @@ async function kickMember(memberId) {
 
 async function openRoom(room) {
   if (socket) socket.close();
-  const pair = await ensureKeyPair();
+  const pair = await ensureKeyPair(currentUser.id);
 
   if (room.type === "dm") {
     addGroupMemberForm.hidden = true;
@@ -206,7 +168,7 @@ async function openRoom(room) {
 
     const peerPublicKey = await cryptoUtil.importPeerPublicKey(room.peer.public_key);
     const sharedKey = await cryptoUtil.deriveSharedKey(pair.privateKey, peerPublicKey);
-    currentRoom = { type: "dm", id: room.id, sharedKey };
+    currentRoom = { type: "dm", id: room.id, sharedKey, peer: room.peer };
     activeRoomLabel.textContent = `DM avec ${room.peer.username}#${room.peer.discriminator}`;
   } else {
     const keysByEpoch = await loadGroupKeys(room, pair.privateKey);
@@ -242,9 +204,18 @@ function keyForMessage(message) {
   return currentRoom.keysByEpoch.get(message.key_epoch);
 }
 
+function authorLabel(senderId) {
+  if (senderId === currentUser.id) return "Moi";
+  if (currentRoom.type === "dm") {
+    return `${currentRoom.peer.username}#${currentRoom.peer.discriminator}`;
+  }
+  const member = currentRoom.room.members.find((m) => m.user.id === senderId);
+  return member ? `${member.user.username}#${member.user.discriminator}` : "Inconnu";
+}
+
 async function renderMessage(message) {
   const item = document.createElement("li");
-  const author = message.sender_id === currentUser.id ? "Moi" : "Eux";
+  const author = authorLabel(message.sender_id);
   try {
     const key = keyForMessage(message);
     if (!key) throw new Error("clé manquante pour cette epoch");
@@ -257,22 +228,40 @@ async function renderMessage(message) {
   }
 
   if (message.attachment) {
-    const downloadButton = document.createElement("button");
-    downloadButton.textContent = `Pièce jointe chiffrée (${message.attachment.size} octets)`;
-    downloadButton.addEventListener("click", () => downloadAndDecryptAttachment(message));
-    item.appendChild(downloadButton);
+    if (message.attachment.content_type?.startsWith("image/")) {
+      const img = document.createElement("img");
+      img.className = "attachment-image";
+      img.alt = "Image envoyée dans le salon";
+      decryptAttachmentBlob(message)
+        .then((blob) => {
+          img.src = URL.createObjectURL(blob);
+        })
+        .catch(() => {
+          img.replaceWith(document.createTextNode("[image illisible]"));
+        });
+      item.appendChild(img);
+    } else {
+      const downloadButton = document.createElement("button");
+      downloadButton.textContent = `Pièce jointe chiffrée (${message.attachment.size} octets)`;
+      downloadButton.addEventListener("click", () => downloadAndDecryptAttachment(message));
+      item.appendChild(downloadButton);
+    }
   }
 
   messagesList.appendChild(item);
 }
 
-async function downloadAndDecryptAttachment(message) {
+async function decryptAttachmentBlob(message) {
   const key = keyForMessage(message);
   const ciphertextBuffer = await api.downloadAttachment(currentRoom.id, message.attachment.id);
   const plainBuffer = await cryptoUtil.decryptBytes(key, ciphertextBuffer, message.attachment.iv);
-  // Le nom/type d'origine n'est jamais transmis en clair au serveur (limitation assumée) :
-  // le fichier est téléchargé sous un nom générique.
-  const blob = new Blob([plainBuffer]);
+  return new Blob([plainBuffer], { type: message.attachment.content_type || "" });
+}
+
+async function downloadAndDecryptAttachment(message) {
+  const blob = await decryptAttachmentBlob(message);
+  // Le nom d'origine n'est jamais transmis en clair au serveur (limitation
+  // assumée) : le fichier est téléchargé sous un nom générique.
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -281,9 +270,24 @@ async function downloadAndDecryptAttachment(message) {
   URL.revokeObjectURL(url);
 }
 
+function describeNotification({ type, payload }) {
+  switch (type) {
+    case "message":
+      return `💬 Nouveau message de ${payload.sender_label || "quelqu'un"}`;
+    case "friend_request":
+      return `👤 ${payload.from_label || "Quelqu'un"} t'a envoyé une demande d'ami`;
+    case "friend_accepted":
+      return `✅ ${payload.peer_label || "Quelqu'un"} a accepté ta demande d'ami`;
+    case "room_invite":
+      return `📨 ${payload.invited_by_label || "Quelqu'un"} t'a ajouté au salon "${payload.room_name}"`;
+    default:
+      return `[${type}] ${JSON.stringify(payload)}`;
+  }
+}
+
 function renderNotification(notification, prepend) {
   const item = document.createElement("li");
-  item.textContent = `[${notification.type}] ${JSON.stringify(notification.payload)}`;
+  item.textContent = describeNotification(notification);
   item.dataset.notificationId = notification.id;
   if (!notification.read) item.style.fontWeight = "bold";
   item.addEventListener("click", async () => {
@@ -316,96 +320,32 @@ document.getElementById("notifications-toggle").addEventListener("click", () => 
   notificationsList.hidden = !notificationsList.hidden;
 });
 
-document.getElementById("register-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  authError.textContent = "";
-  const form = new FormData(event.target);
-  try {
-    const user = await api.register({
-      username: form.get("username"),
-      email: form.get("email"),
-      password: form.get("password"),
-    });
-    await publishPublicKeyIfNeeded(user);
-    showChatView(user);
-  } catch (error) {
-    authError.textContent = error.message;
-  }
-});
-
-document.getElementById("login-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  authError.textContent = "";
-  const form = new FormData(event.target);
-  try {
-    const result = await api.login({
-      email: form.get("email"),
-      password: form.get("password"),
-    });
-    if (result.totp_required) {
-      showTotpView(result.pending_token);
-      return;
-    }
-    await publishPublicKeyIfNeeded(result.user);
-    showChatView(result.user);
-  } catch (error) {
-    authError.textContent = error.message;
-  }
-});
-
-document.getElementById("totp-login-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  totpError.textContent = "";
-  const form = new FormData(event.target);
-  try {
-    const user = await api.verifyTotp(pendingTotpToken, form.get("code"));
-    await publishPublicKeyIfNeeded(user);
-    showChatView(user);
-  } catch (error) {
-    totpError.textContent = error.message;
-  }
-});
-
-document.getElementById("forgot-password-link").addEventListener("click", () => {
-  hideAllViews();
-  forgotPasswordView.hidden = false;
-});
-
-document.getElementById("forgot-password-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  await api.forgotPassword(form.get("email"));
-  document.getElementById("forgot-password-message").textContent =
-    "Si ce compte existe, un email avec un lien de réinitialisation vient d'être envoyé.";
-});
-
-document.getElementById("reset-password-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = new FormData(event.target);
-  const token = new URLSearchParams(window.location.search).get("reset_token");
-  try {
-    await api.resetPassword(token, form.get("password"));
-    document.getElementById("reset-password-message").textContent =
-      "Mot de passe changé. Tu peux te reconnecter.";
-    window.history.replaceState({}, "", window.location.pathname);
-    showAuthView();
-  } catch (error) {
-    document.getElementById("reset-password-message").textContent = error.message;
-  }
-});
-
 document.getElementById("logout-button").addEventListener("click", async () => {
   await api.logout();
   if (socket) socket.close();
   if (notificationsSocket) notificationsSocket.close();
-  showAuthView();
+  goToLogin();
 });
+
+let pendingTotpUri = null;
 
 document.getElementById("totp-setup-button").addEventListener("click", async () => {
   const setup = await api.setupTotp();
+  pendingTotpUri = setup.uri;
   document.getElementById("totp-secret").textContent = setup.secret;
-  document.getElementById("totp-uri").textContent = setup.uri;
+  drawQrToCanvas(document.getElementById("totp-qr-canvas"), setup.uri);
   document.getElementById("totp-setup-details").hidden = false;
+});
+
+document.getElementById("totp-copy-secret").addEventListener("click", async () => {
+  await navigator.clipboard.writeText(document.getElementById("totp-secret").textContent);
+  document.getElementById("totp-setup-message").textContent = "Secret copié.";
+});
+
+document.getElementById("totp-copy-uri").addEventListener("click", async () => {
+  if (!pendingTotpUri) return;
+  await navigator.clipboard.writeText(pendingTotpUri);
+  document.getElementById("totp-setup-message").textContent = "Lien d'import copié.";
 });
 
 document.getElementById("totp-confirm-form").addEventListener("submit", async (event) => {
@@ -437,7 +377,8 @@ document.getElementById("avatar-form").addEventListener("submit", async (event) 
 document.getElementById("open-dm-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
-  const room = await api.openDm(form.get("username"), form.get("discriminator"));
+  const { username, discriminator } = parseTag(form.get("tag"));
+  const room = await api.openDm(username, discriminator);
   await loadRooms();
   await openRoom(room);
 });
@@ -457,11 +398,8 @@ addGroupMemberForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!currentRoom || currentRoom.type !== "group") return;
   const form = new FormData(event.target);
-  const updatedRoomFromAdd = await api.addRoomMember(
-    currentRoom.id,
-    form.get("username"),
-    form.get("discriminator")
-  );
+  const { username, discriminator } = parseTag(form.get("tag"));
+  const updatedRoomFromAdd = await api.addRoomMember(currentRoom.id, username, discriminator);
   event.target.reset();
 
   await refreshGroupAfterMembershipChange(updatedRoomFromAdd);
@@ -477,7 +415,9 @@ sendForm.addEventListener("submit", async (event) => {
   event.target.reset();
 
   const key =
-    currentRoom.type === "dm" ? currentRoom.sharedKey : currentRoom.keysByEpoch.get(currentRoom.currentEpoch);
+    currentRoom.type === "dm"
+      ? currentRoom.sharedKey
+      : currentRoom.keysByEpoch.get(currentRoom.currentEpoch);
   const epoch = currentRoom.type === "group" ? currentRoom.currentEpoch : null;
 
   let attachmentId = null;
@@ -487,7 +427,8 @@ sendForm.addEventListener("submit", async (event) => {
     const attachment = await api.uploadAttachment(
       currentRoom.id,
       new Blob([encryptedFile.ciphertext]),
-      encryptedFile.iv
+      encryptedFile.iv,
+      file.type
     );
     attachmentId = attachment.id;
   }
@@ -497,17 +438,41 @@ sendForm.addEventListener("submit", async (event) => {
   await renderMessage(message);
 });
 
+// Rejoint le salon public #général (créé au premier appel) et, si on n'a pas
+// encore la clé de l'epoch courante (nouvel arrivant, ou salon qui vient
+// d'être créé), fait tourner la clé pour la rendre lisible immédiatement.
+async function joinGeneralChannel() {
+  const room = await api.joinGeneral();
+  const myKeyEntries = await api.getGroupKeys(room.id);
+  const hasCurrentEpochKey = myKeyEntries.some((entry) => entry.epoch === room.key_epoch);
+  if (room.key_epoch === 0 || !hasCurrentEpochKey) {
+    await rotateGroupKeyFor(room);
+  }
+}
+
 (async function init() {
-  if (new URLSearchParams(window.location.search).get("reset_token")) {
-    hideAllViews();
-    resetPasswordView.hidden = false;
+  let user;
+  try {
+    user = await api.me();
+  } catch {
+    // Seul un vrai échec d'authentification doit renvoyer vers /login : les
+    // étapes suivantes (clé publique, #général) ne doivent jamais provoquer
+    // ce redirect, sous peine de boucle infinie /  <->  /login.
+    goToLogin();
     return;
   }
+
   try {
-    const user = await api.me();
     await publishPublicKeyIfNeeded(user);
-    showChatView(user);
-  } catch {
-    showAuthView();
+  } catch (error) {
+    console.error("Impossible de publier la clé publique :", error);
   }
+
+  try {
+    await joinGeneralChannel();
+  } catch (error) {
+    console.error("Impossible de rejoindre #général :", error);
+  }
+
+  showChatView(user);
 })();

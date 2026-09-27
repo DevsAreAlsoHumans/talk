@@ -53,7 +53,7 @@ async def test_upload_attach_to_message_and_download() -> None:
         ciphertext_bytes = b"\x01\x02\x03-fake-encrypted-file-bytes-\x04\x05"
         upload_response = await alice_client.post(
             f"/rooms/{room_id}/attachments",
-            data={"iv": "attachment-iv"},
+            data={"iv": "attachment-iv", "content_type": "image/png"},
             files={"file": ("blob", ciphertext_bytes, "application/octet-stream")},
             headers=_csrf(alice_client),
         )
@@ -61,6 +61,11 @@ async def test_upload_attach_to_message_and_download() -> None:
         attachment = upload_response.json()
         assert attachment["size"] == len(ciphertext_bytes)
         assert attachment["iv"] == "attachment-iv"
+        # content_type est purement déclaratif (fourni par le client, jamais
+        # vérifié : le serveur ne voit que du ciphertext) — utile pour que le
+        # frontend sache afficher une image en ligne plutôt qu'un lien de
+        # téléchargement.
+        assert attachment["content_type"] == "image/png"
 
         message_response = await alice_client.post(
             f"/rooms/{room_id}/messages",
@@ -72,6 +77,7 @@ async def test_upload_attach_to_message_and_download() -> None:
 
         history = (await bob_client.get(f"/rooms/{room_id}/messages")).json()
         assert history[0]["attachment"]["sha256"] == attachment["sha256"]
+        assert history[0]["attachment"]["content_type"] == "image/png"
 
         download_response = await bob_client.get(
             f"/rooms/{room_id}/attachments/{attachment['id']}"

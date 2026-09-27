@@ -20,5 +20,9 @@ class Settings(BaseSettings):
     smtp_port: int = 1025
     mail_from: str = "no-reply@talk.local"
 
+    # Utilisé pour construire un lien cliquable dans l'email de reset (en plus
+    # du jeton brut, que l'utilisateur peut aussi coller manuellement).
+    app_base_url: str = "http://localhost:8000"
+
 
 settings = Settings()

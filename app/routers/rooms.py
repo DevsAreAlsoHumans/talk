@@ -6,8 +6,9 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
+from pymongo.errors import DuplicateKeyError
 
-from app.db.mongo import db, find_user_by_tag
+from app.db.mongo import db, find_user_by_tag, get_user_label
 from app.db.redis_client import redis_client
 from app.models.attachment import AttachmentPublic
 from app.models.room import (
@@ -67,7 +68,11 @@ def _to_group_room_public(
 
 def _to_attachment_public(document: dict[str, Any]) -> AttachmentPublic:
     return AttachmentPublic(
-        id=document["_id"], size=document["size"], sha256=document["sha256"], iv=document["iv"]
+        id=document["_id"],
+        size=document["size"],
+        sha256=document["sha256"],
+        iv=document["iv"],
+        content_type=document.get("content_type"),
     )
 
 
@@ -188,6 +193,40 @@ async def create_group_room(
     return _to_group_room_public(room_doc, member_documents)
 
 
+@router.post("/general/join", response_model=RoomPublic, dependencies=[Depends(require_csrf)])
+async def join_general_room(user_id: str = Depends(get_current_user_id)) -> RoomPublic:
+    """Rejoint (ou crée) le salon public #général, ouvert à tout utilisateur inscrit."""
+    room = await db.rooms.find_one({"is_general": True})
+    if room is None:
+        room_doc: dict[str, Any] = {
+            "type": "group",
+            "name": "Général",
+            "is_general": True,
+            "members": [{"user_id": user_id, "role": "owner"}],
+            "member_ids": [user_id],
+            "created_at": datetime.now(UTC),
+        }
+        try:
+            result = await db.rooms.insert_one(room_doc)
+        except DuplicateKeyError:
+            room = await db.rooms.find_one({"is_general": True})
+        else:
+            room_doc["_id"] = result.inserted_id
+            room = room_doc
+
+    if user_id not in room["member_ids"]:
+        new_member = {"user_id": user_id, "role": "member"}
+        await db.rooms.update_one(
+            {"_id": room["_id"]},
+            {"$push": {"members": new_member}, "$addToSet": {"member_ids": user_id}},
+        )
+        room["members"].append(new_member)
+        room["member_ids"].append(user_id)
+
+    member_documents = await _fetch_member_documents(room["members"])
+    return _to_group_room_public(room, member_documents)
+
+
 @router.post(
     "/{room_id}/members", response_model=RoomPublic, dependencies=[Depends(require_csrf)]
 )
@@ -214,7 +253,13 @@ async def add_member(
     room["member_ids"].append(peer_id)
 
     await create_notification(
-        peer_id, "room_invite", {"room_id": str(room["_id"]), "room_name": room["name"]}
+        peer_id,
+        "room_invite",
+        {
+            "room_id": str(room["_id"]),
+            "room_name": room["name"],
+            "invited_by_label": await get_user_label(user_id),
+        },
     )
 
     member_documents = await _fetch_member_documents(room["members"])
@@ -380,10 +425,14 @@ async def send_message(
     message = _to_message_public(document, attachment_document)
     await redis_client.publish(room_channel(room_id), message.model_dump_json())
 
-    for member_id in room["member_ids"]:
-        if member_id != user_id:
+    other_members = [member_id for member_id in room["member_ids"] if member_id != user_id]
+    if other_members:
+        sender_label = await get_user_label(user_id)
+        for member_id in other_members:
             await create_notification(
-                member_id, "message", {"room_id": room_id, "sender_id": user_id}
+                member_id,
+                "message",
+                {"room_id": room_id, "sender_id": user_id, "sender_label": sender_label},
             )
 
     return message
@@ -395,6 +444,7 @@ async def send_message(
 async def upload_attachment(
     room_id: str,
     iv: str = Form(...),
+    content_type: str | None = Form(default=None),
     file: UploadFile = File(...),
     user_id: str = Depends(get_current_user_id),
 ) -> AttachmentPublic:
@@ -416,6 +466,7 @@ async def upload_attachment(
         "size": len(data),
         "sha256": sha256,
         "iv": iv,
+        "content_type": content_type,
         "uploader_id": user_id,
         "created_at": datetime.now(UTC),
     }
@@ -449,9 +500,13 @@ async def rotate_group_key(
 
     Le serveur ne voit jamais la clé de salon en clair : il ne fait que stocker, par membre,
     la clé déjà chiffrée côté client (ECDH avec la clé publique de l'auteur de la rotation).
+    Ouvert à n'importe quel membre (pas seulement owner/admin) : contrairement à
+    l'ajout/retrait de membres, faire tourner la clé ne donne aucun pouvoir sur la
+    composition du salon (la validation ci-dessous impose de couvrir exactement les
+    membres actuels) — ça permet à un nouvel arrivant simple "membre" de récupérer
+    lui-même l'accès à la clé sans dépendre d'un admin en ligne au même moment.
     """
     room = await _get_group_or_400(room_id, user_id)
-    _require_min_role(room, user_id, "admin")
 
     entry_member_ids = {entry.member_id for entry in payload.entries}
     if entry_member_ids != set(room["member_ids"]):

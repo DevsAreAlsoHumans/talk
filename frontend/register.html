@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Talk — Inscription</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+  </head>
+  <body>
+    <main>
+      <section class="auth-shell">
+        <div class="auth-card">
+          <h1 class="brand">Talk</h1>
+          <form id="register-form">
+            <h2>Créer un compte</h2>
+            <input name="username" placeholder="Pseudo" required minlength="3" />
+            <input name="email" type="email" placeholder="Email" required />
+            <input name="password" type="password" placeholder="Mot de passe" required />
+            <button type="submit" class="btn-primary">S'inscrire</button>
+            <a href="/login" class="btn-link">Déjà un compte ? Connecte-toi</a>
+          </form>
+          <p id="auth-error" class="error"></p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/static/js/register.js"></script>
+  </body>
+</html>

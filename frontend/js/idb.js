@@ -1,6 +1,5 @@
 const DB_NAME = "talk-crypto";
 const STORE_NAME = "keys";
-const KEY_NAME = "ecdh-keypair";
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -15,21 +14,24 @@ function openDb() {
 
 // Un CryptoKey (extractable ou non) peut être stocké tel quel en IndexedDB :
 // on garde donc la paire de clés ECDH en local sans jamais l'exporter en clair.
-export async function loadKeyPair() {
+// Clé indexée par userId : IndexedDB est partagée par origine (pas par compte),
+// donc plusieurs comptes dans le même navigateur doivent avoir chacun leur
+// propre paire (sinon le 2e compte réutiliserait celle du 1er par erreur).
+export async function loadKeyPair(userId) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, "readonly");
-    const request = transaction.objectStore(STORE_NAME).get(KEY_NAME);
+    const request = transaction.objectStore(STORE_NAME).get(userId);
     request.onsuccess = () => resolve(request.result || null);
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function saveKeyPair(keyPair) {
+export async function saveKeyPair(userId, keyPair) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, "readwrite");
-    transaction.objectStore(STORE_NAME).put(keyPair, KEY_NAME);
+    transaction.objectStore(STORE_NAME).put(keyPair, userId);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });

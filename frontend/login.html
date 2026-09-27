@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Talk — Connexion</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+  </head>
+  <body>
+    <main>
+      <section id="login-view" class="auth-shell">
+        <div class="auth-card">
+          <h1 class="brand">Talk</h1>
+          <form id="login-form">
+            <h2>Connexion</h2>
+            <input name="email" type="email" placeholder="Email" required />
+            <input name="password" type="password" placeholder="Mot de passe" required />
+            <button type="submit" class="btn-primary">Se connecter</button>
+            <button type="button" id="forgot-password-link" class="btn-link">
+              Mot de passe oublié ?
+            </button>
+            <a href="/register" class="btn-link">Pas de compte ? Inscris-toi</a>
+          </form>
+          <p id="auth-error" class="error"></p>
+        </div>
+      </section>
+
+      <section id="totp-view" class="auth-shell" hidden>
+        <div class="auth-card">
+          <h1 class="brand">Talk</h1>
+          <h2>Code de vérification</h2>
+          <form id="totp-login-form">
+            <input name="code" placeholder="Code à 6 chiffres" pattern="\d{6}" required />
+            <button type="submit" class="btn-primary">Valider</button>
+          </form>
+          <p id="totp-error" class="error"></p>
+        </div>
+      </section>
+
+      <section id="forgot-password-view" class="auth-shell" hidden>
+        <div class="auth-card">
+          <h1 class="brand">Talk</h1>
+          <h2>Mot de passe oublié</h2>
+          <form id="forgot-password-form">
+            <input name="email" type="email" placeholder="Email" required />
+            <button type="submit" class="btn-primary">Envoyer le lien</button>
+          </form>
+          <p id="forgot-password-message" class="hint"></p>
+          <button type="button" id="have-token-link" class="btn-link">J'ai déjà un jeton</button>
+        </div>
+      </section>
+
+      <section id="reset-password-view" class="auth-shell" hidden>
+        <div class="auth-card">
+          <h1 class="brand">Talk</h1>
+          <h2>Nouveau mot de passe</h2>
+          <form id="reset-password-form">
+            <input name="token" placeholder="Jeton reçu par email" required />
+            <input name="password" type="password" placeholder="Nouveau mot de passe" required />
+            <button type="submit" class="btn-primary">Réinitialiser</button>
+          </form>
+          <p id="reset-password-message" class="hint"></p>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/static/js/login.js"></script>
+  </body>
+</html>

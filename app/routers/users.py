@@ -81,4 +81,6 @@ async def get_avatar(blob_id: str) -> FileResponse:
     path = blob_path(blob_id)
     if not path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Avatar introuvable.")
-    return FileResponse(path)
+    # blob_id est unique par upload (jamais réutilisé pour un contenu différent) :
+    # le navigateur peut garder cette image en cache indéfiniment sans risque.
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
