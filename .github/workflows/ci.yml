@@ -13,9 +13,14 @@ jobs:
     runs-on: ubuntu-latest
 
     # Les tests d'intégration utilisent la vraie base MongoDB.
+    # Le job tourne sur la VM du runner, pas dans un conteneur : le hostname
+    # `mongo` n'existe que dans le réseau Docker. Le port doit donc être publié
+    # sur l'hôte, et c'est `localhost` que le job doit viser.
     services:
       mongo:
         image: mongo:7
+        ports:
+          - 27017:27017
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\")'"
           --health-interval 10s
@@ -23,7 +28,7 @@ jobs:
           --health-retries 10
 
     env:
-      MONGO_URL: mongodb://mongo:27017
+      MONGO_URL: mongodb://localhost:27017
       MONGO_DB_NAME: talk_test
 
     steps:
