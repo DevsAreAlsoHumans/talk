@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:                 # CI verte exigée sur les branches étudiantes (= tout push)
+  pull_request:
+
+# Annule les runs précédents du même PR (économie de minutes Actions)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install ruff
+      - run: ruff check app/ tests/
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Mongo de CI fourni via service container : aucun secret requis
+      mongodb:
+        image: mongo:7
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest tests/ -v
+        env:
+          TALK_MONGODB_URI: mongodb://localhost:27017/talk_test
+          TALK_DB_NAME: talk_test
+
+  test-front:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: find frontend -name '*.js' -print0 | xargs -0 -n1 node --check
+      # Glob explicite : la découverte par répertoire est capricieuse selon
+      # l'OS (Node/Windows), le glob est portable sur Linux CI comme en local.
+      - run: node --test tests/front/*.test.mjs
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # TALK_JWT_SECRET est requis par Compose ; une valeur jetable suffit ici
+      # (l'image n'est PAS lancée : elle est juste bâtie puis validée).
+      - run: docker compose build app
+        env:
+          TALK_JWT_SECRET: ci-build-only-secret-do-not-reuse-0123456789abcdef
