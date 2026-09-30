@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="talk, messagerie chiffre de bout en bout">
+  <title>talk · messagerie privée</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section id="auth-view" class="auth-view">
+      <div class="brand-mark">t/</div>
+      <p class="eyebrow">messagerie privée</p>
+      <h1>Des conversations qui restent à vous.</h1>
+      <p class="lede">Un espace calme pour vos équipes et vos communautés, chiffré directement dans votre navigateur.</p>
+      <form id="auth-form" class="auth-form">
+        <label>Identifiant<input id="username" name="username" autocomplete="username" minlength="3" maxlength="32" required></label>
+        <label>Mot de passe<input id="password" name="password" type="password" autocomplete="current-password" minlength="12" required></label>
+        <button class="button button-primary" type="submit"><span id="auth-submit-label">Se connecter</span><span aria-hidden="true">↗</span></button>
+      </form>
+      <button id="auth-mode" class="text-button" type="button">Créer un compte</button>
+      <p id="auth-error" class="form-error" role="alert"></p>
+    </section>
+
+    <section id="app-view" class="app-view hidden">
+      <aside class="sidebar">
+        <div class="sidebar-top"><div class="brand-mark small">t/</div><button id="logout" class="icon-button" title="Se déconnecter" aria-label="Se déconnecter">↪</button></div>
+        <div class="profile"><span id="profile-initial" class="avatar">?</span><div><strong id="profile-name">Utilisateur</strong><small>session sécurisée</small></div></div>
+        <div class="section-heading"><span>Espaces</span><button id="new-server" class="icon-button" title="Créer un espace" aria-label="Créer un espace">+</button></div>
+        <nav id="server-list" class="server-list" aria-label="Espaces"></nav>
+      </aside>
+      <aside class="channel-rail">
+        <div class="channel-header"><div><span class="eyebrow">espace actif</span><h2 id="server-name">Aucun espace</h2></div><button id="new-channel" class="icon-button" title="Créer un canal" aria-label="Créer un canal">+</button></div>
+        <div class="channel-label">Canaux</div>
+        <nav id="channel-list" class="channel-list" aria-label="Canaux"></nav>
+        <div class="security-note"><span class="lock">⌁</span><div><strong>Chiffrement actif</strong><small>Les messages sont chiffrés avant de quitter votre navigateur.</small></div></div>
+      </aside>
+      <section class="conversation">
+        <header class="conversation-header"><div><p class="eyebrow">canal</p><h2 id="channel-name">Sélectionnez un canal</h2></div><span id="connection-state" class="status"><i></i>hors ligne</span></header>
+        <div id="message-list" class="message-list"><div class="empty-state"><div class="empty-icon">✦</div><h3>Votre espace vous attend.</h3><p>Créez un espace et un canal pour commencer une conversation chiffrée.</p></div></div>
+        <form id="message-form" class="message-form hidden"><textarea id="message-input" rows="1" maxlength="5000" placeholder="Écrire un message chiffré…" aria-label="Message"></textarea><button class="send-button" type="submit" title="Envoyer" aria-label="Envoyer">↑</button></form>
+      </section>
+    </section>
+  </main>
+  <dialog id="name-dialog"><form method="dialog" id="name-form"><p class="eyebrow" id="dialog-eyebrow">nouvel espace</p><h2 id="dialog-title">Créer un espace</h2><label>Nom<input id="dialog-name" maxlength="64" required></label><div class="dialog-actions"><button class="button button-muted" value="cancel">Annuler</button><button class="button button-primary" id="dialog-submit" value="default">Créer</button></div></form></dialog>
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>

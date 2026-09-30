@@ -1,0 +1,37 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      COOKIE_SECURE: "false"
+      ALLOWED_ORIGIN: http://localhost:8000
+      USE_MONGO: "true"
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DATABASE: talk
+    depends_on:
+      mongo:
+        condition: service_healthy
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    environment:
+      COOKIE_SECURE: "false"
+      ALLOWED_ORIGIN: http://test
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo-data:

@@ -1,0 +1,13 @@
+# Secrets locaux — ne jamais committer
+RESUME_PRIVE.md
+.env
+.env.*
+
+# Artefacts
+.DS_Store
+*.log
+build/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
