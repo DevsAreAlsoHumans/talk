@@ -1,0 +1,35 @@
+services:
+  # Base Redis, les données sont gardées dans un volume
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    # L'app attend que Redis réponde avant de démarrer
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # L'application
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+
+  # Lance ruff + les tests Python : docker compose --profile test run --rm test
+  test:
+    build: .
+    command: sh -c "pip install --no-cache-dir -r requirements-dev.txt && ruff check app tests && pytest -q --cov=app --cov-report=term-missing"
+    profiles: [test]
+    volumes:
+      - .:/code
+
+volumes:
+  redis_data:
