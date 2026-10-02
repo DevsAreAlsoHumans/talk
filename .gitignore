@@ -6,3 +6,12 @@ RESUME_PRIVE.md
 # Artefacts
 .DS_Store
 *.log
+# Outils locaux
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
