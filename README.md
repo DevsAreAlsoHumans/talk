@@ -1,68 +1,63 @@
-# talk
+# Talk
 
-> **Chat chiffré de bout en bout — un croisement entre Discord et Telegram WebApp.**
+Webapp de discussion en salons et canaux. Projet pédagogique **SDV DEV 2026** : FastAPI, Redis et JavaScript sans framework.
 
-Application de messagerie qui combine le modèle de **Discord** (serveurs, salons, canaux, multi-utilisateurs) et le côté **webapp léger de Telegram** (interface accessible depuis le navigateur, sans installation). Les utilisateurs s'authentifient, rejoignent des salons et échangent des messages **sans que le serveur puisse jamais lire le contenu en clair** (chiffrement de bout en bout côté client).
+## Démarrer
 
-Sujet d'examen `SDV DEV 2026`.
-
-## Stack
-
-| Couche | Technologie |
-|--------|-------------|
-| Backend | Python + FastAPI |
-| Stockage | Redis ou MongoDB |
-| Frontend | HTML + CSS + JavaScript vanilla |
-| Temps réel | WebSocket / polling court |
-| CI | GitHub Actions |
-| Déploiement | Docker + docker-compose |
-
-## Fonctionnalités
-
-- Authentification (inscription, connexion, sessions sécurisées, mots de passe hachés).
-- Salons et canaux de discussion multi-utilisateurs, proche d'un serveur Discord.
-- Messages chiffrés de bout en bout, **jamais stockés en clair**.
-- Mise à jour en temps réel ou quasi temps réel.
-- Interface web légère et utilisable, style webapp.
-
-## Sécurité
-
-- Protection CSRF effective sur toutes les mutations.
-- Prévention des injections SQL et NoSQL.
-- Chiffrement de bout en bout côté client (clés jamais transmises au serveur).
-- Validation stricte des entrées, anti-XSS, headers de sécurité, sessions sécurisées.
-
-## Démarrer avec Docker
+Il faut Docker avec Compose :
 
 ```bash
-docker compose up              # lance l'application (app + Redis/MongoDB)
-docker compose run --rm test   # lance les tests (unitaires + intégration)
+docker compose up --build
 ```
 
-La **CI GitHub Actions** exécute les tests et le linter à chaque push / pull request.
+Ouvrir <http://localhost:8000>. Créer deux comptes dans deux navigateurs (ou avec une fenêtre privée), créer un salon et envoyer son lien d’invitation à l’autre compte. Le créateur peut ajouter des canaux. Les messages apparaissent chez tous les membres en environ 2,5 secondes.
 
-## Mode de travail sur ce dépôt
-
-- Travail **individuel** : chaque étudiant développe son projet sur **sa propre branche** (`etudiant/<nom>-<prenom>`).
-- **Ne jamais casser les branches des autres** (pas de force-push, reset, réécriture ni suppression des branches d'autrui).
-- La branche `main` sert de référence ; les projets sont rendus sur les branches étudiantes avec **CI verte**.
-
-## Structure d'un projet rendu
-
-```
-Dockerfile                # image de l'application
-docker-compose.yml        # app + base de données
-.github/workflows/*.yml   # pipeline CI (tests + linter)
-app/                      # backend FastAPI
-frontend/                 # HTML/CSS/JS vanilla + chiffrement côté client
-tests/                    # tests unitaires + intégration / non-régression
-README.md                 # documentation (fonctionnement, sécurité, mise en place)
+```bash
+docker compose --profile test run --rm test
 ```
 
-## Ressources
+Cette commande lance Ruff puis les tests de l’API avec la couverture. Les tests du chiffrement côté navigateur se lancent avec Node :
 
-- Dépôt : <https://github.com/DevsAreAlsoHumans/talk>
+```bash
+node --test "tests/*.test.js"
+```
 
----
+La CI GitHub Actions lance tout à chaque push et pull request : Ruff, les tests Python (couverture minimale 90 %), les tests Node et la construction de l’image Docker. Aucun service externe n’est nécessaire : les tests utilisent un faux Redis en mémoire.
 
-*Projet pédagogique — année 2026.*
+| Fichier | Ce qui est testé |
+|---|---|
+| `tests/test_security.py` | hachage Argon2, CSRF, vérification d’origine, headers, cookies, erreurs génériques |
+| `tests/test_auth.py` | inscription, connexion, déconnexion, sessions, entrées invalides, essais d’injection |
+| `tests/test_servers.py` | parcours complet entre deux comptes, accès refusés, messages en clair refusés, historique |
+| `tests/crypto.test.js` | chiffrement AES-GCM : aller-retour, nonce unique, mauvaise clé, message modifié ou déplacé |
+
+## Fonctionnement
+
+- Les mots de passe sont hachés avec **Argon2id** (sel aléatoire inclus). Si le compte n’existe pas, un faux hash est vérifié pour que la réponse prenne le même temps. Les sessions sont des jetons aléatoires conservés dans Redis (7 jours) et envoyés dans un cookie `HttpOnly`, `SameSite=Strict` (et `Secure` en HTTPS). Une nouvelle session est créée à chaque connexion et l’ancienne est supprimée.
+- Les requêtes qui modifient des données (y compris inscription et connexion) doivent venir de notre site (en-tête `Origin`, sinon `Referer`) et porter un jeton CSRF identique au cookie. L’API vérifie aussi l’appartenance au salon et, pour créer un canal, le compte créateur.
+- Le navigateur crée une clé AES-256 aléatoire pour chaque salon. Il chiffre chaque message avec AES-GCM et un nonce aléatoire de 96 bits. L’identifiant du canal est inclus dans les données authentifiées.
+- La clé reste dans le stockage local du navigateur. Le lien d’invitation la contient dans son **fragment** (`#`), que le navigateur n’envoie pas au serveur. Il faut transmettre ce lien par un canal privé. Si la clé locale est perdue, il faut récupérer à nouveau l’invitation.
+- Redis conserve les utilisateurs, salons, membres, canaux et messages chiffrés. Les 100 derniers messages d’un canal sont affichés et actualisés toutes les 2,5 secondes.
+- Toutes les entrées passent par des schémas Pydantic stricts (types, tailles, format, champs en trop refusés) : un objet comme `{"$gt": ""}` est refusé. Les clés Redis sont construites avec des identifiants générés par le serveur.
+- Les messages sont affichés comme texte, sans interpréter leur HTML. Chaque réponse porte une CSP stricte, HSTS, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy` et `Cross-Origin-Opener-Policy`.
+- Les erreurs renvoient un message générique (« Données invalides », « Erreur interne »), sans détail ni trace.
+
+**Limites connues :** les noms de salons et canaux, auteurs et dates restent visibles du serveur. Tous les membres d’un salon partagent la même clé : un membre ayant reçu l’invitation peut lire l’historique. Il n’y a pas de rotation ni de révocation des clés. L’application JavaScript étant livrée par le serveur, un serveur activement malveillant pourrait modifier ce code ; le chiffrement protège contre la lecture passive des messages stockés ou transmis au serveur. En production, servir l’application en HTTPS est indispensable pour Web Crypto et la confidentialité des liens.
+
+## Structure
+
+```text
+app/main.py                 création de l’app, headers, gestion des erreurs
+app/routes.py               routes : comptes, salons, canaux, messages
+app/security.py             Argon2, CSRF + origine, sessions, headers
+app/models.py               schémas Pydantic (validation des entrées)
+app/database.py             connexion Redis
+frontend/crypto.js          chiffrement AES-GCM (Web Crypto)
+frontend/app.js             interface
+tests/                      tests Python (pytest) et tests du chiffrement (Node)
+Dockerfile                  image de l’application
+docker-compose.yml          application, Redis, commande de test
+.github/workflows/ci.yml    tests et linter
+```
+
+Le projet ne nécessite aucune valeur secrète de configuration. `REDIS_URL` peut être fourni à l’application pour choisir le serveur Redis.
