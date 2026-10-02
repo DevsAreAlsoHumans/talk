@@ -1,0 +1,5 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+redis>=5,<9
+pydantic>=2,<3
+argon2-cffi>=23,<26

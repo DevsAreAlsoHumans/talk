@@ -1,0 +1,10 @@
+[tool.ruff]
+line-length = 120
+
+# FastAPI utilise Depends() comme valeur par défaut, c'est normal ici
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Cookie", "fastapi.Header"]
+
+# Pour que pytest trouve le dossier app/
+[tool.pytest.ini_options]
+pythonpath = ["."]
