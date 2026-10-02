@@ -1,0 +1,24 @@
+name: Vérifications
+# La CI se lance à chaque push et pull request
+on: [push, pull_request]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements-dev.txt
+      # Linter
+      - run: ruff check app tests
+      # Tests de l'API avec la couverture (échoue sous 90 %)
+      - run: pytest -q --cov=app --cov-report=term-missing --cov-fail-under=90
+      # Tests du chiffrement côté navigateur
+      - run: node --test "tests/*.test.js"
+      # L'image Docker doit se construire
+      - run: docker build -t talk .
