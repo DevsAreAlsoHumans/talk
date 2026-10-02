@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+  <title>Talk</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/crypto.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main id="auth" class="auth-screen" hidden>
+    <section class="auth-card" aria-labelledby="auth-title">
+      <p class="brand">talk</p>
+      <h1 id="auth-title">Connexion</h1>
+      <form id="auth-form">
+        <label for="username">Identifiant</label>
+        <input id="username" name="username" autocomplete="username" minlength="3" maxlength="24" pattern="[a-zA-Z0-9_]+" required>
+        <label for="password">Mot de passe</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" minlength="10" required placeholder="10 caractères minimum">
+        <button class="primary full" id="auth-submit" type="submit">Se connecter</button>
+      </form>
+      <p id="auth-error" class="form-error" role="alert"></p>
+      <button id="auth-switch" class="text-button" type="button">Créer un compte</button>
+    </section>
+  </main>
+
+  <div id="app" class="app-shell" hidden>
+    <aside class="server-rail" aria-label="Salons">
+      <div id="server-list" class="server-list"></div>
+      <button id="new-server" class="rail-add" type="button" title="Nouveau salon" aria-label="Nouveau salon">+</button>
+      <div class="rail-spacer"></div>
+      <button id="logout" class="rail-exit" type="button" title="Déconnexion" aria-label="Déconnexion">⏻</button>
+    </aside>
+
+    <aside class="channel-sidebar" aria-label="Canaux">
+      <h2 id="server-name" class="sidebar-head">talk</h2>
+      <div class="channel-heading"><span>Canaux</span><button id="new-channel" type="button" title="Nouveau canal" aria-label="Nouveau canal">+</button></div>
+      <nav id="channel-list" class="channel-list" aria-label="Canaux du salon"></nav>
+      <div class="sidebar-bottom">
+        <button id="invite" class="invite-button" type="button">Inviter</button>
+        <div class="profile"><span class="avatar" id="user-avatar"></span><span id="username-display"></span></div>
+      </div>
+    </aside>
+
+    <section class="conversation" aria-label="Conversation">
+      <header class="conversation-head">
+        <span class="hash">#</span><strong id="channel-name"></strong>
+      </header>
+      <div id="messages" class="messages" aria-live="polite">
+        <div class="empty-state"><p>Créez ou rejoignez un salon.</p></div>
+      </div>
+      <form id="message-form" class="composer" hidden>
+        <label class="sr-only" for="message-input">Message</label>
+        <input id="message-input" maxlength="4000" autocomplete="off" placeholder="Message" required>
+        <button type="submit" aria-label="Envoyer">↑</button>
+      </form>
+      <p id="chat-error" class="chat-error" role="alert"></p>
+    </section>
+  </div>
+
+  <dialog id="name-dialog" class="modal">
+    <form id="name-form">
+      <h2 id="dialog-title">Nouveau salon</h2>
+      <label class="sr-only" for="new-name">Nom</label>
+      <input id="new-name" maxlength="40" required placeholder="Nom">
+      <p id="dialog-error" class="form-error" role="alert"></p>
+      <div class="modal-actions"><button id="dialog-cancel" class="secondary" type="button">Annuler</button><button class="primary" type="submit">Créer</button></div>
+    </form>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
