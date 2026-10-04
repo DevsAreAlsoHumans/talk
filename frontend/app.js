@@ -2,9 +2,14 @@
 const authScreen = document.querySelector('#auth');
 const appScreen = document.querySelector('#app');
 // Tout l'état de l'appli est gardé ici
-const state = { csrf: '', username: '', servers: [], server: null, channel: null, channels: [], signup: false };
+const state = {
+  csrf: '', username: '', signup: false,
+  userKeys: null, roomKeys: new Map(),
+  servers: [], server: null, channels: [], channel: null, members: [],
+};
 // Raccourci pour pas réécrire document.querySelector partout
 const $ = (selector) => document.querySelector(selector);
+const serverPath = () => `/servers/${encodeURIComponent(state.server.id)}`;
 
 // Petite notif en bas à droite qui disparaît toute seule
 function notify(message) {
@@ -28,25 +33,34 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-// La clé du salon est gardée dans le navigateur, jamais envoyée au serveur
-function keyFor(serverId) {
-  return localStorage.getItem(`talk:key:${serverId}`);
+// ---------- Clés ----------
+
+// Ma paire de clés RSA : créée une fois, gardée dans ce navigateur. Seule la publique part au serveur
+async function setupUserKeys(publicKeyOnServer) {
+  const storageKey = `talk:user-keys:${state.username}`;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(storageKey)); } catch { saved = null; }
+  if (!saved) {
+    saved = await exportUserKeys(await newUserKeys());
+    localStorage.setItem(storageKey, JSON.stringify(saved));
+  }
+  state.userKeys = await importUserKeys(saved);
+  if (publicKeyOnServer !== saved.publicKey) {
+    await api('/me/public-key', { method: 'PUT', body: JSON.stringify({ public_key: saved.publicKey }) });
+  }
 }
 
+// Clé du salon : le serveur donne ma copie chiffrée, je l'ouvre avec ma clé privée
 async function roomKey(serverId) {
-  const raw = keyFor(serverId);
-  if (!raw) throw new Error('Clé absente sur cet appareil. Ouvrez le lien d’invitation du salon.');
-  return importRoomKey(raw);
+  if (!state.roomKeys.has(serverId)) {
+    const { wrapped_key: wrappedKey } = await api(`/servers/${encodeURIComponent(serverId)}/key`);
+    try { state.roomKeys.set(serverId, await unwrapRoomKey(wrappedKey, state.userKeys.privateKey)); }
+    catch { throw new Error('Clé illisible sur cet appareil : demandez au créateur de vous ajouter à nouveau.'); }
+  }
+  return state.roomKeys.get(serverId);
 }
 
-// Chiffre le message avant de l'envoyer (fonctions dans crypto.js)
-async function encryptMessage(serverId, channelId, text) {
-  return encryptText(await roomKey(serverId), channelId, text);
-}
-
-async function decryptMessage(serverId, channelId, message) {
-  return decryptText(await roomKey(serverId), channelId, message);
-}
+// ---------- Affichage ----------
 
 // Affiche l'écran de connexion
 function showAuth() {
@@ -95,6 +109,33 @@ function renderChannels() {
   }
 }
 
+// Dessine les membres, avec un bouton pour les retirer si je suis le créateur
+function renderMembers() {
+  const list = $('#member-list');
+  list.replaceChildren();
+  for (const member of state.members) {
+    const item = document.createElement('li');
+    item.textContent = member.username;
+    if (member.owner) {
+      const badge = document.createElement('span');
+      badge.className = 'muted';
+      badge.textContent = ' créateur';
+      item.append(badge);
+    } else if (state.server?.owner) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.title = `Retirer ${member.username}`;
+      remove.setAttribute('aria-label', `Retirer ${member.username}`);
+      remove.addEventListener('click', () => removeMember(member.username));
+      item.append(remove);
+    }
+    list.append(item);
+  }
+}
+
+// ---------- Chargement ----------
+
 // Récupère mes salons et ouvre le premier
 async function loadServers() {
   state.servers = await api('/servers');
@@ -102,18 +143,27 @@ async function loadServers() {
   if (state.servers.length && !state.server) await selectServer(state.servers[0]);
 }
 
-// Quand on clique sur un salon : on charge ses canaux
+// Quand on clique sur un salon : on charge ses canaux et ses membres
 async function selectServer(server) {
   state.server = server;
   state.channel = null;
   $('#server-name').textContent = server.name;
   $('#message-form').hidden = true;
+  // Seul le créateur peut ajouter des canaux et des membres
+  $('#new-channel').hidden = !server.owner;
+  $('#add-member').hidden = !server.owner;
   renderServers();
   try {
-    state.channels = await api(`/servers/${encodeURIComponent(server.id)}/channels`);
+    state.channels = await api(`${serverPath()}/channels`);
     renderChannels();
+    await loadMembers();
     if (state.channels.length) await selectChannel(state.channels[0]);
   } catch (error) { notify(error.message); }
+}
+
+async function loadMembers() {
+  state.members = await api(`${serverPath()}/members`);
+  renderMembers();
 }
 
 // Quand on clique sur un canal : on affiche ses messages
@@ -132,6 +182,7 @@ async function loadMessages() {
   const channel = state.channel;
   if (!server || !channel) return;
   try {
+    const key = await roomKey(server.id);
     const messages = await api(`/servers/${encodeURIComponent(server.id)}/channels/${encodeURIComponent(channel.id)}/messages`);
     // Si on a changé de canal pendant le chargement, on ignore
     if (state.server?.id !== server.id || state.channel?.id !== channel.id) return;
@@ -160,7 +211,7 @@ async function loadMessages() {
       time.textContent = new Date(message.created_at).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
       const text = document.createElement('p');
       // Toujours textContent : le HTML d'un message n'est jamais interprété
-      try { text.textContent = await decryptMessage(server.id, channel.id, message); }
+      try { text.textContent = await decryptText(key, channel.id, message); }
       catch { text.textContent = 'Impossible de déchiffrer ce message.'; text.className = 'decrypt-error'; }
       meta.append(author, time);
       content.append(meta, text);
@@ -169,28 +220,20 @@ async function loadMessages() {
     }
     container.replaceChildren(...items);
     if (nearBottom) container.scrollTop = container.scrollHeight;
+    $('#chat-error').textContent = '';
   } catch (error) { $('#chat-error').textContent = error.message; }
 }
 
-// Lien d'invitation : l'id du salon et la clé sont après le #
-async function acceptInvite() {
-  const params = new URLSearchParams(location.hash.slice(1));
-  const serverId = params.get('server');
-  const key = params.get('key');
-  if (!serverId || !key) return false;
-  // On enlève la clé de la barre d'adresse tout de suite
-  history.replaceState(null, '', location.pathname);
-  try {
-    if (base64ToBytes(key).length !== 32) throw new Error('Clé d’invitation invalide.');
-    const joined = await api(`/servers/${encodeURIComponent(serverId)}/join`, { method: 'POST' });
-    localStorage.setItem(`talk:key:${serverId}`, key);
-    state.server = null;
-    await loadServers();
-    await selectServer(joined);
-    notify(`Salon « ${joined.name} » rejoint.`);
-    return true;
-  } catch (error) { notify(error.message); return false; }
+// Après connexion : mes clés, puis mes salons
+async function enterApp() {
+  const me = await api('/me');
+  state.username = me.username;
+  await setupUserKeys(me.public_key);
+  showApp();
+  await loadServers();
 }
+
+// ---------- Actions ----------
 
 // Bascule entre connexion et inscription
 $('#auth-switch').addEventListener('click', () => {
@@ -208,71 +251,87 @@ $('#auth-form').addEventListener('submit', async (event) => {
   $('#auth-error').textContent = '';
   try {
     const data = { username: $('#username').value, password: $('#password').value };
-    const result = await api(state.signup ? '/signup' : '/login', { method: 'POST', body: JSON.stringify(data) });
-    state.username = result.username;
-    showApp();
-    if (!(await acceptInvite())) await loadServers();
+    await api(state.signup ? '/signup' : '/login', { method: 'POST', body: JSON.stringify(data) });
+    $('#password').value = '';
+    await enterApp();
   } catch (error) { $('#auth-error').textContent = error.message; }
 });
 
-// Déconnexion
+// Déconnexion : on oublie aussi les clés gardées en mémoire
 $('#logout').addEventListener('click', async () => {
   try { await api('/logout', { method: 'POST' }); }
   catch (error) { notify(error.message); return; }
-  state.server = null;
-  state.channel = null;
+  Object.assign(state, { userKeys: null, roomKeys: new Map(), servers: [], server: null, channel: null });
   showAuth();
 });
 
-// Fenêtre pour créer un salon ou un canal (même fenêtre pour les deux)
+// Fenêtre pour créer un salon, un canal ou ajouter un membre (même fenêtre pour les trois)
+const dialogs = {
+  server: { title: 'Nouveau salon', placeholder: 'Nom', maxLength: 40 },
+  channel: { title: 'Nouveau canal', placeholder: 'Nom', maxLength: 40 },
+  member: { title: 'Ajouter un membre', placeholder: 'Identifiant', maxLength: 24 },
+};
 let dialogMode = 'server';
-function openNameDialog(mode) {
+function openDialog(mode) {
   dialogMode = mode;
-  $('#dialog-title').textContent = mode === 'server' ? 'Nouveau salon' : 'Nouveau canal';
+  $('#dialog-title').textContent = dialogs[mode].title;
+  $('#new-name').placeholder = dialogs[mode].placeholder;
+  $('#new-name').maxLength = dialogs[mode].maxLength;
   $('#new-name').value = '';
   $('#dialog-error').textContent = '';
   $('#name-dialog').showModal();
   $('#new-name').focus();
 }
-$('#new-server').addEventListener('click', () => openNameDialog('server'));
-$('#new-channel').addEventListener('click', () => {
-  if (state.server) openNameDialog('channel');
-});
+$('#new-server').addEventListener('click', () => openDialog('server'));
+$('#new-channel').addEventListener('click', () => { if (state.server) openDialog('channel'); });
+$('#add-member').addEventListener('click', () => { if (state.server) openDialog('member'); });
 $('#dialog-cancel').addEventListener('click', () => $('#name-dialog').close());
-// Création du salon ou du canal
+
+// Nouveau salon : je crée sa clé AES et je l'envoie chiffrée avec MA clé publique
+async function createServer(name) {
+  const key = await newRoomKey();
+  const wrappedKey = await wrapRoomKey(key, state.userKeys.publicKey);
+  const server = await api('/servers', { method: 'POST', body: JSON.stringify({ name, wrapped_key: wrappedKey }) });
+  state.roomKeys.set(server.id, key);
+  state.server = null;
+  await loadServers();
+  await selectServer(state.servers.find((item) => item.id === server.id));
+  notify('Salon créé');
+}
+
+async function createChannel(name) {
+  const channel = await api(`${serverPath()}/channels`, { method: 'POST', body: JSON.stringify({ name }) });
+  state.channels.push(channel);
+  await selectChannel(channel);
+}
+
+// Ajout d'un membre : je chiffre la clé du salon avec SA clé publique
+async function addMember(username) {
+  const { public_key: publicKey } = await api(`/users/${encodeURIComponent(username)}/public-key`);
+  const wrappedKey = await wrapRoomKey(await roomKey(state.server.id), await importPublicKey(publicKey));
+  await api(`${serverPath()}/members`, { method: 'POST', body: JSON.stringify({ username, wrapped_key: wrappedKey }) });
+  await loadMembers();
+  notify(`${username} ajouté`);
+}
+
+async function removeMember(username) {
+  if (!confirm(`Retirer ${username} du salon ?`)) return;
+  try {
+    await api(`${serverPath()}/members/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    await loadMembers();
+  } catch (error) { notify(error.message); }
+}
+
 $('#name-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const name = $('#new-name').value.trim();
   if (!name) return;
   try {
-    if (dialogMode === 'server') {
-      // Nouveau salon = nouvelle clé AES de 256 bits générée ici
-      const key = newRoomKey();
-      const server = await api('/servers', { method: 'POST', body: JSON.stringify({ name }) });
-      localStorage.setItem(`talk:key:${server.id}`, key);
-      state.server = null;
-      await loadServers();
-      await selectServer(server);
-      notify('Salon créé');
-    } else {
-      const channel = await api(`/servers/${encodeURIComponent(state.server.id)}/channels`, {
-        method: 'POST', body: JSON.stringify({ name }),
-      });
-      state.channels.push(channel);
-      await selectChannel(channel);
-    }
+    if (dialogMode === 'server') await createServer(name);
+    else if (dialogMode === 'channel') await createChannel(name);
+    else await addMember(name);
     $('#name-dialog').close();
   } catch (error) { $('#dialog-error').textContent = error.message; }
-});
-
-// Copie le lien d'invitation avec la clé dedans
-$('#invite').addEventListener('click', async () => {
-  if (!state.server) return;
-  const key = keyFor(state.server.id);
-  if (!key) { notify('Clé du salon absente sur cet appareil'); return; }
-  const url = `${location.origin}/#server=${encodeURIComponent(state.server.id)}&key=${encodeURIComponent(key)}`;
-  try { await navigator.clipboard.writeText(url); notify('Lien copié, à envoyer en privé'); }
-  catch { notify('Copie impossible (HTTPS requis)'); }
 });
 
 // Envoi d'un message : on chiffre puis on envoie
@@ -285,7 +344,7 @@ $('#message-form').addEventListener('submit', async (event) => {
   const channelId = state.channel.id;
   $('#chat-error').textContent = '';
   try {
-    const encrypted = await encryptMessage(serverId, channelId, text);
+    const encrypted = await encryptText(await roomKey(serverId), channelId, text);
     await api(`/servers/${encodeURIComponent(serverId)}/channels/${encodeURIComponent(channelId)}/messages`, {
       method: 'POST', body: JSON.stringify(encrypted),
     });
@@ -294,18 +353,24 @@ $('#message-form').addEventListener('submit', async (event) => {
   } catch (error) { $('#chat-error').textContent = error.message; }
 });
 
+// Recharge la liste des salons (pour voir ceux où on vient d'être ajouté)
+async function refreshServers() {
+  try {
+    state.servers = await api('/servers');
+    renderServers();
+    if (!state.server && state.servers.length) await selectServer(state.servers[0]);
+  } catch { /* on réessaiera au prochain tour */ }
+}
+
 // Au chargement : on récupère le CSRF puis on regarde si on est déjà connecté
 async function start() {
   if (!crypto.subtle) { showAuth(); $('#auth-error').textContent = 'Le chiffrement nécessite HTTPS ou localhost.'; return; }
   try {
-    const token = await api('/csrf');
-    state.csrf = token.csrf_token;
-    const me = await api('/me');
-    state.username = me.username;
-    showApp();
-    if (!(await acceptInvite())) await loadServers();
+    state.csrf = (await api('/csrf')).csrf_token;
+    await enterApp();
   } catch { showAuth(); }
-  // Toutes les 2,5 s on recharge les messages (polling)
+  // Toutes les 2,5 s on recharge les messages (polling), et les salons toutes les 10 s
   setInterval(() => { if (state.channel && !appScreen.hidden) loadMessages(); }, 2500);
+  setInterval(() => { if (!appScreen.hidden) refreshServers(); }, 10000);
 }
 start();
