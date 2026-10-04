@@ -1,0 +1,14 @@
+# Rien d'inutile ou de privé dans l'image
+.git
+.github
+.claude
+.env
+.env.*
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.coverage
+.DS_Store
+*.md
+LICENSE
+docker-compose.yml

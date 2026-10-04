@@ -12,9 +12,11 @@ services:
       timeout: 3s
       retries: 10
 
-  # L'application
+  # L'application (son healthcheck est dans le Dockerfile)
   app:
-    build: .
+    build:
+      context: .
+      target: app
     ports:
       - "8000:8000"
     depends_on:
@@ -22,14 +24,14 @@ services:
         condition: service_healthy
     environment:
       REDIS_URL: redis://redis:6379/0
+    restart: unless-stopped
 
   # Lance ruff + les tests Python : docker compose --profile test run --rm test
   test:
-    build: .
-    command: sh -c "pip install --no-cache-dir -r requirements-dev.txt && ruff check app tests && pytest -q --cov=app --cov-report=term-missing"
+    build:
+      context: .
+      target: test
     profiles: [test]
-    volumes:
-      - .:/code
 
 volumes:
   redis_data:
