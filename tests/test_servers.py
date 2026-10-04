@@ -2,10 +2,10 @@
 
 import pytest
 
-from tests.conftest import CIPHER, create_server, signup
+from tests.conftest import CIPHER, WRAPPED_KEY, add_member, create_server, signup
 
 
-# Parcours complet : inscription → salon → envoi → l'autre rejoint → réception → historique
+# Parcours complet : inscription → salon → ajout d'un membre → envoi → réception → historique
 def test_full_flow_between_two_users(browser, stored):
     alice, bob = browser(), browser()
     signup(alice)
@@ -13,8 +13,11 @@ def test_full_flow_between_two_users(browser, stored):
     server, path = create_server(alice)
     assert alice.post(path, json=CIPHER).status_code == 200
 
-    assert bob.post(f"/api/servers/{server['id']}/join").status_code == 200
-    assert bob.get("/api/servers").json() == [{"id": server["id"], "name": "Cours"}]
+    bob_key = "B" * 342
+    assert add_member(alice, server["id"], "bob", bob_key).status_code == 200
+    assert bob.get("/api/servers").json() == [{"id": server["id"], "name": "Cours", "owner": False}]
+    # Bob récupère SA copie chiffrée de la clé du salon
+    assert bob.get(f"/api/servers/{server['id']}/key").json() == {"wrapped_key": bob_key}
     reply = {**CIPHER, "ciphertext": "cmVwb25zZS1kZS1ib2ItY2hpZmZyZWU"}
     assert bob.post(path, json=reply).status_code == 200
 
@@ -34,7 +37,9 @@ def test_server_list_only_shows_my_servers(browser):
     create_server(alice, "Zèbre")
     create_server(alice, "alpha")
     create_server(bob, "Privé")
-    assert [server["name"] for server in alice.get("/api/servers").json()] == ["alpha", "Zèbre"]
+    servers = alice.get("/api/servers").json()
+    assert [server["name"] for server in servers] == ["alpha", "Zèbre"]
+    assert all(server["owner"] for server in servers)
 
 
 def test_non_member_is_refused(browser):
@@ -43,6 +48,8 @@ def test_non_member_is_refused(browser):
     signup(bob, "bob")
     server, path = create_server(alice)
     assert bob.get(f"/api/servers/{server['id']}/channels").status_code == 403
+    assert bob.get(f"/api/servers/{server['id']}/key").status_code == 403
+    assert bob.get(f"/api/servers/{server['id']}/members").status_code == 403
     assert bob.get(path).status_code == 403
     assert bob.post(path, json=CIPHER).status_code == 403
 
@@ -53,7 +60,7 @@ def test_logged_out_user_is_refused(browser):
     server, path = create_server(alice)
     assert visitor.get("/api/servers").status_code == 401
     assert visitor.get(path).status_code == 401
-    assert visitor.post(f"/api/servers/{server['id']}/join").status_code == 401
+    assert visitor.get(f"/api/servers/{server['id']}/key").status_code == 401
 
 
 def test_only_owner_can_add_a_channel(browser):
@@ -61,7 +68,7 @@ def test_only_owner_can_add_a_channel(browser):
     signup(alice)
     signup(bob, "bob")
     server, _ = create_server(alice)
-    bob.post(f"/api/servers/{server['id']}/join")
+    add_member(alice, server["id"], "bob")
     channels_path = f"/api/servers/{server['id']}/channels"
     assert bob.post(channels_path, json={"name": "Pirate"}).status_code == 403
     assert alice.post(channels_path, json={"name": "  Devoirs  "}).json()["name"] == "Devoirs"
@@ -79,14 +86,20 @@ def test_channel_must_belong_to_server(client):
 
 def test_unknown_server_is_not_found(client):
     signup(client)
-    assert client.post("/api/servers/inconnu/join").status_code == 404
     assert client.get("/api/servers/inconnu/channels").status_code == 404
+    assert client.get("/api/servers/inconnu/key").status_code == 404
 
 
-@pytest.mark.parametrize("name", ["", "   ", "x" * 41])
-def test_bad_names_are_rejected(client, name):
+@pytest.mark.parametrize("data", [
+    {"name": "", "wrapped_key": WRAPPED_KEY},
+    {"name": "   ", "wrapped_key": WRAPPED_KEY},
+    {"name": "x" * 41, "wrapped_key": WRAPPED_KEY},
+    {"name": "Cours"},
+    {"name": "Cours", "wrapped_key": "clé en clair !"},
+])
+def test_bad_new_servers_are_rejected(client, data):
     signup(client)
-    assert client.post("/api/servers", json={"name": name}).status_code == 422
+    assert client.post("/api/servers", json=data).status_code == 422
 
 
 @pytest.mark.parametrize("message", [

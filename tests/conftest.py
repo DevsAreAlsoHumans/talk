@@ -10,8 +10,10 @@ from app.main import app
 
 ORIGIN = "http://testserver"
 PASSWORD = "motdepasse123"
-# Un faux message chiffré au bon format (le vrai chiffrement est testé dans crypto.test.js)
+# Fausses données au bon format (le vrai chiffrement est testé dans crypto.test.js)
 CIPHER = {"version": 1, "nonce": "AAAAAAAAAAAAAAAA", "ciphertext": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo"}
+PUBLIC_KEY = "P" * 392
+WRAPPED_KEY = "W" * 342
 
 
 # Faux Redis en mémoire, vidé à chaque test
@@ -61,5 +63,9 @@ def login(client, username="alice", password=PASSWORD):
 
 # Crée un salon et renvoie aussi le chemin des messages de son canal « général »
 def create_server(client, name="Cours"):
-    server = client.post("/api/servers", json={"name": name}).json()
+    server = client.post("/api/servers", json={"name": name, "wrapped_key": WRAPPED_KEY}).json()
     return server, f"/api/servers/{server['id']}/channels/{server['channel_id']}/messages"
+
+
+def add_member(client, server_id, username, wrapped_key=WRAPPED_KEY):
+    return client.post(f"/api/servers/{server_id}/members", json={"username": username, "wrapped_key": wrapped_key})

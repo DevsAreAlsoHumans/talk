@@ -7,7 +7,7 @@ from tests.conftest import PASSWORD, login, signup
 
 def test_signup_logs_in(client):
     assert signup(client).json() == {"username": "alice"}
-    assert client.get("/api/me").json() == {"username": "alice"}
+    assert client.get("/api/me").json()["username"] == "alice"
 
 
 def test_username_is_unique_without_case(client):
@@ -28,7 +28,7 @@ def test_login_and_wrong_password(client):
     client.post("/api/logout")
     assert login(client, password="mauvais-mdp").status_code == 401
     assert login(client).status_code == 200
-    assert client.get("/api/me").json() == {"username": "alice"}
+    assert client.get("/api/me").json()["username"] == "alice"
 
 
 def test_unknown_user_gets_same_error(client):
