@@ -8,7 +8,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app.database import db
 from app.models import Credentials, EncryptedMessage, Named
-from app.security import check_password, csrf, current_user, hash_password, open_session, set_cookie
+from app.security import (
+    check_login_allowed,
+    check_password,
+    csrf,
+    current_user,
+    hash_password,
+    login_failures_key,
+    open_session,
+    record_login_failure,
+    set_cookie,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -63,11 +73,15 @@ async def signup(data: Credentials, request: Request, response: Response, databa
 @router.post("/login", dependencies=[Depends(csrf)])
 async def login(data: Credentials, request: Request, response: Response, database=Depends(db)):
     username = data.username.lower()
+    failures_key = login_failures_key(request, username)
+    await check_login_allowed(database, failures_key)
     user_id = await database.get(f"username:{username}")
     password_hash = await database.hget(f"user:{user_id}", "password_hash") if user_id else None
     # Même message si le compte n'existe pas ou si le mot de passe est faux
     if not check_password(data.password, password_hash):
+        await record_login_failure(database, failures_key)
         raise HTTPException(401, "Identifiant ou mot de passe incorrect")
+    await database.delete(failures_key)
     await open_session(request, response, database, user_id)
     return {"username": username}
 

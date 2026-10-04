@@ -29,6 +29,10 @@ SECURITY_HEADERS = {
     "Cache-Control": "no-store",
 }
 
+# Après 5 échecs de connexion, on bloque 15 minutes (par adresse IP + identifiant)
+MAX_LOGIN_FAILURES = 5
+LOGIN_LOCK_SECONDS = 15 * 60
+
 # Argon2id avec un sel aléatoire (inclus dans le hash)
 hasher = PasswordHasher()
 # Faux hash utilisé quand le compte n'existe pas : la réponse prend le même temps
@@ -100,3 +104,22 @@ async def current_user(request: Request, database=Depends(db)) -> str:
     if not user_id:
         raise HTTPException(401, "Connexion requise")
     return user_id
+
+
+def login_failures_key(request: Request, username: str) -> str:
+    ip = request.client.host if request.client else "inconnue"
+    return f"login-failures:{ip}:{username}"
+
+
+# Refuse la connexion s'il y a eu trop d'échecs récents
+async def check_login_allowed(database, key: str):
+    if int(await database.get(key) or 0) >= MAX_LOGIN_FAILURES:
+        raise HTTPException(429, "Trop de tentatives, réessayez dans 15 minutes")
+
+
+# Compte un échec, le compteur s'efface tout seul au bout de 15 minutes
+async def record_login_failure(database, key: str):
+    pipe = database.pipeline()
+    pipe.incr(key)
+    pipe.expire(key, LOGIN_LOCK_SECONDS)
+    await pipe.execute()

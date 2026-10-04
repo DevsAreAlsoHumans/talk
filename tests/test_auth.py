@@ -89,3 +89,35 @@ def test_bad_passwords_are_rejected(client, password):
 def test_injection_payloads_are_rejected(client, payload):
     assert client.post("/api/signup", json=payload).status_code == 422
     assert client.post("/api/login", json=payload).status_code == 422
+
+
+# ---------- Limite de tentatives ----------
+
+def test_login_is_blocked_after_5_failures(client, stored):
+    signup(client)
+    for _ in range(5):
+        assert login(client, password="mauvais-mdp").status_code == 401
+    # Même avec le bon mot de passe, c'est bloqué
+    blocked = login(client)
+    assert blocked.status_code == 429
+    assert blocked.json() == {"detail": "Trop de tentatives, réessayez dans 15 minutes"}
+    key = next(stored.scan_iter("login-failures:*"))
+    assert 0 < stored.ttl(key) <= 15 * 60
+
+
+def test_block_only_concerns_this_username(client):
+    signup(client)
+    signup(client, "bob")
+    for _ in range(5):
+        login(client, password="mauvais-mdp")
+    assert login(client, "bob").status_code == 200
+
+
+def test_successful_login_resets_the_counter(client):
+    signup(client)
+    for _ in range(4):
+        login(client, password="mauvais-mdp")
+    assert login(client).status_code == 200
+    for _ in range(4):
+        assert login(client, password="mauvais-mdp").status_code == 401
+    assert login(client).status_code == 200
